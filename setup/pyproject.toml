@@ -1,0 +1,13 @@
+[project]
+name = "gameboy-rl"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12.2"
+dependencies = [
+    "click>=8.3.1",
+    "poke-worlds[vlm]",
+]
+
+[tool.uv.sources]
+poke-worlds = { path = "../PokeWorlds", editable = true }
