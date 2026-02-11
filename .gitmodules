@@ -1,3 +1,6 @@
 [submodule "PokeWorlds"]
 	path = PokeWorlds
 	url = https://github.com/DhananjayAshok/PokeWorlds
+[submodule "cleanrl"]
+	path = cleanrl
+	url = https://github.com/DhananjayAshok/cleanrl
