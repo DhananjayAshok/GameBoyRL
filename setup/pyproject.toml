@@ -5,9 +5,11 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12.2"
 dependencies = [
+    "cleanrl[atari]",
     "click>=8.3.1",
     "poke-worlds[vlm]",
 ]
 
 [tool.uv.sources]
 poke-worlds = { path = "../PokeWorlds", editable = true }
+cleanrl = { path = "../cleanrl", editable = true }
