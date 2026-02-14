@@ -1552,7 +1552,7 @@ requires-dist = [
     { name = "gymnasium", specifier = ">=1.2.3" },
     { name = "huggingface-hub", specifier = ">=0.36.0" },
     { name = "matplotlib", specifier = ">=3.10.7" },
-    { name = "numpy", specifier = ">=2.3.4" },
+    { name = "numpy" },
     { name = "openai", marker = "extra == 'vlm'", specifier = ">=2.15.0" },
     { name = "opencv-python", specifier = ">=4.11.0.86" },
     { name = "pandas", specifier = ">=2.3.3" },
