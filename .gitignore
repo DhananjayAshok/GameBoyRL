@@ -175,3 +175,5 @@ cython_debug/
 
 setup/.venv
 videos/
+*.out
+configs/config.env
