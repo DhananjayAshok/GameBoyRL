@@ -10,8 +10,8 @@ game="pokemon_red"
 controller="low_level"
 train_env_name="default"
 test_env_name="default"
-train_init_state="default"
-test_init_state="default"
+train_init_state="none"
+test_init_state="none"
 
 # Curiosity Arguments
 observation_embedder="random_patch"
