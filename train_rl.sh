@@ -5,14 +5,14 @@ source configs/config.env
 cd cleanrl
 
 # RL Arguments
-algo="dqn"
-timesteps=300
+algo="sac"
+timesteps=10000
 gamma=0.99
 
 # Environment Arguments
-max_steps=100
+max_steps=500
 game="pokemon_red"
-controller="low_level"
+controller="state_wise"
 train_env_name="default"
 test_env_name="default"
 train_init_state="none"
@@ -43,5 +43,5 @@ python cleanrl/${algo}_curiosity.py --exp_name $exp_name --seed 1 --gamma $gamma
     --curiosity-module $curiosity_module &> ../$exp_name.out
 
 
-python cleanrl_utils/enjoy.py --exp-name ${algo}_atari --model_path $model_save_path/model.pt \
+python cleanrl_utils/enjoy.py --exp-name ${algo}_curiosity --model_path $model_save_path/model.pt \
     --env-id $test_env_id --save-name $exp_name
