@@ -6,11 +6,11 @@ cd cleanrl
 
 # RL Arguments
 algo="sac"
-timesteps=10000
+timesteps=100000
 gamma=0.99
 
 # Environment Arguments
-max_steps=500
+max_steps=250
 game="pokemon_red"
 controller="state_wise"
 train_env_name="default"
