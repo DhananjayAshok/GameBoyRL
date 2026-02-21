@@ -6,7 +6,7 @@ cd cleanrl
 
 # RL Arguments
 algo="sac"
-timesteps=500
+timesteps=500000
 gamma=0.99
 
 # Environment Arguments
@@ -41,7 +41,7 @@ echo "Starting Experiment: $exp_name"
 python cleanrl/${algo}_curiosity.py --exp_name $exp_name --seed 1 --gamma $gamma --env-id $train_env_id --total-timesteps $timesteps --track \
     --wandb-project-name $WANDB_PROJECT --model_save_path $model_save_path --capture_video --save_model \
     --observation-embedder $observation_embedder --similarity_metric $similarity_metric $argpart \
-    --curiosity-module $curiosity_module #&> ../$exp_name.out
+    --curiosity-module $curiosity_module &> ../$exp_name.out
 
 
 echo python cleanrl_utils/enjoy.py --exp-name ${algo}_curiosity --model_path $model_save_path/model.pt \
