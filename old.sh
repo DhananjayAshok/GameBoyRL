@@ -6,13 +6,13 @@ cd cleanrl
 
 # RL Arguments
 algo="sac"
-timesteps=500000
+timesteps=500
 gamma=0.99
 
 # Environment Arguments
 max_steps=250
 game="pokemon_red"
-controller="state_wise"
+controller="low_level"
 train_env_name="default"
 test_env_name="default"
 train_init_state="none"
@@ -20,7 +20,7 @@ test_init_state="none"
 
 # Curiosity Arguments
 observation_embedder="random_patch"
-similarity_metric="hinge"
+similarity_metric="cosine"
 reset_curiosity_module="true"
 if [ "$reset_curiosity_module" = "true" ]; then
     argpart="--reset-curiosity-module"
@@ -41,8 +41,8 @@ echo "Starting Experiment: $exp_name"
 python cleanrl/${algo}_curiosity.py --exp_name $exp_name --seed 1 --gamma $gamma --env-id $train_env_id --total-timesteps $timesteps --track \
     --wandb-project-name $WANDB_PROJECT --model_save_path $model_save_path --capture_video --save_model \
     --observation-embedder $observation_embedder --similarity_metric $similarity_metric $argpart \
-    --curiosity-module $curiosity_module &> ../$exp_name.out
+    --curiosity-module $curiosity_module #&> ../$exp_name.out
 
 
-echo python cleanrl_utils/enjoy.py --exp-name ${algo}_curiosity --model_path $model_save_path/model.pt \
+python cleanrl_utils/enjoy.py --exp-name ${algo}_curiosity --model_path $model_save_path/model.pt \
     --env-id $test_env_id --save-name $exp_name
