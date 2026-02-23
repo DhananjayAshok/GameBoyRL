@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 source configs/config.env || { echo "configs/config.env not found"; exit 1; }
+source setup/.venv/bin/activate || { echo "Virtual environment not found."; exit 1; }
 
 # Define Defaults
 declare -A ARGS
@@ -13,10 +14,20 @@ ARGS["max_steps"]=200
 ARGS["timesteps"]=500000
 ARGS["test_env"]=""
 ARGS["test_init_state"]=""
+ARGS["replay_buffer_save_folder"]=""
+ARGS["buffer_save_path"]=""
+ARGS["buffer_load_path"]=""
+ARGS["train_only"]=""
 
+# Temporarily hardcode game for testing
+ARGS["game"]="pokemon_red"
+ARGS["env"]="default"
+ARGS["init_state"]="none"
+ARGS["controller"]="state_wise"
 
 # Define Required Keys
-REQUIRED_ARGS=("game" "env" "init_state")
+#REQUIRED_ARGS=("game" "env" "init_state" "controller")
+REQUIRED_ARGS=() # temporarily make all optional for testing
 
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
 
@@ -86,17 +97,32 @@ for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
+cd cleanrl
+
 # Logic here:
-train_env_id="poke_worlds-${ARGS["game"]}-${ARGS["env"]}-${ARGS["init_state"]}-${ARGS["max_steps"]}-False"
+train_env_id="poke_worlds-${ARGS["game"]}-${ARGS["env"]}-${ARGS["init_state"]}-${ARGS["controller"]}-${ARGS["max_steps"]}-False"
 exp_name="${ARGS["algorithm"]}-${ARGS["timesteps"]}-${ARGS["gamma"]}-${ARGS["observation_embedder"]}-${ARGS["curiosity_module"]}-${ARGS["similarity_metric"]}-${train_env_id}"
 model_save_path="$storage_dir/models/$exp_name/"
+
+buffer_arg_part=""
+if [[ -n "${ARGS["replay_buffer_save_folder"]}" ]]; then
+    buffer_arg_part+="--replay_buffer_save_folder $storage_dir/replay_buffers/${ARGS["replay_buffer_save_folder"]} "
+fi
+
+if [[ -n "${ARGS["buffer_save_path"]}" ]]; then
+    buffer_arg_part+="--buffer_save_path $storage_dir/${ARGS["curiosity_module"]}/${ARGS["buffer_save_path"]} "
+fi
+
+if [[ -n "${ARGS["buffer_load_path"]}" ]]; then
+    buffer_arg_part+="--buffer_load_path $storage_dir/${ARGS["curiosity_module"]}/${ARGS["buffer_load_path"]} "
+fi
 
 echo "Starting Experiment: $exp_name"
 
 python cleanrl/${ARGS["algorithm"]}_curiosity.py --exp_name $exp_name --seed 1 --gamma ${ARGS["gamma"]} --env-id $train_env_id --total-timesteps ${ARGS["timesteps"]} --track \
     --wandb-project-name $WANDB_PROJECT --model_save_path $model_save_path --capture_video --save_model \
     --observation-embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} \
-    --curiosity-module ${ARGS["curiosity_module"]} --reset-curiosity-module &> ../$exp_name.out
+    --curiosity-module ${ARGS["curiosity_module"]} --reset-curiosity-module $buffer_arg_part &> ../$exp_name.out
 
 # if test_env and test_init_state are empty, set them to train values:
 if [[ -z "${ARGS["test_env"]}" ]]; then
@@ -106,4 +132,23 @@ if [[ -z "${ARGS["test_init_state"]}" ]]; then
     ARGS["test_init_state"]="${ARGS["init_state"]}"
 fi
 
-bash enjoy.sh --algorithm ${ARGS["algorithm"]} --exp_name $exp_name --env ${ARGS["test_env"]} --game ${ARGS["game"]} --init_state ${ARGS["test_init_state"]} --max_steps ${ARGS["max_steps"]}
+cd ..
+
+# if train_only is true, t, yes or y then exit here:
+if [[ "${ARGS["train_only"]}" == "true" || "${ARGS["train_only"]}" == "yes" || "${ARGS["train_only"]}" == "y" ]]; then
+    echo "Train only flag is set. Exiting after training."
+    exit 0
+fi
+
+buffer_arg_part=""
+if [[ -n "${ARGS["buffer_load_path"]}" ]]; then
+    buffer_arg_part+="--buffer_load_path ${ARGS["buffer_load_path"]} "
+fi
+
+if [[ -n "${ARGS["buffer_save_path"]}" ]]; then
+    buffer_arg_part+="--buffer_save_path ${ARGS["buffer_save_path"]} "
+fi
+
+
+echo "Calling enjoy.sh --algorithm ${ARGS["algorithm"]} --exp_name $exp_name --env ${ARGS["test_env"]} --game ${ARGS["game"]} --init_state ${ARGS["test_init_state"]} --controller ${ARGS["controller"]} --max_steps ${ARGS["max_steps"]} --curiosity_module ${ARGS["curiosity_module"]} --observation_embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} $buffer_arg_part"
+bash enjoy.sh --algorithm ${ARGS["algorithm"]} --exp_name $exp_name --env ${ARGS["test_env"]} --game ${ARGS["game"]} --init_state ${ARGS["test_init_state"]} --controller ${ARGS["controller"]} --max_steps ${ARGS["max_steps"]} --curiosity_module ${ARGS["curiosity_module"]} --observation_embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} $buffer_arg_part

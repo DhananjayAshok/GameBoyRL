@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
 
 source configs/config.env || { echo "configs/config.env not found"; exit 1; }
+source setup/.venv/bin/activate || { echo "Virtual environment not found."; exit 1; }
 
 # Define Defaults
 declare -A ARGS
 ARGS["max_steps"]=200
+ARGS["similarity_metric"]="cosine"
+ARGS["observation_embedder"]="random_patch"
+ARGS["curiosity_module"]="embedbuffer"
+ARGS["buffer_save_path"]=""
+ARGS["buffer_load_path"]=""
+
 # Define Required Keys
-REQUIRED_ARGS=("algorithm" "exp_name" "game" "env" "init_state")
+REQUIRED_ARGS=("algorithm" "exp_name" "game" "controller" "env" "init_state")
 
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
 
@@ -44,7 +51,7 @@ while [[ $# -gt 0 ]]; do
                 fi
             done
             if [ "$VALID" = false ]; then
-                echo "Error: Unknown flag --$FLAG"
+                echo "Error: Unknown flag --$FLAG. Allowed flags are: ${ALLOWED_FLAGS[*]}"
                 usage
             fi            
             ARGS["$FLAG"]="$2"
@@ -78,9 +85,23 @@ done
 
 # Logic here:
 exp_name="${ARGS["exp_name"]}"
-test_env_id="poke_worlds-${ARGS["game"]}-${ARGS["env"]}-${ARGS["init_state"]}-${ARGS["max_steps"]}-True"
+test_env_id="poke_worlds-${ARGS["game"]}-${ARGS["env"]}-${ARGS["init_state"]}-${ARGS["controller"]}-${ARGS["max_steps"]}-True"
 model_save_path="$storage_dir/models/$exp_name/"
+buffer_arg_part=""
+if [[ -n "${ARGS["buffer_save_path"]}" ]]; then
+    buffer_arg_part+="--buffer_save_path $storage_dir/${ARGS["curiosity_module"]}/${ARGS["buffer_save_path"]} "
+fi
 
-python cleanrl_utils/enjoy.py --exp-name ${algorithm}_curiosity --model_path $model_save_path/model.pt \
-    --env-id $test_env_id --save-name $exp_name
+if [[ -n "${ARGS["buffer_load_path"]}" ]]; then
+    buffer_arg_part+="--buffer_load_path $storage_dir/${ARGS["curiosity_module"]}/${ARGS["buffer_load_path"]} "
+fi
 
+
+cd cleanrl
+
+python cleanrl_utils/enjoy.py --exp-name ${ARGS["algorithm"]}_curiosity --model_path $model_save_path/model.pt \
+    --env-id $test_env_id --save-name $exp_name \
+    --similarity_metric ${ARGS["similarity_metric"]} --observation_embedder ${ARGS["observation_embedder"]} \
+    --curiosity_module ${ARGS["curiosity_module"]} $buffer_arg_part
+
+cd ..
