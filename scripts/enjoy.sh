@@ -6,6 +6,7 @@ source setup/.venv/bin/activate || { echo "Virtual environment not found."; exit
 # Define Defaults
 declare -A ARGS
 ARGS["max_steps"]=200
+ARGS["controller"]="low_level"
 ARGS["similarity_metric"]="cosine"
 ARGS["observation_embedder"]="random_patch"
 ARGS["curiosity_module"]="embedbuffer"
@@ -13,7 +14,7 @@ ARGS["buffer_save_path"]=""
 ARGS["buffer_load_path"]=""
 
 # Define Required Keys
-REQUIRED_ARGS=("algorithm" "exp_name" "game" "controller" "env" "init_state")
+REQUIRED_ARGS=("algorithm" "exp_name" "game" "env" "init_state")
 
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
 

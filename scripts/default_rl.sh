@@ -18,12 +18,12 @@ ARGS["replay_buffer_save_folder"]=""
 ARGS["buffer_save_path"]=""
 ARGS["buffer_load_path"]=""
 ARGS["train_only"]=""
+ARGS["controller"]="low_level"
 
 # Temporarily hardcode game for testing
 ARGS["game"]="pokemon_red"
 ARGS["env"]="default"
 ARGS["init_state"]="none"
-ARGS["controller"]="state_wise"
 
 # Define Required Keys
 #REQUIRED_ARGS=("game" "env" "init_state" "controller")
@@ -150,5 +150,5 @@ if [[ -n "${ARGS["buffer_save_path"]}" ]]; then
 fi
 
 
-echo "Calling enjoy.sh --algorithm ${ARGS["algorithm"]} --exp_name $exp_name --env ${ARGS["test_env"]} --game ${ARGS["game"]} --init_state ${ARGS["test_init_state"]} --controller ${ARGS["controller"]} --max_steps ${ARGS["max_steps"]} --curiosity_module ${ARGS["curiosity_module"]} --observation_embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} $buffer_arg_part"
-bash enjoy.sh --algorithm ${ARGS["algorithm"]} --exp_name $exp_name --env ${ARGS["test_env"]} --game ${ARGS["game"]} --init_state ${ARGS["test_init_state"]} --controller ${ARGS["controller"]} --max_steps ${ARGS["max_steps"]} --curiosity_module ${ARGS["curiosity_module"]} --observation_embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} $buffer_arg_part
+echo "Calling scripts/enjoy.sh --algorithm ${ARGS["algorithm"]} --exp_name $exp_name --env ${ARGS["test_env"]} --game ${ARGS["game"]} --init_state ${ARGS["test_init_state"]} --controller ${ARGS["controller"]} --max_steps ${ARGS["max_steps"]} --curiosity_module ${ARGS["curiosity_module"]} --observation_embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} $buffer_arg_part"
+bash scripts/enjoy.sh --algorithm ${ARGS["algorithm"]} --exp_name $exp_name --env ${ARGS["test_env"]} --game ${ARGS["game"]} --init_state ${ARGS["test_init_state"]} --controller ${ARGS["controller"]} --max_steps ${ARGS["max_steps"]} --curiosity_module ${ARGS["curiosity_module"]} --observation_embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} $buffer_arg_part
