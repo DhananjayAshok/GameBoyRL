@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
-source configs/config.env || { echo "configs/config.env not found"; exit 1; }
-source setup/.venv/bin/activate || { echo "Virtual environment not found."; exit 1; }
+source scripts/utils.sh
 
 # Define Defaults for default_rl.sh
 declare -A ARGS
@@ -9,12 +8,13 @@ ARGS["algorithm"]="sac"
 ARGS["gamma"]="0.99"
 ARGS["similarity_metric"]="cosine"
 ARGS["observation_embedder"]="random_patch"
+ARGS["embedder_load_path"]="none"
 ARGS["curiosity_module"]="embedbuffer"
 ARGS["max_steps"]=200
 ARGS["timesteps"]=500000
 ARGS["controller"]="low_level"
 # Script specific defaults
-ARGS["n_agents"]=5
+ARGS["n_agents"]=2
 
 # Temporarily hardcode game for testing
 ARGS["game"]="pokemon_red"
@@ -92,16 +92,82 @@ for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
-
-common_args="--gamma ${ARGS["gamma"]} --similarity_metric ${ARGS["similarity_metric"]} --observation-embedder ${ARGS["observation_embedder"]} --curiosity-module ${ARGS["curiosity_module"]} --max_steps ${ARGS["max_steps"]} --timesteps ${ARGS["timesteps"]} --controller ${ARGS["controller"]}"
 replay_buffer_save_folder=${ARGS["init_state"]}
+
+## Set up functions for iterative training
+
+
+function get_local_exp_name() {
+    local buffer_load_path="$1"
+    local exp_name=$(get_exp_name_full --algorithm ${ARGS["algorithm"]} --timesteps ${ARGS["timesteps"]} --gamma ${ARGS["gamma"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["observation_embedder"]} --curiosity_module ${ARGS["curiosity_module"]} --similarity_metric ${ARGS["similarity_metric"]}  --game ${ARGS["game"]} --env ${ARGS["env"]} --init_state ${ARGS["init_state"]} --controller ${ARGS["controller"]} --max_steps ${ARGS["max_steps"]} --buffer_load_path $buffer_load_path )
+    if [-z "$exp_name" ]; then
+        return 1
+    fi
+    echo "$exp_name"
+}
+
+prev_buffer_load_path="none"
+
+function get_true_replay_buffer_save_folder() {
+    local exp_name=$(get_local_exp_name $prev_buffer_load_path)
+    if [-z "$exp_name" ]; then
+        echo "Error: Could not determine experiment name for buffer load path '$prev_buffer_load_path'."
+        return 1
+    fi
+    echo $replay_buffer_save_folder/$exp_name
+}
+
+
+all_common_args="--gamma ${ARGS["gamma"]} --similarity_metric ${ARGS["similarity_metric"]} --observation-embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["observation_embedder"]} --curiosity-module ${ARGS["curiosity_module"]} --max_steps ${ARGS["max_steps"]} --timesteps ${ARGS["timesteps"]} --controller ${ARGS["controller"]} --replay_buffer_save_folder $replay_buffer_save_folder --game ${ARGS["game"]} --env ${ARGS["env"]} --init_state ${ARGS["init_state"]}"
+
+function call_agent(){
+    local buffer_load_path="$1"
+    local buffer_save_path="$2"
+    bash scripts/default_rl.sh --algorithm ${ARGS["algorithm"]} --buffer_save_path $buffer_save_path --buffer_load_path $buffer_load_path $all_common_args
+}
+
+function train_world_model(){
+    local buffer_load_path="$1"
+    local buffer_save_path="$2"
+    local latest_replay_buffer_folder=$(get_true_replay_buffer_save_folder)
+    if [-z "$latest_replay_buffer_folder" ]; then
+        echo "Error: Could not determine latest replay buffer folder for buffer load path '$buffer_load_path'."
+        return 1
+    fi
+    bash scripts/train_world_model.sh --latest_replay_buffer_folder $latest_replay_buffer_folder --buffer_save_path $buffer_save_path --buffer_load_path $buffer_load_path --controller ${ARGS["controller"]} --game ${ARGS["game"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["embedder_load_path"]} 
+}
+
+## Execution starts here
+
+
 buffer_save_path=${ARGS["init_state"]}
-bash scripts/default_rl.sh --algorithm random --replay_buffer_save_folder $replay_buffer_save_folder --buffer_save_path $buffer_save_path $common_args
+prev_buffer_save_path=$buffer_save_path
 
-# if the curiosity module is world_model, we need to call train_world_model.sh as well before. 
+# First, run a random agent to populate the curiosity module buffer
 
-#common_args="--algorithm ${ARGS["algorithm"]} --gamma ${ARGS["gamma"]} --similarity_metric ${ARGS["similarity_metric"]} --observation-embedder ${ARGS["observation_embedder"]} --curiosity-module ${ARGS["curiosity_module"]} --max_steps ${ARGS["max_steps"]} --timesteps ${ARGS["timesteps"]} --controller ${ARGS["controller"]}"
+bash scripts/default_rl.sh --algorithm random --buffer_save_path $buffer_save_path $common_args
 
+if [ "${ARGS["curiosity_module"]}" == "world_model" ]; then
+    train_world_model $prev_buffer_load_path $buffer_save_path    
+fi
 
+prev_buffer_load_path=$prev_buffer_save_path
+buffer_save_path="${ARGS["init_state"]}_${ARGS["algorithm"]}_agent_1"
 
-# create a function. The function reads set argum
+# Then, run the actual agent iteratively, updating the world model each time if needed
+for ((i=0; i<${ARGS["n_agents"]}; i++)); do
+    echo "Starting iteration $i with buffer load path '$prev_buffer_load_path' and buffer save path '$buffer_save_path'"
+
+    call_agent $prev_buffer_load_path $buffer_save_path
+
+    # Don't train world model on the last iteration since we won't be using the buffer again
+    if [ $i -lt $((${ARGS["n_agents"]}-1)) ]; then
+        if [ "${ARGS["curiosity_module"]}" == "world_model" ]; then
+            train_world_model $prev_buffer_load_path $buffer_save_path    
+        fi
+    fi
+
+    prev_buffer_load_path=$prev_buffer_save_path
+    prev_buffer_save_path=$buffer_save_path
+    buffer_save_path="${ARGS["init_state"]}_${ARGS["algorithm"]}_agent_$((i+2))"
+done

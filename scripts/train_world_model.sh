@@ -9,11 +9,10 @@ ARGS["embedder_load_path"]="none"
 ARGS["latest_replay_buffer_folder"]="none"
 ARGS["buffer_save_path"]="none"
 ARGS["buffer_load_path"]="none"
-ARGS["controller"]="low_level"
-ARGS["game"]="pokemon_red"
 
 # Temporarily hardcode game for testing
-
+ARGS["controller"]="low_level"
+ARGS["game"]="pokemon_red"
 
 # Define Required Keys
 #REQUIRED_ARGS=("game" "env")
