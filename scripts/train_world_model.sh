@@ -120,3 +120,5 @@ echo "Training World Model:"
 echo python cleanrl_utils/train_world_model.py --seed 1 --env-id $env_id \
     --track --wandb-project-name $WANDB_PROJECT \
     --observation-embedder ${ARGS["observation_embedder"]} $extra_arg_part
+
+cd ..
