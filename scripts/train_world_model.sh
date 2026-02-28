@@ -1,30 +1,19 @@
 #!/usr/bin/env bash
 
-source configs/config.env || { echo "configs/config.env not found"; exit 1; }
-source setup/.venv/bin/activate || { echo "Virtual environment not found."; exit 1; }
+source scripts/utils.sh
 
 # Define Defaults
 declare -A ARGS
-ARGS["algorithm"]="sac"
-ARGS["gamma"]="0.99"
-ARGS["similarity_metric"]="cosine"
 ARGS["observation_embedder"]="random_patch"
-ARGS["curiosity_module"]="embedbuffer"
-ARGS["max_steps"]=200
-ARGS["timesteps"]=500000
-ARGS["test_env"]=""
-ARGS["test_init_state"]=""
-ARGS["replay_buffer_save_folder"]=""
-ARGS["buffer_save_path"]=""
-ARGS["buffer_load_path"]=""
-ARGS["train_only"]=""
+ARGS["embedder_load_path"]="none"
+ARGS["latest_replay_buffer_folder"]="none"
+ARGS["buffer_save_path"]="none"
+ARGS["buffer_load_path"]="none"
 ARGS["controller"]="low_level"
-ARGS["log_folder"]=""
-ARGS["env"]="default"
+ARGS["game"]="pokemon_red"
 
 # Temporarily hardcode game for testing
-ARGS["game"]="pokemon_red"
-ARGS["init_state"]="none"
+
 
 # Define Required Keys
 #REQUIRED_ARGS=("game" "env")
@@ -98,65 +87,37 @@ for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
+
 cd cleanrl
 
 # Logic here:
-train_env_id="poke_worlds-${ARGS["game"]}-${ARGS["env"]}-${ARGS["init_state"]}-${ARGS["controller"]}-${ARGS["max_steps"]}-False"
-exp_name="${ARGS["algorithm"]}-${ARGS["timesteps"]}-${ARGS["gamma"]}-${ARGS["observation_embedder"]}-${ARGS["curiosity_module"]}-${ARGS["similarity_metric"]}-${train_env_id}"
-model_save_path="$storage_dir/models/$exp_name/"
 
-buffer_arg_part=""
-if [[ -n "${ARGS["replay_buffer_save_folder"]}" ]]; then
-    buffer_arg_part+="--replay_buffer_save_folder $storage_dir/replay_buffers/$ARGS["game"]/${ARGS["replay_buffer_save_folder"]} "
+train_env_id=$(get_env_id --game ${ARGS["game"]} --env default --init_state default --controller ${ARGS["controller"]} --max_steps 10)
+if [[ -z "$train_env_id" ]]; then
+    echo "Error: Failed to get train_env_id"
+    exit 1
+fi
+env_id=$train_env_id-False
+
+extra_arg_part=""
+if [[ "${ARGS["latest_replay_buffer_folder"]}" != "none" ]]; then
+    extra_arg_part+="--latest_replay_buffer_folder $storage_dir/replay_buffers/${ARGS["game"]}/${ARGS["latest_replay_buffer_folder"]} "
 fi
 
-if [[ -n "${ARGS["buffer_save_path"]}" ]]; then
-    buffer_arg_part+="--buffer_save_path $storage_dir/${ARGS["curiosity_module"]}/$ARGS["game"]/${ARGS["buffer_save_path"]} "
+if [[ "${ARGS["buffer_save_path"]}" != "none" ]]; then
+    extra_arg_part+="--buffer_save_path $storage_dir/world_model/${ARGS["game"]}/${ARGS["buffer_save_path"]} "
 fi
 
-if [[ -n "${ARGS["buffer_load_path"]}" ]]; then
-    buffer_arg_part+="--buffer_load_path $storage_dir/${ARGS["curiosity_module"]}/$ARGS["game"]/${ARGS["buffer_load_path"]} "
+if [[ "${ARGS["buffer_load_path"]}" != "none" ]]; then
+    extra_arg_part+="--buffer_load_path $storage_dir/world_model/${ARGS["game"]}/${ARGS["buffer_load_path"]} "
 fi
-
-log_file="../$exp_name.out"
-if [[ -n "${ARGS["log_folder"]}" ]]; then
-    log_file="$storage_dir/logs/${ARGS["log_folder"]}/$exp_name.out"
-    # make sure the folder exists
-    mkdir -p "$(dirname "$log_file")"
-fi
-
-echo "Starting Experiment: $exp_name logging to $log_file"
-
-python cleanrl/${ARGS["algorithm"]}_curiosity.py --exp_name $exp_name --seed 1 --gamma ${ARGS["gamma"]} --env-id $train_env_id --total-timesteps ${ARGS["timesteps"]} --track \
-    --wandb-project-name $WANDB_PROJECT --model_save_path $model_save_path --capture_video --save_model \
-    --observation-embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} \
-    --curiosity-module ${ARGS["curiosity_module"]} --reset-curiosity-module $buffer_arg_part &> $log_file
-
-# if test_env and test_init_state are empty, set them to train values:
-if [[ -z "${ARGS["test_env"]}" ]]; then
-    ARGS["test_env"]="${ARGS["env"]}"
-fi
-if [[ -z "${ARGS["test_init_state"]}" ]]; then
-    ARGS["test_init_state"]="${ARGS["init_state"]}"
-fi
-
-cd ..
-
-# if train_only is true, t, yes or y then exit here:
-if [[ "${ARGS["train_only"]}" == "true" || "${ARGS["train_only"]}" == "yes" || "${ARGS["train_only"]}" == "y" ]]; then
-    echo "Train only flag is set. Exiting after training."
-    exit 0
-fi
-
-buffer_arg_part=""
-if [[ -n "${ARGS["buffer_load_path"]}" ]]; then
-    buffer_arg_part+="--buffer_load_path ${ARGS["buffer_load_path"]} "
-fi
-
-if [[ -n "${ARGS["buffer_save_path"]}" ]]; then
-    buffer_arg_part+="--buffer_save_path ${ARGS["buffer_save_path"]} "
+if [[ "${ARGS["embedder_load_path"]}" != "none" ]]; then
+    extra_arg_part+="--embedder_load_path $storage_dir/${ARGS["observation_embedder"]}/${ARGS["game"]}/${ARGS["embedder_load_path"]} "
 fi
 
 
-echo "Calling scripts/enjoy.sh --algorithm ${ARGS["algorithm"]} --exp_name $exp_name --env ${ARGS["test_env"]} --game ${ARGS["game"]} --init_state ${ARGS["test_init_state"]} --controller ${ARGS["controller"]} --max_steps ${ARGS["max_steps"]} --curiosity_module ${ARGS["curiosity_module"]} --observation_embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} $buffer_arg_part"
-bash scripts/enjoy.sh --algorithm ${ARGS["algorithm"]} --exp_name $exp_name --env ${ARGS["test_env"]} --game ${ARGS["game"]} --init_state ${ARGS["test_init_state"]} --controller ${ARGS["controller"]} --max_steps ${ARGS["max_steps"]} --curiosity_module ${ARGS["curiosity_module"]} --observation_embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} $buffer_arg_part
+echo "Training World Model:"
+
+echo python cleanrl_utils/train_world_model.py --seed 1 --env-id $env_id \
+    --track --wandb-project-name $WANDB_PROJECT \
+    --observation-embedder ${ARGS["observation_embedder"]} $extra_arg_part

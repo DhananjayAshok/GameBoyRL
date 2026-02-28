@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
-source configs/config.env || { echo "configs/config.env not found"; exit 1; }
-source setup/.venv/bin/activate || { echo "Virtual environment not found."; exit 1; }
+source scripts/utils.sh
 
 # Define Defaults
 declare -A ARGS
@@ -9,9 +8,10 @@ ARGS["max_steps"]=200
 ARGS["controller"]="low_level"
 ARGS["similarity_metric"]="cosine"
 ARGS["observation_embedder"]="random_patch"
+ARGS["embedder_load_path"]="none"
 ARGS["curiosity_module"]="embedbuffer"
-ARGS["buffer_save_path"]=""
-ARGS["buffer_load_path"]=""
+ARGS["buffer_save_path"]="none"
+ARGS["buffer_load_path"]="none"
 
 # Define Required Keys
 REQUIRED_ARGS=("algorithm" "exp_name" "game" "env" "init_state")
@@ -86,15 +86,30 @@ done
 
 # Logic here:
 exp_name="${ARGS["exp_name"]}"
-test_env_id="poke_worlds-${ARGS["game"]}-${ARGS["env"]}-${ARGS["init_state"]}-${ARGS["controller"]}-${ARGS["max_steps"]}-True"
+test_env_id=$(get_env_id --game "${ARGS["game"]}" --env "${ARGS["env"]}" --init_state "${ARGS["init_state"]}" \
+    --controller "${ARGS["controller"]}" --max_steps "${ARGS["max_steps"]}")
+if [[ -z "$test_env_id" ]]; then
+    echo "Error: Failed to construct test environment ID. Please check your input parameters."
+    exit 1
+fi
+test_env_id="${test_env_id}-True"
 model_save_path="$storage_dir/models/$exp_name/"
-buffer_arg_part=""
-if [[ -n "${ARGS["buffer_save_path"]}" ]]; then
-    buffer_arg_part+="--buffer_save_path $storage_dir/${ARGS["curiosity_module"]}/${ARGS["buffer_save_path"]} "
+
+
+extra_arg_part=""
+if [[ "${ARGS["replay_buffer_save_folder"]}" != "none" ]]; then
+    extra_arg_part+="--replay_buffer_save_folder $storage_dir/replay_buffers/${ARGS["game"]}/${ARGS["replay_buffer_save_folder"]} "
 fi
 
-if [[ -n "${ARGS["buffer_load_path"]}" ]]; then
-    buffer_arg_part+="--buffer_load_path $storage_dir/${ARGS["curiosity_module"]}/${ARGS["buffer_load_path"]} "
+if [[ "${ARGS["buffer_save_path"]}" != "none" ]]; then
+    extra_arg_part+="--buffer_save_path $storage_dir/${ARGS["curiosity_module"]}/${ARGS["game"]}/${ARGS["buffer_save_path"]} "
+fi
+
+if [[ "${ARGS["buffer_load_path"]}" != "none" ]]; then
+    extra_arg_part+="--buffer_load_path $storage_dir/${ARGS["curiosity_module"]}/${ARGS["game"]}/${ARGS["buffer_load_path"]} "
+fi
+if [[ "${ARGS["embedder_load_path"]}" != "none" ]]; then
+    extra_arg_part+="--embedder_load_path $storage_dir/${ARGS["observation_embedder"]}/${ARGS["game"]}/${ARGS["embedder_load_path"]} "
 fi
 
 
@@ -103,6 +118,6 @@ cd cleanrl
 python cleanrl_utils/enjoy.py --exp-name ${ARGS["algorithm"]}_curiosity --model_path $model_save_path/model.pt \
     --env-id $test_env_id --save-name $exp_name \
     --similarity_metric ${ARGS["similarity_metric"]} --observation_embedder ${ARGS["observation_embedder"]} \
-    --curiosity_module ${ARGS["curiosity_module"]} $buffer_arg_part
+    --curiosity_module ${ARGS["curiosity_module"]} $extra_arg_part
 
 cd ..
