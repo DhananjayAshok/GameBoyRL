@@ -117,8 +117,8 @@ function get_true_replay_buffer_save_folder() {
     echo $replay_buffer_save_folder/$exp_name
 }
 
-
-all_common_args="--gamma ${ARGS["gamma"]} --similarity_metric ${ARGS["similarity_metric"]} --observation-embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["observation_embedder"]} --curiosity-module ${ARGS["curiosity_module"]} --max_steps ${ARGS["max_steps"]} --timesteps ${ARGS["timesteps"]} --controller ${ARGS["controller"]} --replay_buffer_save_folder $replay_buffer_save_folder --game ${ARGS["game"]} --env ${ARGS["env"]} --init_state ${ARGS["init_state"]}"
+log_folder="../iterative_agents/${ARGS["game"]}/${ARGS["init_state"]}/"
+all_common_args="--gamma ${ARGS["gamma"]} --similarity_metric ${ARGS["similarity_metric"]} --observation-embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["observation_embedder"]} --curiosity-module ${ARGS["curiosity_module"]} --max_steps ${ARGS["max_steps"]} --timesteps ${ARGS["timesteps"]} --controller ${ARGS["controller"]} --replay_buffer_save_folder $replay_buffer_save_folder --game ${ARGS["game"]} --env ${ARGS["env"]} --init_state ${ARGS["init_state"]} --log_folder $log_folder"
 
 function call_agent(){
     local buffer_load_path="$1"
