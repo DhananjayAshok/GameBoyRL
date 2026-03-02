@@ -79,7 +79,7 @@ done
 if [ "$FAILED" = true ]; then usage; fi
 
 # Print active variables
-echo "Active variables:"
+echo "Script $0 Active variables:"
 for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
@@ -97,10 +97,6 @@ model_save_path="$storage_dir/models/$exp_name/"
 
 
 extra_arg_part=""
-if [[ "${ARGS["replay_buffer_save_folder"]}" != "none" ]]; then
-    extra_arg_part+="--replay_buffer_save_folder $storage_dir/replay_buffers/${ARGS["game"]}/${ARGS["replay_buffer_save_folder"]} "
-fi
-
 if [[ "${ARGS["buffer_save_path"]}" != "none" ]]; then
     extra_arg_part+="--buffer_save_path $storage_dir/${ARGS["curiosity_module"]}/${ARGS["game"]}/${ARGS["buffer_save_path"]} "
 fi

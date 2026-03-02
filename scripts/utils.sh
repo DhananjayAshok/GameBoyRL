@@ -41,7 +41,7 @@ function get_env_id(){
     done
 
     if [ "$FAILED" = true ]; then return 1; fi
-    env_id="poke_worlds-${ARGS["game"]}-${ARGS["env"]}-${ARGS["init_state"]}-${ARGS["controller"]}-${ARGS["max_steps"]}-False"
+    env_id="poke_worlds-${ARGS["game"]}-${ARGS["env"]}-${ARGS["init_state"]}-${ARGS["controller"]}-${ARGS["max_steps"]}"
     echo $env_id
 }
 

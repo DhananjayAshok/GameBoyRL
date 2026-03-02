@@ -1,1 +1,1 @@
-bash scripts/default_rl.sh --algorithm random --timesteps 1000000 --buffer_save_path default/random/ --replay_buffer_save_folder default/random/
+bash scripts/default_rl.sh --algorithm random --timesteps 1000

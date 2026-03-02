@@ -81,7 +81,7 @@ done
 if [ "$FAILED" = true ]; then usage; fi
 
 # Print active variables
-echo "Active variables:"
+echo "Script: $0 Active variables:"
 for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
@@ -119,6 +119,6 @@ echo "Training World Model:"
 
 echo python cleanrl_utils/train_world_model.py --seed 1 --env-id $env_id \
     --track --wandb-project-name $WANDB_PROJECT \
-    --observation-embedder ${ARGS["observation_embedder"]} $extra_arg_part
+    --observation_embedder ${ARGS["observation_embedder"]} $extra_arg_part
 
 cd ..

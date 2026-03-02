@@ -10,8 +10,8 @@ ARGS["similarity_metric"]="cosine"
 ARGS["observation_embedder"]="random_patch"
 ARGS["embedder_load_path"]="none"
 ARGS["curiosity_module"]="embedbuffer"
-ARGS["max_steps"]=200
-ARGS["timesteps"]=500000
+ARGS["max_steps"]=50
+ARGS["timesteps"]=1000000
 ARGS["test_env"]=""
 ARGS["test_init_state"]=""
 ARGS["replay_buffer_save_folder"]="none"
@@ -93,7 +93,7 @@ done
 if [ "$FAILED" = true ]; then usage; fi
 
 # Print active variables
-echo "Active variables:"
+echo "Script: $0 Active variables:"
 for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
@@ -114,7 +114,7 @@ if [[ -z "$exp_name" ]]; then
     echo "Error: Failed to generate exp_name"
     exit 1
 fi
-exp_name=$exp_name-$env_id
+exp_name=$exp_name-$train_env_id
 
 model_save_path="$storage_dir/models/$exp_name/"
 
@@ -145,7 +145,7 @@ echo "Starting Experiment: $exp_name logging to $log_file"
 
 python cleanrl/${ARGS["algorithm"]}_curiosity.py --exp_name $exp_name --seed 1 --gamma ${ARGS["gamma"]} --env-id $train_env_id --total-timesteps ${ARGS["timesteps"]} --track \
     --wandb-project-name $WANDB_PROJECT --model_save_path $model_save_path --capture_video --save_model \
-    --observation-embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} \
+    --observation_embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} \
     --curiosity-module ${ARGS["curiosity_module"]} --reset-curiosity-module $extra_arg_part &> $log_file
 
 # if test_env and test_init_state are empty, set them to train values:
