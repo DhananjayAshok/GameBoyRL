@@ -18,6 +18,7 @@ ARGS["replay_buffer_save_folder"]="none"
 ARGS["buffer_save_path"]="none"
 ARGS["buffer_load_path"]="none"
 ARGS["train_only"]=""
+ARGS["eval_only"]=""
 ARGS["controller"]="low_level"
 ARGS["log_folder"]=""
 ARGS["env"]="default"
@@ -141,12 +142,17 @@ if [[ -n "${ARGS["log_folder"]}" ]]; then
     mkdir -p "$(dirname "$log_file")"
 fi
 
-echo "Starting Experiment: $exp_name logging to $log_file"
+# check eval only flag, if true then skip training and go to evaluation
+if [[ "${ARGS["eval_only"]}" == "true" || "${ARGS["eval_only"]}" == "yes" || "${ARGS["eval_only"]}" == "y" ]]; then
+    echo "Eval only flag is set. Skipping training and going to evaluation."
+else
+    echo "Starting Experiment: $exp_name logging to $log_file"
 
-python cleanrl/${ARGS["algorithm"]}_curiosity.py --exp_name $exp_name --seed 1 --gamma ${ARGS["gamma"]} --env-id $train_env_id --total-timesteps ${ARGS["timesteps"]} --track \
-    --wandb-project-name $WANDB_PROJECT --model_save_path $model_save_path --capture_video --save_model \
-    --observation_embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} \
-    --curiosity-module ${ARGS["curiosity_module"]} --reset-curiosity-module $extra_arg_part &> $log_file
+    python cleanrl/${ARGS["algorithm"]}_curiosity.py --exp_name $exp_name --seed 1 --gamma ${ARGS["gamma"]} --env-id $train_env_id --total-timesteps ${ARGS["timesteps"]} --track \
+        --wandb-project-name $WANDB_PROJECT --model_save_path $model_save_path --capture_video --save_model \
+        --observation_embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} \
+        --curiosity-module ${ARGS["curiosity_module"]} --reset-curiosity-module $extra_arg_part &> $log_file
+fi
 
 # if test_env and test_init_state are empty, set them to train values:
 if [[ -z "${ARGS["test_env"]}" ]]; then

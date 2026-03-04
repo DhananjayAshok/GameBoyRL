@@ -1,4 +1,4 @@
-source configs/config.env
+source scripts/utils.sh
 rm -rf cleanrl/videos/*
 rm -rf cleanrl/runs/*
 rm -rf cleanrl/wandb/*
