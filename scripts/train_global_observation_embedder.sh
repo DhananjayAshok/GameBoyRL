@@ -2,23 +2,14 @@
 
 source scripts/utils.sh
 
-# Define Defaults for default_rl.sh
+# Define Defaults
 declare -A ARGS
-ARGS["similarity_metric"]="cosine"
-ARGS["observation_embedder"]="random_patch"
-ARGS["embedder_load_path"]="none"
-ARGS["curiosity_module"]="embedbuffer"
-ARGS["max_steps"]=50
-ARGS["timesteps"]=1000000
-ARGS["controller"]="low_level"
-# Script specific defaults
-ARGS["n_agents"]=10
 
 # Temporarily hardcode game for testing
 ARGS["game"]="pokemon_red"
-ARGS["init_state"]="default"
 
 # Define Required Keys
+#REQUIRED_ARGS=("game")
 REQUIRED_ARGS=() # temporarily make all optional for testing
 
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -89,11 +80,18 @@ for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
-replay_buffer_save_folder=${ARGS["init_state"]}
-buffer_save_path=${ARGS["init_state"]}/random/
-prev_buffer_save_path=$buffer_save_path
 
-# First, run a random agent to populate the curiosity module buffer
-log_folder=$storage_dir/logs/${ARGS["game"]}/random/
+cd cleanrl
 
-bash scripts/default_rl.sh --algorithm random --buffer_save_path $buffer_save_path --gamma ${ARGS["gamma"]} --similarity_metric ${ARGS["similarity_metric"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["observation_embedder"]} --curiosity_module ${ARGS["curiosity_module"]} --max_steps ${ARGS["max_steps"]} --timesteps ${ARGS["timesteps"]} --controller ${ARGS["controller"]} --replay_buffer_save_folder $replay_buffer_save_folder --game ${ARGS["game"]} --env default --init_state ${ARGS["init_state"]} --log_folder $log_folder
+# Logic here:
+replay_buffer_folder=$storage_dir/replay_buffers/${ARGS["game"]}/
+save_path=$storage_dir/observation_embedders/${ARGS["game"]}/global/
+
+
+echo "Training Observation Embedder Model:"
+
+echo python cleanrl_utils/train_observation_encoder.py --seed 1 --replay_buffer_folder $replay_buffer_folder \
+    --track --wandb-project-name $WANDB_PROJECT \
+    --save_path $save_path
+
+cd ..

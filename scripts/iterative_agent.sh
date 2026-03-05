@@ -139,7 +139,7 @@ function train_world_model(){
 ## Execution starts here
 
 
-buffer_save_path=${ARGS["init_state"]}
+buffer_save_path=${ARGS["init_state"]}/random/
 prev_buffer_save_path=$buffer_save_path
 
 # First, run a random agent to populate the curiosity module buffer
@@ -151,7 +151,7 @@ if [ "${ARGS["curiosity_module"]}" == "world_model" ]; then
 fi
 
 prev_buffer_load_path=$prev_buffer_save_path
-buffer_save_path="${ARGS["init_state"]}_${ARGS["algorithm"]}_agent_1"
+buffer_save_path="${ARGS["init_state"]}/${ARGS["algorithm"]}_agent_1"
 
 # Then, run the actual agent iteratively, updating the world model each time if needed
 for ((i=0; i<${ARGS["n_agents"]}; i++)); do
@@ -167,5 +167,5 @@ for ((i=0; i<${ARGS["n_agents"]}; i++)); do
     fi
 
     prev_buffer_load_path=$buffer_save_path
-    buffer_save_path="${ARGS["init_state"]}_${ARGS["algorithm"]}_agent_$((i+2))"
+    buffer_save_path="${ARGS["init_state"]}/${ARGS["algorithm"]}_agent_$((i+2))"
 done
