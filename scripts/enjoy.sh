@@ -111,7 +111,7 @@ fi
 
 cd cleanrl
 
-python cleanrl_utils/enjoy.py --exp-name ${ARGS["algorithm"]}_curiosity --model_path $model_save_path/model.pt \
+python cleanrl_utils/enjoy.py --exp-name ${ARGS["algorithm"]}_curiosity --model_path $model_save_path \
     --env-id $test_env_id --save-name $exp_name \
     --similarity_metric ${ARGS["similarity_metric"]} --observation_embedder ${ARGS["observation_embedder"]} \
     --curiosity_module ${ARGS["curiosity_module"]} $extra_arg_part
