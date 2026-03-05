@@ -5,10 +5,20 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12.2"
 dependencies = [
+    "accelerate>=1.12.0",
+    "anthropic>=0.77.0",
     "cleanrl[atari]",
     "click>=8.3.1",
+    "einops>=0.8.2",
+    "openai>=2.16.0",
+    "peft>=0.18.1",
     "poke-worlds[vlm]",
+    "protobuf>=6.33.5",
     "scikit-learn>=1.8.0",
+    "sentencepiece>=0.2.1",
+    "torch>=2.10.0",
+    "torchvision>=0.25.0",
+    "transformers>=5.0.0",
 ]
 
 [tool.uv.sources]
