@@ -90,7 +90,7 @@ save_path=$storage_dir/observation_embedders/${ARGS["game"]}/global/
 
 echo "Training Observation Embedder Model:"
 
-echo python cleanrl_utils/train_observation_encoder.py --seed 1 --replay_buffer_folder $replay_buffer_folder \
+python cleanrl_utils/train_observation_encoder.py --seed 1 --replay_buffer_folder $replay_buffer_folder \
     --track --wandb-project-name $WANDB_PROJECT \
     --save_path $save_path
 
