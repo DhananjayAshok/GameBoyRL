@@ -125,11 +125,11 @@ if [[ "${ARGS["replay_buffer_save_folder"]}" != "none" ]]; then
 fi
 
 if [[ "${ARGS["buffer_save_path"]}" != "none" ]]; then
-    extra_arg_part+="--buffer_save_path $storage_dir/${ARGS["curiosity_module"]}/${ARGS["game"]}/${ARGS["buffer_save_path"]} "
+    extra_arg_part+="--buffer_save_path $storage_dir/curiosity_buffers/${ARGS["curiosity_module"]}/${ARGS["game"]}/${ARGS["buffer_save_path"]} "
 fi
 
 if [[ "${ARGS["buffer_load_path"]}" != "none" ]]; then
-    extra_arg_part+="--buffer_load_path $storage_dir/${ARGS["curiosity_module"]}/${ARGS["game"]}/${ARGS["buffer_load_path"]} "
+    extra_arg_part+="--buffer_load_path $storage_dir/curiosity_buffers/${ARGS["curiosity_module"]}/${ARGS["game"]}/${ARGS["buffer_load_path"]} "
 fi
 if [[ "${ARGS["embedder_load_path"]}" != "none" ]]; then
     extra_arg_part+="--embedder_load_path $storage_dir/${ARGS["observation_embedder"]}/${ARGS["game"]}/${ARGS["embedder_load_path"]} "
