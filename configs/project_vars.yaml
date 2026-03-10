@@ -1,7 +1,7 @@
 random_seed: 42
 results_dir: "results" # Path to the directory where results will be saved, meant for lightweight files, plots and logs
 figure_force_save: True # Indicates whether the Plotter object should save a figure or display it. In envs with no display you'll want to set this to True
-WANDB_PROJECT: "GameBoyRL" # This is more for bash than for within python. Will set the wandb logger to the right project
+WANDB_PROJECT: "GameBoyWorlds" # This is more for bash than for within python. Will set the wandb logger to the right project
 ocr_max_new_tokens: 20
 executor_vlm_model: gpt-4o # The VLM that handles simple goal directed usage of High Level Actions. Use the same model as the backbone to avoid loading multiple models.
 executor_vlm_kind: openai
