@@ -12,7 +12,6 @@ ARGS["max_steps"]=50
 ARGS["timesteps"]=1000000
 ARGS["controller"]="low_level"
 # Script specific defaults
-ARGS["n_agents"]=10
 
 # Temporarily hardcode game for testing
 ARGS["game"]="pokemon_red"
@@ -96,4 +95,4 @@ prev_buffer_save_path=$buffer_save_path
 # First, run a random agent to populate the curiosity module buffer
 log_folder=$storage_dir/logs/${ARGS["game"]}/random/
 
-bash scripts/default_rl.sh --algorithm random --buffer_save_path $buffer_save_path --gamma ${ARGS["gamma"]} --similarity_metric ${ARGS["similarity_metric"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["observation_embedder"]} --curiosity_module ${ARGS["curiosity_module"]} --max_steps ${ARGS["max_steps"]} --timesteps ${ARGS["timesteps"]} --controller ${ARGS["controller"]} --replay_buffer_save_folder $replay_buffer_save_folder --game ${ARGS["game"]} --env default --init_state ${ARGS["init_state"]} --log_folder $log_folder
+bash scripts/default_rl.sh --algorithm random --buffer_save_path $buffer_save_path --similarity_metric ${ARGS["similarity_metric"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["observation_embedder"]} --curiosity_module ${ARGS["curiosity_module"]} --max_steps ${ARGS["max_steps"]} --timesteps ${ARGS["timesteps"]} --controller ${ARGS["controller"]} --replay_buffer_save_folder $replay_buffer_save_folder --game ${ARGS["game"]} --env default --init_state ${ARGS["init_state"]} --log_folder $log_folder

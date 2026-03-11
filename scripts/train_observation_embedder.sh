@@ -4,6 +4,7 @@ source scripts/utils.sh
 
 # Define Defaults
 declare -A ARGS
+ARGS["subfolder"]=""
 
 # Temporarily hardcode game for testing
 ARGS["game"]="pokemon_red"
@@ -84,7 +85,7 @@ done
 cd cleanrl
 
 # Logic here:
-replay_buffer_folder=$storage_dir/replay_buffers/${ARGS["game"]}/
+replay_buffer_folder=$storage_dir/replay_buffers/${ARGS["game"]}/${ARGS["subfolder"]}/
 save_path=$storage_dir/observation_embedders/${ARGS["game"]}/global/
 
 
