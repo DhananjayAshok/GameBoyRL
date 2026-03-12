@@ -534,7 +534,7 @@ dependencies = [
     { name = "einops" },
     { name = "openai" },
     { name = "peft" },
-    { name = "poke-worlds", extra = ["vlm"] },
+    { name = "gameboy-worlds" },
     { name = "protobuf" },
     { name = "scikit-learn" },
     { name = "sentencepiece" },
@@ -552,7 +552,7 @@ requires-dist = [
     { name = "einops", specifier = ">=0.8.2" },
     { name = "openai", specifier = ">=2.16.0" },
     { name = "peft", specifier = ">=0.18.1" },
-    { name = "poke-worlds", extras = ["vlm"], editable = "../PokeWorlds" },
+    { name = "gameboy-worlds", editable = "../GameBoyWorlds" },
     { name = "protobuf", specifier = ">=6.33.5" },
     { name = "scikit-learn", specifier = ">=1.8.0" },
     { name = "sentencepiece", specifier = ">=0.2.1" },
@@ -1538,9 +1538,9 @@ wheels = [
 ]
 
 [[package]]
-name = "poke-worlds"
+name = "gameboy-worlds"
 version = "0.1.0"
-source = { editable = "../PokeWorlds" }
+source = { editable = "../GameBoyWorlds" }
 dependencies = [
     { name = "bidict" },
     { name = "click" },
@@ -1559,49 +1559,35 @@ dependencies = [
     { name = "wheel" },
 ]
 
-[package.optional-dependencies]
-vlm = [
-    { name = "accelerate" },
-    { name = "anthropic" },
-    { name = "einops" },
-    { name = "openai" },
-    { name = "peft" },
-    { name = "protobuf" },
-    { name = "sentencepiece" },
-    { name = "torch" },
-    { name = "torchvision" },
-    { name = "transformers" },
-]
 
 [package.metadata]
 requires-dist = [
-    { name = "accelerate", marker = "extra == 'vlm'", specifier = ">=1.12.0" },
-    { name = "anthropic", marker = "extra == 'vlm'", specifier = ">=0.76.0" },
+    { name = "accelerate", specifier = ">=1.12.0" },
+    { name = "anthropic", specifier = ">=0.76.0" },
     { name = "bidict", specifier = ">=0.23.1" },
     { name = "click", specifier = ">=8.3.0" },
-    { name = "einops", marker = "extra == 'vlm'", specifier = ">=0.8.1" },
+    { name = "einops", specifier = ">=0.8.1" },
     { name = "gymnasium", specifier = ">=1.2.3" },
     { name = "huggingface-hub", specifier = ">=0.36.0" },
     { name = "matplotlib", specifier = ">=3.10.7" },
     { name = "numpy" },
-    { name = "openai", marker = "extra == 'vlm'", specifier = ">=2.15.0" },
+    { name = "openai", specifier = ">=2.15.0" },
     { name = "opencv-python", specifier = ">=4.11.0.86" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pdoc", specifier = ">=16.0.0" },
-    { name = "peft", marker = "extra == 'vlm'", specifier = ">=0.18.1" },
-    { name = "protobuf", marker = "extra == 'vlm'", specifier = ">=6.33.2" },
+    { name = "peft", specifier = ">=0.18.1" },
+    { name = "protobuf", specifier = ">=6.33.2" },
     { name = "pyboy", specifier = "==2.4.0" },
     { name = "pygame", specifier = ">=2.6.1" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "scikit-image", specifier = ">=0.25.2" },
-    { name = "sentencepiece", marker = "extra == 'vlm'", specifier = ">=0.2.1" },
-    { name = "torch", marker = "extra == 'vlm'", specifier = ">=2.9.1" },
-    { name = "torchvision", marker = "extra == 'vlm'", specifier = ">=0.24.1" },
+    { name = "sentencepiece", specifier = ">=0.2.1" },
+    { name = "torch", specifier = ">=2.9.1" },
+    { name = "torchvision", specifier = ">=0.24.1" },
     { name = "tqdm", specifier = ">=4.67.1" },
-    { name = "transformers", marker = "extra == 'vlm'", specifier = ">=4.57.3" },
+    { name = "transformers", specifier = ">=4.57.3" },
     { name = "wheel", specifier = ">=0.45.1" },
 ]
-provides-extras = ["vlm"]
 
 [[package]]
 name = "proglog"

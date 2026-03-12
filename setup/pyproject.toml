@@ -12,7 +12,7 @@ dependencies = [
     "einops>=0.8.2",
     "openai>=2.16.0",
     "peft>=0.18.1",
-    "poke-worlds[vlm]",
+    "gameboy-worlds",
     "protobuf>=6.33.5",
     "scikit-learn>=1.8.0",
     "sentencepiece>=0.2.1",
@@ -22,5 +22,5 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-poke-worlds = { path = "../PokeWorlds", editable = true }
+gameboy-worlds = { path = "../GameBoyWorlds", editable = true }
 cleanrl = { path = "../cleanrl", editable = true }
