@@ -5,7 +5,7 @@ from utils import (
     log_warn,
 )
 from gameboy_worlds.interface import Environment
-from execution.vlm import VLM
+from utils import VLM
 from execution.report import (
     ExecutionReport,
     SupervisorReport,

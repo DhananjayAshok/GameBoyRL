@@ -4,7 +4,7 @@ from copy import deepcopy
 from gameboy_worlds.interface import Controller
 from execution.report import ExecutionReport, SimpleReport
 from execution.executor_action import ExecutorAction
-from execution.vlm import ExecutorVLM, ocr
+from utils import ExecutorVLM, ocr
 from execution.retrieval import DenseTextDatabase, DictDatabase
 from utils import load_parameters, log_error, log_warn, log_info
 from gameboy_worlds.interface import Environment, HighLevelAction

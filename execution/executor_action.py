@@ -1,6 +1,6 @@
 from gameboy_worlds.interface import HighLevelAction
 
-from execution.vlm import ExecutorVLM
+from utils import ExecutorVLM
 from typing import Tuple, List, Dict, Any
 import numpy as np
 from PIL import Image
