@@ -1,21 +1,49 @@
 import os
 import yaml
+from typing import Any, Optional
 from utils.fundamental import get_logger
 
 
-def load_yaml(yaml_path):
+def load_yaml(yaml_path: str) -> dict[str, Any]:
+    """
+    Load a YAML file and return its contents as a dictionary.
+
+    :param yaml_path: Absolute path to the YAML file.
+    :type yaml_path: str
+    :return: Parsed YAML contents.
+    :rtype: dict[str, Any]
+    """
     with open(yaml_path, "r") as f:
         return yaml.load(f, Loader=yaml.FullLoader)
 
 
-def compute_secondary_parameters(params):
+def compute_secondary_parameters(params: dict[str, Any]) -> None:
+    """
+    Derive and create secondary parameters from the base configuration in-place.
+
+    Derives the following keys from ``storage_dir``: ``data_dir``, ``model_dir``,
+    ``tmp_dir``, ``sync_dir``. Derives the following from ``results_dir``:
+    ``log_dir``, ``figure_dir``. All derived directories are created if they do
+    not exist. Also sets ``log_file`` (defaulting to ``<log_dir>/log.txt`` if not
+    already present) and initialises the ``logger`` key.
+
+    :param params: The parameters dictionary to extend in-place.
+    :type params: dict[str, Any]
+    """
     params["data_dir"] = os.path.join(params["storage_dir"], "data")
     params["model_dir"] = os.path.join(params["storage_dir"], "models")
     params["tmp_dir"] = os.path.join(params["storage_dir"], "tmp")
     params["sync_dir"] = os.path.join(params["storage_dir"], "sync")
     params["log_dir"] = os.path.join(params["results_dir"], "logs")
-    params["figure_dir"] = os.path.join(params["results_dir"], "figures")    
-    for dirname in ["data_dir", "model_dir", "log_dir", "figure_dir", "tmp_dir", "sync_dir"]:
+    params["figure_dir"] = os.path.join(params["results_dir"], "figures")
+    for dirname in [
+        "data_dir",
+        "model_dir",
+        "log_dir",
+        "figure_dir",
+        "tmp_dir",
+        "sync_dir",
+    ]:
         if not os.path.exists(params[dirname]):
             os.makedirs(params[dirname])
     if "log_file" not in params:
@@ -32,23 +60,30 @@ def compute_secondary_parameters(params):
     params["logger"] = logger
 
 
-def load_parameters(parameters=None):
+def load_parameters(parameters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     """
     Loads the parameters for the project from configs/private_vars.yaml and any other yaml files in the configs directory.
 
     That is, unless a non None parameters dictionary is passed through, in which case we assume all is good and just return it.
 
-        :return: A dictionary of parameters
+    :param parameters: An already-loaded parameters dict, or None to load from disk.
+        Passing an existing dict is a no-op (safe to call repeatedly).
+    :type parameters: dict[str, Any] or None
+    :return: A dictionary of fully loaded and validated parameters.
+    :rtype: dict[str, Any]
     """
     if parameters is not None:
-        if "logger" not in parameters: # this is a flag that secondary parameters need to be computed
+        if (
+            "logger" not in parameters
+        ):  # this is a flag that secondary parameters need to be computed
             compute_secondary_parameters(parameters)
         return parameters
-    essential_keys = ["storage_dir", "results_dir", "figure_force_save"]
+    essential_keys = ["storage_dir", "results_dir"]
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     params = {"project_root": project_root}
     logger = get_logger()
     config_files = os.listdir(os.path.join(project_root, "configs"))
+
     def error(msg):
         logger.error(msg)
         raise ValueError(msg)
@@ -60,23 +95,29 @@ def load_parameters(parameters=None):
             configs = load_yaml(os.path.join(project_root, "configs", file))
             for key in configs:
                 if key in params:
-                    error(f"{key} is present in multiple config files. At least one of which is {file}. Please remove the duplicate")
+                    error(
+                        f"{key} is present in multiple config files. At least one of which is {file}. Please remove the duplicate"
+                    )
             params.update(configs)
         else:
             pass
 
     for key in params:
         if params[key] == "PLACEHOLDER":
-            error(f"{key} is currently the placeholder value in private_vars.yaml. Please set it")
+            error(
+                f"{key} is currently the placeholder value in private_vars.yaml. Please set it"
+            )
     for essential_key in essential_keys:
         if essential_key not in params:
             error(f"Please set {essential_key} in one of the config yamls")
     # check if there are any .py files in storage_dir, if so, log error
-    if os.path.exists(params['storage_dir']):
+    if os.path.exists(params["storage_dir"]):
         if any([f.endswith(".py") for f in os.listdir(params["storage_dir"])]):
-            logger.warning(f"There are .py files in the storage_dir {params['storage_dir']}. It is recommended to set a path which has nothing else inside it to avoid issues.")
+            logger.warning(
+                f"There are .py files in the storage_dir {params['storage_dir']}. It is recommended to set a path which has nothing else inside it to avoid issues."
+            )
     else:
-        os.makedirs(params['storage_dir'])
+        os.makedirs(params["storage_dir"])
         logger.info(f"Created storage directory {params['storage_dir']}")
     compute_secondary_parameters(params)
     return params
