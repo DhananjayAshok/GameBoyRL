@@ -96,11 +96,11 @@ All VLM methods expect images shaped `(H, W, C)`. This placeholder will fail if 
 
 ### 14. `check_optional_installs` referenced but not defined locally — [utils/fundamental.py](utils/fundamental.py)
 
-`utils/fundamental.py` exports `check_optional_installs` (imported in `utils/parameter_handling.py`) but the function isn't present in the file. It exists in `PokeWorlds/src/poke_worlds/utils/fundamental.py`. If `utils/` is meant to be independent of the submodule, this will fail.
+`utils/fundamental.py` exports `check_optional_installs` (imported in `utils/parameter_handling.py`) but the function isn't present in the file. It exists in `PokeWorlds/src/gameboy_worlds/utils/fundamental.py`. If `utils/` is meant to be independent of the submodule, this will fail.
 
 ### 15. Duplicated `parameter_handling` / `log_handling` between `utils/` and the submodule
 
-`utils/parameter_handling.py` and `utils/log_handling.py` are substantially similar to their counterparts inside `PokeWorlds/src/poke_worlds/utils/`. They have different `compute_secondary_parameters` logic (`data_dir`/`model_dir`/`results_dir` vs `rom_data_dir`), which is fine, but the pattern means any fix to shared logic must be applied in two places.
+`utils/parameter_handling.py` and `utils/log_handling.py` are substantially similar to their counterparts inside `PokeWorlds/src/gameboy_worlds/utils/`. They have different `compute_secondary_parameters` logic (`data_dir`/`model_dir`/`results_dir` vs `rom_data_dir`), which is fine, but the pattern means any fix to shared logic must be applied in two places.
 
 ---
 

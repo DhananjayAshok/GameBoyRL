@@ -1,6 +1,6 @@
-from poke_worlds.utils import verify_parameters, log_error
-from poke_worlds.emulation import StateTracker
-from poke_worlds.interface import HighLevelAction, Environment, History
+from gameboy_worlds.utils import verify_parameters, log_error
+from gameboy_worlds.emulation import StateTracker
+from gameboy_worlds.interface import HighLevelAction, Environment, History
 from execution.executor_action import ExecutorAction
 
 

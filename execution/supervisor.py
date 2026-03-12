@@ -4,7 +4,7 @@ from utils import (
     log_info,
     log_warn,
 )
-from poke_worlds.interface import Environment
+from gameboy_worlds.interface import Environment
 from execution.vlm import VLM
 from execution.report import (
     ExecutionReport,

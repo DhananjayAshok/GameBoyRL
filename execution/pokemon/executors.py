@@ -1,8 +1,8 @@
-from poke_worlds.interface.pokemon.controllers import PokemonStateWiseController
-from poke_worlds.interface.pokemon.environments import PokemonEnvironment
-from poke_worlds.interface import HighLevelAction
-from poke_worlds.execution.executor import SimpleExecutor, Executor, EQAExecutor
-from poke_worlds.interface.pokemon.actions import (
+from gameboy_worlds.interface.pokemon.controllers import PokemonStateWiseController
+from gameboy_worlds.interface.pokemon.environments import PokemonEnvironment
+from gameboy_worlds.interface import HighLevelAction
+from gameboy_worlds.execution.executor import SimpleExecutor, Executor, EQAExecutor
+from gameboy_worlds.interface.pokemon.actions import (
     MoveStepsAction,
     MenuAction,
     InteractAction,
@@ -11,11 +11,11 @@ from poke_worlds.interface.pokemon.actions import (
     BattleMenuAction,
     PickAttackAction,
 )
-from poke_worlds.execution.pokemon.executor_actions import (
+from gameboy_worlds.execution.pokemon.executor_actions import (
     PokemonLocateAction,
     CheckInteractionAction,
 )
-from poke_worlds.emulation.pokemon.parsers import AgentState
+from gameboy_worlds.emulation.pokemon.parsers import AgentState
 
 
 class PokemonExecutor(SimpleExecutor):

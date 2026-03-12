@@ -1,4 +1,4 @@
-from poke_worlds import AVAILABLE_GAMES, get_environment
+from gameboy_worlds import AVAILABLE_GAMES, get_environment
 import click
 from execution.supervisor import SimpleSupervisor
 from execution.pokemon.executors import PokemonExecutor

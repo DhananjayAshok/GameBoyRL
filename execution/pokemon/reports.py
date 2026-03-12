@@ -1,6 +1,6 @@
-from poke_worlds.execution.vlm import merge_ocr_strings
-from poke_worlds.execution.report import ExecutionReport, SimpleReport, EQAReport
-from poke_worlds.emulation.pokemon.trackers import PokemonOCRTracker
+from gameboy_worlds.execution.vlm import merge_ocr_strings
+from gameboy_worlds.execution.report import ExecutionReport, SimpleReport, EQAReport
+from gameboy_worlds.emulation.pokemon.trackers import PokemonOCRTracker
 from typing import Dict, Any
 
 

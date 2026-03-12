@@ -1,4 +1,4 @@
-from poke_worlds import (
+from gameboy_worlds import (
     AVAILABLE_GAMES,
     get_environment,
     get_benchmark_tasks,

@@ -5,7 +5,7 @@ from utils import (
     log_warn,
 )
 from execution.vlm import ExecutorVLM, convert_numpy_greyscale_to_pillow
-from poke_worlds.emulation.parser import StateParser
+from gameboy_worlds.emulation.parser import StateParser
 import os
 from typing import List, Tuple, Any, Dict, Union, Type
 import numpy as np

@@ -1,13 +1,13 @@
 # Meant to store vlm utilities for the lowest level VLM agent.
 from copy import deepcopy
 
-from poke_worlds.interface import Controller
+from gameboy_worlds.interface import Controller
 from execution.report import ExecutionReport, SimpleReport
 from execution.executor_action import ExecutorAction
 from execution.vlm import ExecutorVLM, ocr
 from execution.retrieval import DenseTextDatabase, DictDatabase
 from utils import load_parameters, log_error, log_warn, log_info
-from poke_worlds.interface import Environment, HighLevelAction
+from gameboy_worlds.interface import Environment, HighLevelAction
 from typing import List, Tuple, Type, Dict, Any
 from abc import ABC, abstractmethod
 
@@ -1142,7 +1142,7 @@ Reasoning: I believe"""
                 ) in transition_state_ocr_regions.items():
                     if region_name not in ocr_text_dict:
                         ocr_text_dict[region_name] = []
-                    from poke_worlds.execution.vlm import ocr
+                    from gameboy_worlds.execution.vlm import ocr
 
                     ocr_text = ocr(region_captures)
                     ocr_text = "\n".join(ocr_text)

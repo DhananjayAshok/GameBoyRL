@@ -1,6 +1,6 @@
-from poke_worlds.execution.executor_action import ExecutorAction, LocateAction
-from poke_worlds.emulation.pokemon import AgentState
-from poke_worlds.execution.vlm import ExecutorVLM
+from gameboy_worlds.execution.executor_action import ExecutorAction, LocateAction
+from gameboy_worlds.emulation.pokemon import AgentState
+from gameboy_worlds.execution.vlm import ExecutorVLM
 
 
 class PokemonLocateAction(LocateAction):
