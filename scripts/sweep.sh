@@ -71,6 +71,12 @@ for req in "${REQUIRED_ARGS[@]}"; do
 done
 
 if [ "$FAILED" = true ]; then usage; fi
+if [[ "${ARGS["model_dir"]}" != "none" ]]; then
+    model_save_path="$storage_dir/models/${ARGS["model_dir"]}/"
+else
+    echo "Sweep requires you to specify a --model_dir"
+    exit 1
+fi
 
 # Print active variables
 echo "Script: $0 Active variables:"
@@ -104,10 +110,15 @@ else
     ARGS["clear_loser_replay_buffer"] = "false" # force false if replay buffer isn't saved in the first place. 
 fi
 
-arg_str+="--best_k ${ARGS["best_k"]} --model_dir ${ARGS["model_dir"]} --clear_loser_replay_buffer ${ARGS["clear_loser_replay_buffer"]}"
+
+arg_str+="--best_k ${ARGS["best_k"]} --model_dir $model_save_path"
+if [[ "${ARGS["clear_loser_replay_buffer"]}" == "true" ]]; then
+    arg_str+=" --clear_loser_replay_buffer"
+fi
+
 
 cd cleanrl
-python cleanrl/utils/keep_only_best_models.py $arg_str
+python cleanrl_utils/keep_only_best_models.py $arg_str
 cd ..
 
 
