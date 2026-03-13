@@ -5,11 +5,8 @@ source scripts/utils.sh
 # Define Defaults for default_rl.sh
 declare -A ARGS
 REQUIRED_ARGS=()
-populate_array ESSENTIAL_ARGS ARGS
-populate_dict ALL_DEFAULTS ARGS
-populate_dict TRAINING_DEFAULTS ARGS
-ARGS["best_k"]=10
-ARGS["clear_loser_replay_buffer"]=true
+populate_array SWEEP_ESSENTIALS ARGS
+populate_dict SWEEP_DEFAULTS ARGS
 
 
 
@@ -93,7 +90,7 @@ for seed in "${SEEDS[@]}"; do
             ARGS["seed"]=$seed
             ARGS["gamma"]=$gamma
             ARGS["algorithm"]=$algorithm
-            argstring=$(args_to_flags_subset ARGS ALLOWED_FLAGS)
+            argstring=$(args_to_flags_subset ARGS TRAINING_ARG_KEYS)
             bash scripts/default_rl.sh $argstring --train_only true
         done
     done
@@ -120,7 +117,7 @@ for seed in "${SEEDS[@]}"; do
             ARGS["seed"]=$seed
             ARGS["gamma"]=$gamma
             ARGS["algorithm"]=$algorithm
-            argstring=$(args_to_flags_subset ARGS ALLOWED_FLAGS)
+            argstring=$(args_to_flags_subset ARGS TRAINING_ARG_KEYS)
             bash scripts/default_rl.sh $argstring --eval_only true
         done
     done
