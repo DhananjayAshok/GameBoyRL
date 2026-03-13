@@ -1,5 +1,6 @@
 source configs/config.env || { echo "configs/config.env not found"; exit 1; }
 source setup/.venv/bin/activate || { echo "Virtual environment not found."; exit 1; }
+PROJECT_ROOT=$(pwd)
 
 # args_to_flags <assoc_array_name>
 #
@@ -33,7 +34,7 @@ function get_string_from_args() {
     local string_kind="$1"
     shift
     local flags=$(args_to_flags "$1")
-    python scripts/get_strings.py "$string_kind" $flags
+    python $PROJECT_ROOT/scripts/get_strings.py "$string_kind" $flags
 }
 
 
