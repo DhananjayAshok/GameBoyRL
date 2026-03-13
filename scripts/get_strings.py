@@ -10,6 +10,10 @@ import sys
 from abc import ABC, abstractmethod
 
 
+def log(message):
+    print(message, file=sys.stderr)
+
+
 def depathify(string) -> str:
     """
     Helper function to convert a path-like string to a string that can be used as a filename or an experiment name.
@@ -119,6 +123,7 @@ class ExperimentName(StringFunction):
     def _get_string(self, **kwargs) -> str:
         exp_name = ""
         exp_name = self.add_to_exp_name(
+            exp_name,
             [
                 "game",
                 "init_state",
@@ -130,7 +135,6 @@ class ExperimentName(StringFunction):
                 "gamma",
                 "observation_embedder",
             ],
-            exp_name,
             kwargs,
         )
         if kwargs["embedder_load_path"] is not None:

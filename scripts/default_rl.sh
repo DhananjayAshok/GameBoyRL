@@ -4,34 +4,18 @@ source scripts/utils.sh
 
 # Define Defaults
 declare -A ARGS
-ARGS["algorithm"]="ppo"
-ARGS["gamma"]="0.99"
-ARGS["seed"]=1
-ARGS["similarity_metric"]="cosine"
-ARGS["observation_embedder"]="random_patch"
-ARGS["embedder_load_path"]="none"
-ARGS["curiosity_module"]="embedbuffer"
-ARGS["max_steps"]=50
-ARGS["timesteps"]=5000000
-ARGS["test_env"]=""
-ARGS["test_init_state"]=""
-ARGS["replay_buffer_save_folder"]="none"
-ARGS["buffer_save_path"]="none"
-ARGS["buffer_load_path"]="none"
-ARGS["train_only"]=""
-ARGS["model_dir"]="none"
-ARGS["eval_only"]=""
-ARGS["controller"]="low_level"
-ARGS["log_folder"]=""
-ARGS["env"]="default"
+ARGS["test_env"]="none"
+ARGS["test_init_state"]="none"
+ARGS["train_only"]="false"
+ARGS["eval_only"]="false"
 
-# Temporarily hardcode game for testing
-ARGS["game"]="pokemon_red"
-ARGS["init_state"]="default"
 
 # Define Required Keys
-#REQUIRED_ARGS=("game" "env")
-REQUIRED_ARGS=() # temporarily make all optional for testing
+REQUIRED_ARGS=()
+
+
+populate_dict TRAINING_DEFAULTS ARGS
+populate_array TRAINING_ESSENTIALS REQUIRED_ARGS
 
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
 
@@ -100,65 +84,31 @@ echo "Script: $0 Active variables:"
 for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
-
+argstring=() 
 cd cleanrl
 
 # Logic here:
 
-train_env_id=$(get_env_id --game ${ARGS["game"]} --env ${ARGS["env"]} --init_state ${ARGS["init_state"]} --controller ${ARGS["controller"]} --max_steps ${ARGS["max_steps"]})
+
+train_env_id=$(get_string_from_args "env_id" ARGS)
 if [[ -z "$train_env_id" ]]; then
     echo "Error: Failed to get train_env_id"
     exit 1
 fi
 train_env_id=$train_env_id-False
 
-exp_name=$(get_exp_name_partial --algorithm ${ARGS["algorithm"]} --timesteps ${ARGS["timesteps"]} --gamma ${ARGS["gamma"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["observation_embedder"]} --curiosity_module ${ARGS["curiosity_module"]} --similarity_metric ${ARGS["similarity_metric"]} --buffer_load_path ${ARGS["buffer_load_path"]} --seed ${ARGS["seed"]}) )
+exp_name=$(get_string_from_args "exp_name" ARGS)
 if [[ -z "$exp_name" ]]; then
     echo "Error: Failed to generate exp_name"
     exit 1
-fi
-exp_name=$exp_name-$train_env_id
-
-if [[ "${ARGS["model_dir"]}" != "none" ]]; then
-    model_save_path="$storage_dir/models/${ARGS["model_dir"]}/$exp_name/"
-else
-    model_save_path="$storage_dir/models/$exp_name/"
-fi
-
-
-extra_arg_part=""
-if [[ "${ARGS["replay_buffer_save_folder"]}" != "none" ]]; then
-    extra_arg_part+="--replay_buffer_save_folder $storage_dir/replay_buffers/${ARGS["game"]}/${ARGS["replay_buffer_save_folder"]} "
-fi
-
-if [[ "${ARGS["buffer_save_path"]}" != "none" ]]; then
-    extra_arg_part+="--buffer_save_path $storage_dir/curiosity_buffers/${ARGS["curiosity_module"]}/${ARGS["game"]}/${ARGS["buffer_save_path"]} "
-fi
-
-if [[ "${ARGS["buffer_load_path"]}" != "none" ]]; then
-    extra_arg_part+="--buffer_load_path $storage_dir/curiosity_buffers/${ARGS["curiosity_module"]}/${ARGS["game"]}/${ARGS["buffer_load_path"]} "
-fi
-if [[ "${ARGS["embedder_load_path"]}" != "none" ]]; then
-    extra_arg_part+="--embedder_load_path $storage_dir/${ARGS["observation_embedder"]}/${ARGS["game"]}/${ARGS["embedder_load_path"]} "
-fi
-
-log_file="../$exp_name.out"
-if [[ -n "${ARGS["log_folder"]}" ]]; then
-    log_file="$storage_dir/logs/${ARGS["log_folder"]}/$exp_name.out"
-    # make sure the folder exists
-    mkdir -p "$(dirname "$log_file")"
 fi
 
 # check eval only flag, if true then skip training and go to evaluation
 if [[ "${ARGS["eval_only"]}" == "true" || "${ARGS["eval_only"]}" == "yes" || "${ARGS["eval_only"]}" == "y" ]]; then
     echo "Eval only flag is set. Skipping training and going to evaluation."
 else
-    echo "Starting Experiment: $exp_name logging to $log_file"
-
-    python cleanrl/${ARGS["algorithm"]}_curiosity.py --exp_name $exp_name --seed ${ARGS["seed"]} --gamma ${ARGS["gamma"]} --env-id $train_env_id --total-timesteps ${ARGS["timesteps"]} --track \
-        --wandb-project-name $WANDB_PROJECT --model_save_path $model_save_path --capture_video --save_model \
-        --observation_embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} \
-        --curiosity-module ${ARGS["curiosity_module"]} --reset-curiosity-module $extra_arg_part &> $log_file
+    arg_string=$(args_to_flags_subset ARGS TRAINING_ARG_KEYS)
+    bash scripts/train.sh $arg_string
 fi
 
 # if test_env and test_init_state are empty, set them to train values:
@@ -178,5 +128,6 @@ if [[ "${ARGS["train_only"]}" == "true" || "${ARGS["train_only"]}" == "yes" || "
 fi
 
 
-echo "Calling scripts/enjoy.sh --algorithm ${ARGS["algorithm"]} --exp_name $exp_name --env ${ARGS["test_env"]} --game ${ARGS["game"]} --init_state ${ARGS["test_init_state"]} --controller ${ARGS["controller"]} --max_steps ${ARGS["max_steps"]} --curiosity_module ${ARGS["curiosity_module"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["embedder_load_path"]} --similarity_metric ${ARGS["similarity_metric"]} --buffer_load_path ${ARGS["buffer_load_path"]} --buffer_save_path ${ARGS["buffer_save_path"]}" --model_dir ${ARGS["model_dir"]}
-bash scripts/enjoy.sh --algorithm ${ARGS["algorithm"]} --exp_name $exp_name --env ${ARGS["test_env"]} --game ${ARGS["game"]} --init_state ${ARGS["test_init_state"]} --controller ${ARGS["controller"]} --max_steps ${ARGS["max_steps"]} --curiosity_module ${ARGS["curiosity_module"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["embedder_load_path"]} --similarity_metric ${ARGS["similarity_metric"]} --buffer_load_path ${ARGS["buffer_load_path"]} --buffer_save_path ${ARGS["buffer_save_path"]} --model_dir ${ARGS["model_dir"]}
+ARGS["exp_name"]=$exp_name
+arg_string=$(args_to_flags_subset ARGS EVALUATION_ARG_KEYS)
+bash scripts/enjoy.sh $arg_string

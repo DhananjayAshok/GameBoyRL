@@ -4,18 +4,12 @@ source scripts/utils.sh
 
 # Define Defaults
 declare -A ARGS
-ARGS["max_steps"]=200
-ARGS["controller"]="low_level"
-ARGS["similarity_metric"]="cosine"
-ARGS["observation_embedder"]="random_patch"
-ARGS["embedder_load_path"]="none"
-ARGS["curiosity_module"]="embedbuffer"
-ARGS["buffer_save_path"]="none"
-ARGS["buffer_load_path"]="none"
-ARGS["model_dir"]="none"
+declare -A ARGS
 
-# Define Required Keys
-REQUIRED_ARGS=("algorithm" "exp_name" "game" "env" "init_state")
+REQUIRED_ARGS=()
+
+populate_dict EVALUATION_DEFAULTS ARGS
+populate_array EVALUATION_ESSENTIALS REQUIRED_ARGS
 
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
 
@@ -87,8 +81,7 @@ done
 
 # Logic here:
 exp_name="${ARGS["exp_name"]}"
-test_env_id=$(get_env_id --game "${ARGS["game"]}" --env "${ARGS["env"]}" --init_state "${ARGS["init_state"]}" \
-    --controller "${ARGS["controller"]}" --max_steps "${ARGS["max_steps"]}")
+test_env_id=$(get_string_from_args "env_id" ARGS)
 if [[ -z "$test_env_id" ]]; then
     echo "Error: Failed to construct test environment ID. Please check your input parameters."
     exit 1
