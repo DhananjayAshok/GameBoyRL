@@ -5,11 +5,11 @@ source scripts/utils.sh
 # Define Defaults for default_rl.sh
 declare -A ARGS
 REQUIRED_ARGS=()
-populate_array ESSENTIAL_ARGS ARGS
-populate_dict ALL_DEFAULTS ARGS
-populate_dict TRAINING_DEFAULTS ARGS
+populate_dict SWEEP_DEFAULTS ARGS
+populate_array SWEEP_ESSENTIALS REQUIRED_ARGS
 
 ARGS["n_agents"]=10
+ARGS["sweep"]=false
 
 
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -80,55 +80,42 @@ for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
-replay_buffer_save_folder=${ARGS["init_state"]}
+
+sweeping=false
+if [ "${ARGS["sweep"]}" == "true" ]; then
+    run_name="iterative_sweep"
+    sweeping=true
+else
+    run_name="iterative_agent"
+fi
+
+replay_buffer_save_folder=${ARGS["init_state"]}/$run_name/
+ARGS["latest_replay_buffer_folder"]=$replay_buffer_save_folder
 
 ## Set up functions for iterative training
 
 
-function get_local_exp_name() {
-    local buffer_load_path="$1"
-    local exp_args=$(args_to_flags ARGS)
-    exp_args="${exp_args} --buffer_load_path $buffer_load_path"
-    local exp_name=$(python scripts/get_exp_name.py $exp_args)
-    if [-z "$exp_name" ]; then
-        return 1
-    fi
-    echo "$exp_name"
-}
-
 prev_buffer_load_path="none"
-
-function get_true_replay_buffer_save_folder() {
-    local exp_name=$(get_local_exp_name $prev_buffer_load_path)
-    if [-z "$exp_name" ]; then
-        echo "Error: Could not determine experiment name for buffer load path '$prev_buffer_load_path'."
-        return 1
-    fi
-    echo $replay_buffer_save_folder/$exp_name
-}
-
-log_folder="../iterative_agents/${ARGS["game"]}/${ARGS["init_state"]}/"
+log_folder="../$run_name/${ARGS["game"]}/${ARGS["init_state"]}/"
 
 function call_agent(){
     local buffer_load_path="$1"
     local buffer_save_path="$2"
     ARGS["buffer_save_path"]=$buffer_save_path
     ARGS["buffer_load_path"]=$buffer_load_path
-    argstring=$(args_to_flags_subset ARGS TRAINING_ARG_KEYS)
-    bash scripts/default_rl.sh $argstring
+    if [ "$sweeping" = true ]; then
+        argstring=$(args_to_flags_subset ARGS SWEEP_ARG_KEYS)
+        bash scripts/sweep.sh $argstring
+    else
+        argstring=$(args_to_flags_subset ARGS TRAINING_ARG_KEYS)    
+        bash scripts/default_rl.sh $argstring
+    fi
 }
 
 function train_world_model(){
-    local buffer_load_path="$1"
-    local buffer_save_path="$2"
-    local latest_replay_buffer_folder=$(get_true_replay_buffer_save_folder)
-    if [-z "$latest_replay_buffer_folder" ]; then
-        echo "Error: Could not determine latest replay buffer folder for buffer load path '$buffer_load_path'."
-        return 1
-    fi
-    ARGS["latest_replay_buffer_folder"]=$latest_replay_buffer_folder
+    local buffer_save_path="$1"
     ARGS["buffer_save_path"]=$buffer_save_path
-    ARGS["buffer_load_path"]=$buffer_load_path
+    # Don't bother with buffer_load_path, this will just make the WM train from scratch on all trajectories in the replay buffer folder. 
     argstring=$(args_to_flags_subset ARGS WORLD_MODEL_ARG_KEYS)
     bash scripts/train_world_model.sh $argstring 
 }

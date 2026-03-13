@@ -5,7 +5,7 @@ source scripts/utils.sh
 # Define Defaults for default_rl.sh
 declare -A ARGS
 REQUIRED_ARGS=()
-populate_array SWEEP_ESSENTIALS ARGS
+populate_array SWEEP_ESSENTIALS REQUIRED_ARGS
 populate_dict SWEEP_DEFAULTS ARGS
 
 

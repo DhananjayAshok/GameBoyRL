@@ -123,6 +123,7 @@ declare -A SAVE_DEFAULTS=(
     ["replay_buffer_save_folder"]="none"
     ["model_dir"]="none"
     ["log_folder"]="none"
+    ["capture_video"]=false
 )
 
 declare -A TRAINING_DEFAULTS

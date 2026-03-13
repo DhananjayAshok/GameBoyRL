@@ -130,6 +130,6 @@ echo "Starting Experiment: $exp_name logging to $log_file"
 python cleanrl/${ARGS["algorithm"]}_curiosity.py --exp_name $exp_name --seed ${ARGS["seed"]} --gamma ${ARGS["gamma"]} --env-id $train_env_id --total-timesteps ${ARGS["timesteps"]} --track \
     --wandb-project-name $WANDB_PROJECT --model_save_path $model_save_path --capture_video --save_model \
     --observation_embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} \
-    --curiosity-module ${ARGS["curiosity_module"]} --reset-curiosity-module $extra_arg_part &> $log_file
+    --curiosity-module ${ARGS["curiosity_module"]} --reset-curiosity-module $extra_arg_part --capture_video ${ARGS["capture_video"]} &> $log_file
 
 cd ..
