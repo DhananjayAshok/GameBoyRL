@@ -122,15 +122,20 @@ function train_world_model(){
 
 ## Execution starts here
 
+if [ "$sweeping" = true ]; then
+    all_buffer_save_paths=${ARGS["init_state"]}/sweep_
+else
+    all_buffer_save_paths=${ARGS["init_state"]}/${ARGS["algorithm"]}_agent_
+fi
 
-all_buffer_save_paths=${ARGS["init_state"]}/${ARGS["algorithm"]}_agent_
+
 buffer_save_path=${all_buffer_save_paths}0
 prev_buffer_save_path=$buffer_save_path
 
 call_agent "none" $buffer_save_path
 
 if [ "${ARGS["curiosity_module"]}" == "world_model" ]; then
-    train_world_model $prev_buffer_load_path $buffer_save_path    
+    train_world_model $buffer_save_path    
 fi
 
 prev_buffer_load_path=$prev_buffer_save_path
