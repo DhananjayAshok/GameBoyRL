@@ -109,7 +109,7 @@ class ExperimentName(StringFunction):
         "seed",
     ]
 
-    def add_to_exp_name(exp_name, keys, kwargs):
+    def add_to_exp_name(self, exp_name, keys, kwargs):
         for i, key in enumerate(keys):
             exp_name += f"{key}_{kwargs[key]}"
             if i != len(keys) - 1:
