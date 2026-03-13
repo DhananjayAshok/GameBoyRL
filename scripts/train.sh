@@ -131,3 +131,5 @@ python cleanrl/${ARGS["algorithm"]}_curiosity.py --exp_name $exp_name --seed ${A
     --wandb-project-name $WANDB_PROJECT --model_save_path $model_save_path --capture_video --save_model \
     --observation_embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} \
     --curiosity-module ${ARGS["curiosity_module"]} --reset-curiosity-module $extra_arg_part &> $log_file
+
+cd ..

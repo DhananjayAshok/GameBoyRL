@@ -84,8 +84,6 @@ echo "Script: $0 Active variables:"
 for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
-argstring=() 
-cd cleanrl
 
 # Logic here:
 
@@ -118,8 +116,6 @@ fi
 if [[ -z "${ARGS["test_init_state"]}" ]]; then
     ARGS["test_init_state"]="${ARGS["init_state"]}"
 fi
-
-cd ..
 
 # if train_only is true, t, yes or y then exit here:
 if [[ "${ARGS["train_only"]}" == "true" || "${ARGS["train_only"]}" == "yes" || "${ARGS["train_only"]}" == "y" ]]; then
