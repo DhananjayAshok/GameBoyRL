@@ -90,6 +90,8 @@ GAMMAS=(0.99 0.995 0.999)
 ALGORITHMS=(dqn ppo sac)
 
 
+true_buffer_save_path=$ARGS["buffer_save_path"]
+ARGS["buffer_save_path"]="none" # the first eval of the sweep is just to assess test reward, not to save to buffers. 
 for seed in "${SEEDS[@]}"; do
     for gamma in "${GAMMAS[@]}"; do
         for algorithm in "${ALGORITHMS[@]}"; do
@@ -97,10 +99,11 @@ for seed in "${SEEDS[@]}"; do
             ARGS["gamma"]=$gamma
             ARGS["algorithm"]=$algorithm
             argstring=$(args_to_flags_subset ARGS TRAINING_ARG_KEYS)
-            bash scripts/default_rl.sh $argstring --train_only true
+            bash scripts/default_rl.sh $argstring
         done
     done
 done
+ARGS["buffer_save_path"]="$true_buffer_save_path"
 
 # Keep only the best
 arg_str=""
