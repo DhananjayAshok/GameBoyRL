@@ -4,7 +4,7 @@ source scripts/utils.sh
 
 # Define Defaults
 declare -A ARGS
-ARGS["algorithm"]="sac"
+ARGS["algorithm"]="ppo"
 ARGS["gamma"]="0.99"
 ARGS["seed"]=1
 ARGS["similarity_metric"]="cosine"

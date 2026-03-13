@@ -4,7 +4,7 @@ source scripts/utils.sh
 
 # Define Defaults for default_rl.sh
 declare -A ARGS
-ARGS["algorithm"]="dqn"
+ARGS["algorithm"]="ppo"
 ARGS["gamma"]="0.99"
 ARGS["seed"]=1
 ARGS["similarity_metric"]="cosine"
