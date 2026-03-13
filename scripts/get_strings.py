@@ -183,7 +183,7 @@ def parse():
         if args[i + 1].startswith("--"):
             raise ValueError(f"consecutive --s: {args}")
         if args[i + 1].strip().lower() == "none":
-            args[i + 1] = None
+            arg_dict[args[i].strip("--").lower()] = None
         else:
             arg_dict[args[i].strip("--").lower()] = args[i + 1]
     return string_name, arg_dict
