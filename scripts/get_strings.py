@@ -118,7 +118,7 @@ class ExperimentName(StringFunction):
 
     def _get_string(self, **kwargs) -> str:
         exp_name = ""
-        self.add_to_exp_name(
+        exp_name = self.add_to_exp_name(
             [
                 "game",
                 "init_state",
@@ -137,7 +137,7 @@ class ExperimentName(StringFunction):
             exp_name += f"-{depathify(kwargs['embedder_load_path'])}_"
         else:
             exp_name += f"_"
-        self.add_to_exp_name(
+        exp_name = self.add_to_exp_name(
             exp_name, keys=["similarity_metric", "curiosity_module"], kwargs=kwargs
         )
         if kwargs["buffer_load_path"] is not None:
