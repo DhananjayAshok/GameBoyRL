@@ -117,7 +117,7 @@ fi
 if [[ "${ARGS["embedder_load_path"]}" != "none" ]]; then
     extra_arg_part+="--embedder_load_path $storage_dir/${ARGS["observation_embedder"]}/${ARGS["game"]}/${ARGS["embedder_load_path"]} "
 fi
-if [[ "${ARGS["capture_video"]}" == "true" ]]; then
+if [[ "${ARGS["capture_video"]}" == "true" || "${ARGS["capture_video"]}" == "True" || "${ARGS["capture_video"]}" == "yes" || "${ARGS["capture_video"]}" == "y" ]]; then
     extra_arg_part+="--capture_video "
 fi
 
