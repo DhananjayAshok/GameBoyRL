@@ -1,136 +1,121 @@
 source configs/config.env || { echo "configs/config.env not found"; exit 1; }
 source setup/.venv/bin/activate || { echo "Virtual environment not found."; exit 1; }
 
-
-function get_env_id(){    
-    declare -A ARGS
-    REQUIRED_ARGS=("max_steps" "env" "init_state" "controller" "game")
-
-    ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}")
-    # 3. Parser
-    while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --*)
-            # Extract the name (remove the leading --)
-            FLAG=${1#--}
-            VALID=false
-            for allowed in "${ALLOWED_FLAGS[@]}"; do
-                if [[ "$FLAG" == "$allowed" ]]; then
-                    VALID=true
-                    break
-                fi
-            done
-            if [ "$VALID" = false ]; then
-                return 1
-            fi            
-            ARGS["$FLAG"]="$2"
-            shift 2
-            ;;
-        *)
-            return 1
-            usage
-            ;;
-    esac
+# args_to_flags <assoc_array_name>
+#
+# Converts a bash associative array into a flat --key value string suitable
+# for passing to a Python click command or another bash script.
+# Empty values ("") are emitted as --key none.
+#
+# Usage (capture-safe — all diagnostics go to stderr):
+#   declare -A ARGS=( ["lr"]="0.001" ["dataset"]="" )
+#   flags=$(args_to_flags ARGS)
+#   python get_strings.py <string_kind> $flags
+function args_to_flags() {
+    local -n _dict="$1"
+    local result=""
+    for key in "${!_dict[@]}"; do
+        local val="${_dict[$key]}"
+        if [[ -z "$val" ]]; then
+            val="none"
+        fi
+        result+="--${key} ${val} "
     done
+    echo "${result% }"  # trim trailing space
+}
 
-    # 4. Strict Validation
-    for req in "${REQUIRED_ARGS[@]}"; do
-    if [[ -z "${ARGS[$req]}" ]]; then
-        FAILED=true
-    fi
-    done
-
-    if [ "$FAILED" = true ]; then return 1; fi
-    env_id="gameboy_worlds-${ARGS["game"]}-${ARGS["env"]}-${ARGS["init_state"]}-${ARGS["controller"]}-${ARGS["max_steps"]}"
-    echo $env_id
+# get_string_from_args <string_kind> <assoc_array_name>
+#
+# Utility function to get a string from get_strings.py by passing an associative array of args.
+# Usage:
+#   string=$(get_string_from_args <string_kind> ARGS)
+function get_string_from_args() {
+    local string_kind="$1"
+    shift
+    local flags=$(args_to_flags "$1")
+    python scripts/get_strings.py "$string_kind" $flags
 }
 
 
-
-function get_exp_name_partial(){    
-    declare -A ARGS
-    REQUIRED_ARGS=("algorithm" "timesteps" "gamma" "similarity_metric" "observation_embedder" "embedder_load_path" "curiosity_module" "buffer_load_path" "seed")
-
-    ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}")
-    # 3. Parser
-    while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --*)
-            # Extract the name (remove the leading --)
-            FLAG=${1#--}
-            VALID=false
-            for allowed in "${ALLOWED_FLAGS[@]}"; do
-                if [[ "$FLAG" == "$allowed" ]]; then
-                    VALID=true
-                    break
-                fi
-            done
-            if [ "$VALID" = false ]; then
-                return 1
-            fi            
-            ARGS["$FLAG"]="$2"
-            shift 2
-            ;;
-        *)
-            return 1
-            usage
-            ;;
-    esac
+# args_to_flags_subset <assoc_array_name> "${KEY_LIST[@]}"
+#
+# Like args_to_flags, but only emits flags for the specified keys.
+# Keys not present in the array are silently skipped.
+# Use this when calling a subscript that doesn't accept all of the caller's ARGS.
+#
+# Usage:
+#   subset=$(args_to_flags_subset ARGS "${COMMON_TRAINING_ARGS_KEYS[@]}")
+#   bash scripts/a.sh $subset
+function args_to_flags_subset() {
+    local -n _dict="$1"
+    shift
+    local result=""
+    for key in "$@"; do
+        if [[ -v _dict["$key"] ]]; then
+            local val="${_dict[$key]}"
+            if [[ -z "$val" ]]; then val="none"; fi
+            result+="--${key} ${val} "
+        fi
     done
-
-    # 4. Strict Validation
-    for req in "${REQUIRED_ARGS[@]}"; do
-    if [[ -z "${ARGS[$req]}" ]]; then
-        FAILED=true
-    fi
-    done
-
-    if [ "$FAILED" = true ]; then return 1; fi
-    exp_name_partial="${ARGS["algorithm"]}-${ARGS["timesteps"]}-${ARGS["gamma"]}-${ARGS["observation_embedder"]}-${ARGS["embedder_load_path"]}-${ARGS["curiosity_module"]}-${ARGS["buffer_load_path"]}-${ARGS["similarity_metric"]}-${ARGS["seed"]}"
-    echo $exp_name_partial
+    echo "${result% }"
 }
 
-function get_exp_name_full(){    
-    declare -A ARGS
-    REQUIRED_ARGS=("algorithm" "gamma" "similarity_metric" "observation_embedder" "curiosity_module" "max_steps" "timesteps" "env" "init_state" "buffer_load_path" "controller" "game" "timesteps" "embedder_load_path" "seed")
-
-    ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}")
-    # 3. Parser
-    while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --*)
-            # Extract the name (remove the leading --)
-            FLAG=${1#--}
-            VALID=false
-            for allowed in "${ALLOWED_FLAGS[@]}"; do
-                if [[ "$FLAG" == "$allowed" ]]; then
-                    VALID=true
-                    break
-                fi
-            done
-            if [ "$VALID" = false ]; then
-                return 1
-            fi            
-            ARGS["$FLAG"]="$2"
-            shift 2
-            ;;
-        *)
-            return 1
-            usage
-            ;;
-    esac
+function populate_dict(){
+    local -n _source_dict="$1"
+    local -n _target_dict="$2"
+    for key in "${!_source_dict[@]}"; do
+        _target_dict["$key"]="${_source_dict[$key]}"
     done
-
-    # 4. Strict Validation
-    for req in "${REQUIRED_ARGS[@]}"; do
-    if [[ -z "${ARGS[$req]}" ]]; then
-        FAILED=true
-    fi
-    done
-
-    if [ "$FAILED" = true ]; then return 1; fi
-    env_id=$(get_env_id --max_steps ${ARGS["max_steps"]} --env ${ARGS["env"]} --init_state ${ARGS["init_state"]} --controller ${ARGS["controller"]} --game ${ARGS["game"]})
-    exp_name_partial=$(get_exp_name_partial --algorithm ${ARGS["algorithm"]} --timesteps ${ARGS["timesteps"]} --gamma ${ARGS["gamma"]} --similarity_metric ${ARGS["similarity_metric"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["embedder_load_path"]} --curiosity_module ${ARGS["curiosity_module"]} --buffer_load_path ${ARGS["buffer_load_path"]} --seed ${ARGS["seed"]})
-    exp_name="${env_id}-${exp_name_partial}"
-    echo $exp_name
 }
+
+function populate_array(){
+    local -n _source_arr="$1"
+    local -n _target_arr="$2"
+    _target_arr+=("${_source_arr[@]}")
+}
+
+
+################################################################################
+ESSENTIAL_ARGS=() # should be game later. 
+declare -A ALL_DEFAULTS=( # make this empty later
+    ["game"]="pokemon_red"
+)
+
+ENV_ESSENTIALS=() # should be init_state later.
+declare -A ENV_DEFAULTS=(
+    ["env"]="default"
+    ["controller"]="low_level"
+    ["max_steps"]=50    
+    ["init_state"]="default" # move this to essentials later
+)
+
+
+declare -A ALGORITHM_DEFAULTS=(
+    ["timesteps"]=5000000
+    ["algorithm"]="ppo"
+    ["gamma"]="0.99"
+    ["seed"]=1
+    ["curiosity_module"]="embedbuffer"
+    ["buffer_load_path"]="none"
+    ["similarity_metric"]="cosine"    
+    ["observation_embedder"]="random_patch"
+    ["embedder_load_path"]="none"    
+)
+
+declare -A SAVE_DEFAULTS=(
+    ["buffer_save_path"]="none"
+    ["replay_buffer_save_folder"]="none"
+    ["model_dir"]="none"
+    ["log_folder"]="none"
+)
+
+declare -A TRAINING_DEFAULTS
+TRAINING_ESSENTIALS=()
+populate_dict ALL_DEFAULTS TRAINING_DEFAULTS
+populate_dict ENV_DEFAULTS TRAINING_DEFAULTS
+populate_dict ALGORITHM_DEFAULTS TRAINING_DEFAULTS
+populate_dict SAVE_DEFAULTS TRAINING_DEFAULTS
+populate_array ESSENTIAL_ARGS TRAINING_ESSENTIALS
+populate_array ENV_ESSENTIALS TRAINING_ESSENTIALS
+
+TRAINING_ARG_KEYS=("${TRAINING_ESSENTIALS[@]}" "${!TRAINING_DEFAULTS[@]}")
