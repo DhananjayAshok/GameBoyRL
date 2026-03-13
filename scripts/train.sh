@@ -118,12 +118,12 @@ if [[ "${ARGS["embedder_load_path"]}" != "none" ]]; then
     extra_arg_part+="--embedder_load_path $storage_dir/${ARGS["observation_embedder"]}/${ARGS["game"]}/${ARGS["embedder_load_path"]} "
 fi
 
-log_file="../$exp_name.out"
+log_file="../logs/$exp_name.out"
 if [[ "${ARGS["log_folder"]}" != "none" ]]; then
     log_file="$storage_dir/logs/${ARGS["log_folder"]}/$exp_name.out"
     # make sure the folder exists
-    mkdir -p "$(dirname "$log_file")"
 fi
+mkdir -p "$(dirname "$log_file")"
 
 echo "Starting Experiment: $exp_name logging to $log_file"
 

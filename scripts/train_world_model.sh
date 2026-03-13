@@ -4,19 +4,11 @@ source scripts/utils.sh
 
 # Define Defaults
 declare -A ARGS
-ARGS["observation_embedder"]="random_patch"
-ARGS["embedder_load_path"]="none"
-ARGS["latest_replay_buffer_folder"]="none"
-ARGS["buffer_save_path"]="none"
-ARGS["buffer_load_path"]="none"
+REQUIRED_ARGS=()
 
-# Temporarily hardcode game for testing
-ARGS["controller"]="low_level"
-ARGS["game"]="pokemon_red"
+populate_dict WORLD_MODEL_DEFAULTS ARGS
+populate_dict WORLD_MODEL_ESSENTIALS REQUIRED_ARGS
 
-# Define Required Keys
-#REQUIRED_ARGS=("game" "env")
-REQUIRED_ARGS=() # temporarily make all optional for testing
 
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
 
@@ -91,7 +83,8 @@ cd cleanrl
 
 # Logic here:
 
-train_env_id=$(get_env_id --game ${ARGS["game"]} --env default --init_state default --controller ${ARGS["controller"]} --max_steps 10)
+env_arg_str="--game ${ARGS["game"]} --env default --init_state default --controller ${ARGS["controller"]} --max_steps 10"
+train_env_id=$(python scripts/get_strings.py "env_id" $env_arg_str)
 if [[ -z "$train_env_id" ]]; then
     echo "Error: Failed to get train_env_id"
     exit 1

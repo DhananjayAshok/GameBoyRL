@@ -4,14 +4,11 @@ source scripts/utils.sh
 
 # Define Defaults
 declare -A ARGS
-ARGS["subfolder"]=""
+REQUIRED_ARGS=()
+populate_dict ALL_DEFAULTS ARGS
+populate_array ESSENTIAL_ARGS REQUIRED_ARGS
 
-# Temporarily hardcode game for testing
-ARGS["game"]="pokemon_red"
-
-# Define Required Keys
-#REQUIRED_ARGS=("game")
-REQUIRED_ARGS=() # temporarily make all optional for testing
+ARGS["subfolder"]="none"
 
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
 
@@ -85,7 +82,13 @@ done
 cd cleanrl
 
 # Logic here:
-replay_buffer_folder=$storage_dir/replay_buffers/${ARGS["game"]}/${ARGS["subfolder"]}/
+
+subfolder=""
+if [[ "${ARGS["subfolder"]}" != "none" ]]; then
+    subfolder="${ARGS["subfolder"]}"
+fi
+
+replay_buffer_folder=$storage_dir/replay_buffers/${ARGS["game"]}/${subfolder}/
 save_path=$storage_dir/observation_embedders/${ARGS["game"]}/global/
 
 

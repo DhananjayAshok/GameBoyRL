@@ -76,6 +76,17 @@ function populate_array(){
     _target_arr+=("${_source_arr[@]}")
 }
 
+function populate_dict_subset(){
+    local -n _source_dict="$1"
+    local -n _target_dict="$2"
+    local -n _subset_keys="$3"
+    for key in "${_subset_keys[@]}"; do
+        if [[ -v _source_dict["$key"] ]]; then
+            _target_dict["$key"]="${_source_dict[$key]}"
+        fi
+    done
+}
+
 
 ################################################################################
 ESSENTIAL_ARGS=() # should be game later. 
@@ -138,3 +149,14 @@ populate_array ENV_ESSENTIALS EVALUATION_ESSENTIALS
 EVALUATION_ESSENTIALS+=("algorithm" "exp_name")
 
 EVALUATION_ARG_KEYS=("${EVALUATION_ESSENTIALS[@]}" "${!EVALUATION_DEFAULTS[@]}")
+
+declare -A WORLD_MODEL_DEFAULTS
+WORLD_MODEL_ESSENTIALS=()
+populate_dict ALL_DEFAULTS WORLD_MODEL_DEFAULTS
+populate_array ESSENTIAL_ARGS WORLD_MODEL_ESSENTIALS
+SAME_AS_TRAINING=("observation_embedder" "embedder_load_path" "latest_replay_buffer_folder" "buffer_save_path" "buffer_load_path" "controller")
+populate_dict_subset TRAINING_DEFAULTS WORLD_MODEL_DEFAULTS SAME_AS_TRAINING
+
+WORLD_MODEL_ARG_KEYS=("${WORLD_MODEL_ESSENTIALS[@]}" "${!WORLD_MODEL_DEFAULTS[@]}")
+
+
