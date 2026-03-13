@@ -12,6 +12,7 @@ ARGS["embedder_load_path"]="none"
 ARGS["curiosity_module"]="embedbuffer"
 ARGS["buffer_save_path"]="none"
 ARGS["buffer_load_path"]="none"
+ARGS["model_dir"]="none"
 
 # Define Required Keys
 REQUIRED_ARGS=("algorithm" "exp_name" "game" "env" "init_state")
@@ -93,8 +94,12 @@ if [[ -z "$test_env_id" ]]; then
     exit 1
 fi
 test_env_id="${test_env_id}-True"
-model_save_path="$storage_dir/models/$exp_name/"
 
+if [[ "${ARGS["model_dir"]}" != "none" ]]; then
+    model_save_path="$storage_dir/models/${ARGS["model_dir"]}/$exp_name/"
+else
+    model_save_path="$storage_dir/models/$exp_name/"
+fi
 
 extra_arg_part=""
 if [[ "${ARGS["buffer_save_path"]}" != "none" ]]; then

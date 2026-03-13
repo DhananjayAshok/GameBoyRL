@@ -6,6 +6,7 @@ source scripts/utils.sh
 declare -A ARGS
 ARGS["algorithm"]="dqn"
 ARGS["gamma"]="0.99"
+ARGS["seed"]=1
 ARGS["similarity_metric"]="cosine"
 ARGS["observation_embedder"]="random_patch"
 ARGS["embedder_load_path"]="none"
@@ -98,7 +99,7 @@ replay_buffer_save_folder=${ARGS["init_state"]}
 
 function get_local_exp_name() {
     local buffer_load_path="$1"
-    local exp_name=$(get_exp_name_full --algorithm ${ARGS["algorithm"]} --timesteps ${ARGS["timesteps"]} --gamma ${ARGS["gamma"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["observation_embedder"]} --curiosity_module ${ARGS["curiosity_module"]} --similarity_metric ${ARGS["similarity_metric"]}  --game ${ARGS["game"]} --env default --init_state ${ARGS["init_state"]} --controller ${ARGS["controller"]} --max_steps ${ARGS["max_steps"]} --buffer_load_path $buffer_load_path )
+    local exp_name=$(get_exp_name_full --algorithm ${ARGS["algorithm"]} --timesteps ${ARGS["timesteps"]} --gamma ${ARGS["gamma"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["observation_embedder"]} --curiosity_module ${ARGS["curiosity_module"]} --similarity_metric ${ARGS["similarity_metric"]} --seed ${ARGS["seed"]}  --game ${ARGS["game"]} --env default --init_state ${ARGS["init_state"]} --controller ${ARGS["controller"]} --max_steps ${ARGS["max_steps"]} --buffer_load_path $buffer_load_path )
     if [-z "$exp_name" ]; then
         return 1
     fi
@@ -117,7 +118,7 @@ function get_true_replay_buffer_save_folder() {
 }
 
 log_folder="../iterative_agents/${ARGS["game"]}/${ARGS["init_state"]}/"
-all_common_args="--gamma ${ARGS["gamma"]} --similarity_metric ${ARGS["similarity_metric"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["observation_embedder"]} --curiosity_module ${ARGS["curiosity_module"]} --max_steps ${ARGS["max_steps"]} --timesteps ${ARGS["timesteps"]} --controller ${ARGS["controller"]} --replay_buffer_save_folder $replay_buffer_save_folder --game ${ARGS["game"]} --env default --init_state ${ARGS["init_state"]} --log_folder $log_folder"
+all_common_args="--gamma ${ARGS["gamma"]} --seed ${ARGS["seed"]} --similarity_metric ${ARGS["similarity_metric"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["observation_embedder"]} --curiosity_module ${ARGS["curiosity_module"]} --max_steps ${ARGS["max_steps"]} --timesteps ${ARGS["timesteps"]} --controller ${ARGS["controller"]} --replay_buffer_save_folder $replay_buffer_save_folder --game ${ARGS["game"]} --env default --init_state ${ARGS["init_state"]} --log_folder $log_folder"
 
 function call_agent(){
     local buffer_load_path="$1"

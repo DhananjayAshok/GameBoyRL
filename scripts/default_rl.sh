@@ -6,6 +6,7 @@ source scripts/utils.sh
 declare -A ARGS
 ARGS["algorithm"]="sac"
 ARGS["gamma"]="0.99"
+ARGS["seed"]=1
 ARGS["similarity_metric"]="cosine"
 ARGS["observation_embedder"]="random_patch"
 ARGS["embedder_load_path"]="none"
@@ -18,6 +19,7 @@ ARGS["replay_buffer_save_folder"]="none"
 ARGS["buffer_save_path"]="none"
 ARGS["buffer_load_path"]="none"
 ARGS["train_only"]=""
+ARGS["model_dir"]="none"
 ARGS["eval_only"]=""
 ARGS["controller"]="low_level"
 ARGS["log_folder"]=""
@@ -110,14 +112,19 @@ if [[ -z "$train_env_id" ]]; then
 fi
 train_env_id=$train_env_id-False
 
-exp_name=$(get_exp_name_partial --algorithm ${ARGS["algorithm"]} --timesteps ${ARGS["timesteps"]} --gamma ${ARGS["gamma"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["observation_embedder"]} --curiosity_module ${ARGS["curiosity_module"]} --similarity_metric ${ARGS["similarity_metric"]} --buffer_load_path ${ARGS["buffer_load_path"]} )
+exp_name=$(get_exp_name_partial --algorithm ${ARGS["algorithm"]} --timesteps ${ARGS["timesteps"]} --gamma ${ARGS["gamma"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["observation_embedder"]} --curiosity_module ${ARGS["curiosity_module"]} --similarity_metric ${ARGS["similarity_metric"]} --buffer_load_path ${ARGS["buffer_load_path"]} --seed ${ARGS["seed"]}) )
 if [[ -z "$exp_name" ]]; then
     echo "Error: Failed to generate exp_name"
     exit 1
 fi
 exp_name=$exp_name-$train_env_id
 
-model_save_path="$storage_dir/models/$exp_name/"
+if [[ "${ARGS["model_dir"]}" != "none" ]]; then
+    model_save_path="$storage_dir/models/${ARGS["model_dir"]}/$exp_name/"
+else
+    model_save_path="$storage_dir/models/$exp_name/"
+fi
+
 
 extra_arg_part=""
 if [[ "${ARGS["replay_buffer_save_folder"]}" != "none" ]]; then
@@ -148,7 +155,7 @@ if [[ "${ARGS["eval_only"]}" == "true" || "${ARGS["eval_only"]}" == "yes" || "${
 else
     echo "Starting Experiment: $exp_name logging to $log_file"
 
-    python cleanrl/${ARGS["algorithm"]}_curiosity.py --exp_name $exp_name --seed 1 --gamma ${ARGS["gamma"]} --env-id $train_env_id --total-timesteps ${ARGS["timesteps"]} --track \
+    python cleanrl/${ARGS["algorithm"]}_curiosity.py --exp_name $exp_name --seed ${ARGS["seed"]} --gamma ${ARGS["gamma"]} --env-id $train_env_id --total-timesteps ${ARGS["timesteps"]} --track \
         --wandb-project-name $WANDB_PROJECT --model_save_path $model_save_path --capture_video --save_model \
         --observation_embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} \
         --curiosity-module ${ARGS["curiosity_module"]} --reset-curiosity-module $extra_arg_part &> $log_file
@@ -171,5 +178,5 @@ if [[ "${ARGS["train_only"]}" == "true" || "${ARGS["train_only"]}" == "yes" || "
 fi
 
 
-echo "Calling scripts/enjoy.sh --algorithm ${ARGS["algorithm"]} --exp_name $exp_name --env ${ARGS["test_env"]} --game ${ARGS["game"]} --init_state ${ARGS["test_init_state"]} --controller ${ARGS["controller"]} --max_steps ${ARGS["max_steps"]} --curiosity_module ${ARGS["curiosity_module"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["embedder_load_path"]} --similarity_metric ${ARGS["similarity_metric"]} --buffer_load_path ${ARGS["buffer_load_path"]} --buffer_save_path ${ARGS["buffer_save_path"]}"
-bash scripts/enjoy.sh --algorithm ${ARGS["algorithm"]} --exp_name $exp_name --env ${ARGS["test_env"]} --game ${ARGS["game"]} --init_state ${ARGS["test_init_state"]} --controller ${ARGS["controller"]} --max_steps ${ARGS["max_steps"]} --curiosity_module ${ARGS["curiosity_module"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["embedder_load_path"]} --similarity_metric ${ARGS["similarity_metric"]} --buffer_load_path ${ARGS["buffer_load_path"]} --buffer_save_path ${ARGS["buffer_save_path"]}
+echo "Calling scripts/enjoy.sh --algorithm ${ARGS["algorithm"]} --exp_name $exp_name --env ${ARGS["test_env"]} --game ${ARGS["game"]} --init_state ${ARGS["test_init_state"]} --controller ${ARGS["controller"]} --max_steps ${ARGS["max_steps"]} --curiosity_module ${ARGS["curiosity_module"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["embedder_load_path"]} --similarity_metric ${ARGS["similarity_metric"]} --buffer_load_path ${ARGS["buffer_load_path"]} --buffer_save_path ${ARGS["buffer_save_path"]}" --model_dir ${ARGS["model_dir"]}
+bash scripts/enjoy.sh --algorithm ${ARGS["algorithm"]} --exp_name $exp_name --env ${ARGS["test_env"]} --game ${ARGS["game"]} --init_state ${ARGS["test_init_state"]} --controller ${ARGS["controller"]} --max_steps ${ARGS["max_steps"]} --curiosity_module ${ARGS["curiosity_module"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["embedder_load_path"]} --similarity_metric ${ARGS["similarity_metric"]} --buffer_load_path ${ARGS["buffer_load_path"]} --buffer_save_path ${ARGS["buffer_save_path"]} --model_dir ${ARGS["model_dir"]}

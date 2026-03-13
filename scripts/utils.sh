@@ -49,7 +49,7 @@ function get_env_id(){
 
 function get_exp_name_partial(){    
     declare -A ARGS
-    REQUIRED_ARGS=("algorithm" "timesteps" "gamma" "similarity_metric" "observation_embedder" "embedder_load_path" "curiosity_module" "buffer_load_path")
+    REQUIRED_ARGS=("algorithm" "timesteps" "gamma" "similarity_metric" "observation_embedder" "embedder_load_path" "curiosity_module" "buffer_load_path" "seed")
 
     ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}")
     # 3. Parser
@@ -86,13 +86,13 @@ function get_exp_name_partial(){
     done
 
     if [ "$FAILED" = true ]; then return 1; fi
-    exp_name_partial="${ARGS["algorithm"]}-${ARGS["timesteps"]}-${ARGS["gamma"]}-${ARGS["observation_embedder"]}-${ARGS["embedder_load_path"]}-${ARGS["curiosity_module"]}-${ARGS["buffer_load_path"]}-${ARGS["similarity_metric"]}"
+    exp_name_partial="${ARGS["algorithm"]}-${ARGS["timesteps"]}-${ARGS["gamma"]}-${ARGS["observation_embedder"]}-${ARGS["embedder_load_path"]}-${ARGS["curiosity_module"]}-${ARGS["buffer_load_path"]}-${ARGS["similarity_metric"]}-${ARGS["seed"]}"
     echo $exp_name_partial
 }
 
 function get_exp_name_full(){    
     declare -A ARGS
-    REQUIRED_ARGS=("algorithm" "gamma" "similarity_metric" "observation_embedder" "curiosity_module" "max_steps" "timesteps" "env" "init_state" "buffer_load_path" "controller" "game" "timesteps" "embedder_load_path")
+    REQUIRED_ARGS=("algorithm" "gamma" "similarity_metric" "observation_embedder" "curiosity_module" "max_steps" "timesteps" "env" "init_state" "buffer_load_path" "controller" "game" "timesteps" "embedder_load_path" "seed")
 
     ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}")
     # 3. Parser
@@ -130,7 +130,7 @@ function get_exp_name_full(){
 
     if [ "$FAILED" = true ]; then return 1; fi
     env_id=$(get_env_id --max_steps ${ARGS["max_steps"]} --env ${ARGS["env"]} --init_state ${ARGS["init_state"]} --controller ${ARGS["controller"]} --game ${ARGS["game"]})
-    exp_name_partial=$(get_exp_name_partial --algorithm ${ARGS["algorithm"]} --timesteps ${ARGS["timesteps"]} --gamma ${ARGS["gamma"]} --similarity_metric ${ARGS["similarity_metric"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["embedder_load_path"]} --curiosity_module ${ARGS["curiosity_module"]} --buffer_load_path ${ARGS["buffer_load_path"]})
+    exp_name_partial=$(get_exp_name_partial --algorithm ${ARGS["algorithm"]} --timesteps ${ARGS["timesteps"]} --gamma ${ARGS["gamma"]} --similarity_metric ${ARGS["similarity_metric"]} --observation_embedder ${ARGS["observation_embedder"]} --embedder_load_path ${ARGS["embedder_load_path"]} --curiosity_module ${ARGS["curiosity_module"]} --buffer_load_path ${ARGS["buffer_load_path"]} --seed ${ARGS["seed"]})
     exp_name="${env_id}-${exp_name_partial}"
     echo $exp_name
 }
