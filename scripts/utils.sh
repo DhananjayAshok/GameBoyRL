@@ -38,20 +38,21 @@ function get_string_from_args() {
 }
 
 
-# args_to_flags_subset <assoc_array_name> "${KEY_LIST[@]}"
+
+# args_to_flags_subset <assoc_array_name> <array_of_keys>
 #
 # Like args_to_flags, but only emits flags for the specified keys.
 # Keys not present in the array are silently skipped.
 # Use this when calling a subscript that doesn't accept all of the caller's ARGS.
 #
 # Usage:
-#   subset=$(args_to_flags_subset ARGS "${COMMON_TRAINING_ARGS_KEYS[@]}")
+#   subset=$(args_to_flags_subset ARGS REQUESTED_KEYS_ARRAY)
 #   bash scripts/a.sh $subset
 function args_to_flags_subset() {
     local -n _dict="$1"
-    shift
+    local -n _keys="$2"
     local result=""
-    for key in "$@"; do
+    for key in "${_keys[@]}"; do
         if [[ -v _dict["$key"] ]]; then
             local val="${_dict[$key]}"
             if [[ -z "$val" ]]; then val="none"; fi
