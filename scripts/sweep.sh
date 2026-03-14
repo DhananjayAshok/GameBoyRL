@@ -73,6 +73,7 @@ done
 if [ "$FAILED" = true ]; then usage; fi
 if [[ "${ARGS["model_dir"]}" != "none" ]]; then
     model_save_path="$storage_dir/models/${ARGS["model_dir"]}/"
+    rm -rf model_save_path/* # clear the model save path to ensure we don't have old models lying around.
 else
     echo "Sweep requires you to specify a --model_dir"
     exit 1
@@ -110,7 +111,7 @@ arg_str=""
 if [[ "${ARGS["replay_buffer_save_folder"]}" != "none" ]]; then
     arg_str+="--replay_buffer_save_folder $storage_dir/replay_buffers/${ARGS["game"]}/${ARGS["replay_buffer_save_folder"]} "
 else
-    ARGS["clear_loser_replay_buffer"] = "false" # force false if replay buffer isn't saved in the first place. 
+    ARGS["clear_loser_replay_buffer"]="false" # force false if replay buffer isn't saved in the first place. 
 fi
 
 
