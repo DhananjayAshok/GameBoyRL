@@ -73,11 +73,27 @@ done
 if [ "$FAILED" = true ]; then usage; fi
 if [[ "${ARGS["model_dir"]}" != "none" ]]; then
     model_save_path="$storage_dir/models/${ARGS["model_dir"]}/"
-    rm -rf model_save_path/* # clear the model save path to ensure we don't have old models lying around.
+    rm -rf $model_save_path/* # clear the model save path to ensure we don't have old models lying around.
 else
     echo "Sweep requires you to specify a --model_dir"
     exit 1
 fi
+
+# Keep only the best
+keep_arg_str=""
+if [[ "${ARGS["replay_buffer_save_folder"]}" != "none" ]]; then
+    keep_arg_str+="--replay_buffer_save_folder $storage_dir/replay_buffers/${ARGS["game"]}/${ARGS["replay_buffer_save_folder"]} "
+    rm -rf $storage_dir/replay_buffers/${ARGS["game"]}/${ARGS["replay_buffer_save_folder"]}/*
+else
+    ARGS["clear_loser_replay_buffer"]="false" # force false if replay buffer isn't saved in the first place. 
+fi
+
+
+keep_arg_str+="--best_k ${ARGS["best_k"]} --model_dir $model_save_path"
+if [[ "${ARGS["clear_loser_replay_buffer"]}" == "true" ]]; then
+    keep_arg_str+=" --clear_loser_replay_buffer"
+fi
+
 
 # Print active variables
 echo "Script: $0 Active variables:"
@@ -106,23 +122,10 @@ for seed in "${SEEDS[@]}"; do
 done
 ARGS["buffer_save_path"]="$true_buffer_save_path"
 
-# Keep only the best
-arg_str=""
-if [[ "${ARGS["replay_buffer_save_folder"]}" != "none" ]]; then
-    arg_str+="--replay_buffer_save_folder $storage_dir/replay_buffers/${ARGS["game"]}/${ARGS["replay_buffer_save_folder"]} "
-else
-    ARGS["clear_loser_replay_buffer"]="false" # force false if replay buffer isn't saved in the first place. 
-fi
-
-
-arg_str+="--best_k ${ARGS["best_k"]} --model_dir $model_save_path"
-if [[ "${ARGS["clear_loser_replay_buffer"]}" == "true" ]]; then
-    arg_str+=" --clear_loser_replay_buffer"
-fi
 
 
 cd cleanrl
-python cleanrl_utils/keep_only_best_models.py $arg_str
+python cleanrl_utils/keep_only_best_models.py $keep_arg_str
 cd ..
 
 

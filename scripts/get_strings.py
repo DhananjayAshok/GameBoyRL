@@ -23,13 +23,7 @@ def depathify(string) -> str:
     :return: the depathified string
     :rtype: str
     """
-    return (
-        string.replace("/", "_")
-        .replace("\\", "_")
-        .replace(":", "_")
-        .replace(" ", "_")
-        .replace(".", "_")
-    )
+    return string.replace("/", "_").replace("\\", "_").replace(" ", "_")
 
 
 class StringFunction(ABC):
