@@ -91,6 +91,7 @@ fi
 
 replay_buffer_save_folder=${ARGS["init_state"]}/$run_name/
 ARGS["latest_replay_buffer_folder"]=$replay_buffer_save_folder
+ARGS["replay_buffer_save_folder"]=$replay_buffer_save_folder
 
 ## Set up functions for iterative training
 
