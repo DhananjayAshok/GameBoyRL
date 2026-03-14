@@ -104,7 +104,7 @@ declare -A ENV_DEFAULTS=(
 
 
 declare -A ALGORITHM_DEFAULTS=(
-    ["timesteps"]=5000000
+    ["timesteps"]=50000
     ["algorithm"]="ppo"
     ["gamma"]="0.99"
     ["seed"]=1
@@ -165,7 +165,7 @@ SWEEP_ESSENTIALS=()
 populate_dict ALL_DEFAULTS SWEEP_DEFAULTS
 populate_array ESSENTIAL_ARGS SWEEP_ESSENTIALS
 populate_dict TRAINING_DEFAULTS SWEEP_DEFAULTS
-SWEEP_DEFAULTS["best_k"]=10
+SWEEP_DEFAULTS["best_k"]=6
 SWEEP_DEFAULTS["clear_loser_replay_buffer"]=true
 
 SWEEP_ARG_KEYS=("${SWEEP_ESSENTIALS[@]}" "${!SWEEP_DEFAULTS[@]}")
