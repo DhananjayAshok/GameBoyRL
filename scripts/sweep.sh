@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# first get the GameBoyWorlds $storage_dir variable to handle video deletion
+source GameBoyWorlds/configs/config.env || { echo "GameBoyWorlds/configs/config.env not found"; exit 1; }
+gameboy_worlds_storage_dir="$storage_dir"
+
 source scripts/utils.sh
 
 # Define Defaults for default_rl.sh
@@ -79,6 +83,8 @@ else
     exit 1
 fi
 
+video_session_dir="$gameboy_worlds_storage_dir/sessions/${ARGS["game"]}/"
+
 # Keep only the best
 keep_arg_str=""
 if [[ "${ARGS["replay_buffer_save_folder"]}" != "none" ]]; then
@@ -89,7 +95,7 @@ else
 fi
 
 
-keep_arg_str+="--best_k ${ARGS["best_k"]} --model_dir $model_save_path"
+keep_arg_str+="--best_k ${ARGS["best_k"]} --model_dir $model_save_path --video_session_dir $video_session_dir"
 if [[ "${ARGS["clear_loser_replay_buffer"]}" == "true" ]]; then
     keep_arg_str+=" --clear_loser_replay_buffer"
 fi
