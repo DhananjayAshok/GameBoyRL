@@ -89,7 +89,7 @@ else
     run_name="iterative_agent"
 fi
 
-replay_buffer_save_folder=${ARGS["init_state"]}/$run_name/
+replay_buffer_save_folder=iterative/${ARGS["init_state"]}/$run_name/
 ARGS["latest_replay_buffer_folder"]=$replay_buffer_save_folder
 ARGS["replay_buffer_save_folder"]=$replay_buffer_save_folder
 
@@ -97,7 +97,7 @@ ARGS["replay_buffer_save_folder"]=$replay_buffer_save_folder
 
 
 prev_buffer_load_path="none"
-log_folder="../$run_name/${ARGS["game"]}/${ARGS["init_state"]}/"
+log_folder="${ARGS["game"]}/iterative/$run_name/${ARGS["init_state"]}/"
 
 function call_agent(){
     local buffer_load_path="$1"
@@ -124,9 +124,9 @@ function train_world_model(){
 ## Execution starts here
 
 if [ "$sweeping" = true ]; then
-    all_buffer_save_paths=${ARGS["init_state"]}/sweep_
+    all_buffer_save_paths=iterative/${ARGS["init_state"]}/sweep_
 else
-    all_buffer_save_paths=${ARGS["init_state"]}/${ARGS["algorithm"]}_agent_
+    all_buffer_save_paths=iterative/${ARGS["init_state"]}/${ARGS["algorithm"]}_agent_
 fi
 
 
