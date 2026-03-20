@@ -121,3 +121,50 @@ class ExecutorReport:
     final_state: Optional[Dict[str, Any]] = None
     outcome: Optional[int] = None
     notes: Optional[str] = None
+    termination_reason: Optional[str] = None
+    """
+    Why execution ended.  Set by the executor's ``_execute`` method.
+
+    Expected values:
+
+    - ``"max_steps"``  — the environment-step budget was exhausted.
+    - ``"terminated"`` — the environment signalled a terminal state.
+    - ``"truncated"``  — the environment signalled truncation.
+    - ``None``         — execution has not yet completed.
+    """
+
+
+@dataclass
+class SimpleReport(ExecutorReport):
+    """
+    Report produced by :class:`~execution.executor.SimpleExecutor`.
+
+    Extends :class:`ExecutorReport` with a log of invalid VLM outputs and
+    convenience read-only accessors.
+
+    :param invalid_steps: List of raw VLM responses (or short error strings)
+        from iterations where the output could not be parsed into a valid action.
+    :type invalid_steps: List[str]
+    """
+
+    invalid_steps: List[str] = field(default_factory=list)
+
+    @property
+    def n_env_steps(self) -> int:
+        """Number of environment steps taken."""
+        return sum(1 for s in self.steps if isinstance(s, EnvironmentStepRecord))
+
+    @property
+    def n_tool_calls(self) -> int:
+        """Number of tool calls made."""
+        return sum(1 for s in self.steps if isinstance(s, ToolCallRecord))
+
+    @property
+    def env_step_records(self) -> List[EnvironmentStepRecord]:
+        """Ordered list of environment step records."""
+        return [s for s in self.steps if isinstance(s, EnvironmentStepRecord)]
+
+    @property
+    def tool_call_records(self) -> List[ToolCallRecord]:
+        """Ordered list of tool call records."""
+        return [s for s in self.steps if isinstance(s, ToolCallRecord)]

@@ -2,7 +2,7 @@ from utils.parameter_handling import load_parameters
 from utils.log_handling import log_warn, log_error, log_info
 from typing import List, Union
 import numpy as np
-import ABC
+from abc import ABC
 from PIL import Image
 from utils.lm_inference import (
     OpenAIModel,
@@ -62,13 +62,13 @@ class VLM:
         self._vlm_kind = vlm_kind
         self._vlm = None
         if self._vlm_kind == "openai":
-            self._vlm = OpenAIModel(model_name=self._model_name)
+            self._vlm = OpenAIModel(model=self._model_name)
         elif self._vlm_kind == "openrouter":
-            self._vlm = OpenRouterModel(model_name=self._model_name)
+            self._vlm = OpenRouterModel(model=self._model_name)
         elif self._vlm_kind == "huggingface":
-            self._vlm = HuggingFaceModel(model_name=self._model_name, model_kind="vlm")
+            self._vlm = HuggingFaceModel(model=self._model_name, model_kind="vlm")
         elif self._vlm_kind == "anthropic":
-            self._vlm = AnthropicModel(model_name=self._model_name)
+            self._vlm = AnthropicModel(model=self._model_name)
         else:
             raise ValueError(f"Invalid VLM kind: {self._vlm_kind}")
 
@@ -107,13 +107,14 @@ class VLM:
 class NamedVLM(VLM, ABC):
     NAME = None
 
-    def __init__(self, name: str, parameters: dict = None):
+    def __init__(self, parameters: dict = None):
         """
-        Initializes the ExecutorVLM with model and kind from project parameters.
+        Initializes the NamedVLM with model and kind from project parameters,
+        using the subclass's ``NAME`` class variable as the parameter prefix.
         """
         parameters = load_parameters(parameters)
-        model_name = parameters[f"{name}_vlm_model"]
-        vlm_kind = parameters[f"{name}_vlm_kind"]
+        model_name = parameters[f"{self.NAME}_vlm_model"]
+        vlm_kind = parameters[f"{self.NAME}_vlm_kind"]
         super().__init__(model_name=model_name, vlm_kind=vlm_kind)
 
 

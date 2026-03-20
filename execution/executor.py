@@ -40,7 +40,7 @@ from typing import Any, Dict, List, Optional, Type
 from gameboy_worlds.interface import Environment, HighLevelAction
 
 from execution.executor_action import ExecutorAction
-from execution.report import EnvironmentStepRecord, ExecutorReport, ToolCallRecord
+from execution.report import EnvironmentStepRecord, ExecutorReport, SimpleReport, ToolCallRecord
 from utils import load_parameters
 from utils.vlm import ExecutorVLM
 
@@ -104,20 +104,36 @@ class Executor(ABC):
         self._max_steps = max_steps
         self._max_tool_calls = max_tool_calls
         self._parameters = load_parameters(parameters)
+        self._vlm = ExecutorVLM(parameters=self._parameters)
 
-        self.report = ExecutorReport(
+        self.report = self._make_report(task, kwargs, max_steps, max_tool_calls)
+
+        outcome = self._execute()
+
+        self.report.outcome = outcome
+        self.report.final_state = self._get_state()
+
+    def _make_report(
+        self,
+        task: str,
+        init_kwargs: dict,
+        max_steps: int,
+        max_tool_calls: int,
+    ) -> ExecutorReport:
+        """
+        Factory for the report object.  Override in subclasses to return a
+        different :class:`~execution.report.ExecutorReport` subclass.
+
+        Called by :meth:`__init__` before :meth:`_execute` runs, so
+        ``self._get_state()`` is already available.
+        """
+        return ExecutorReport(
             task=task,
-            init_kwargs=kwargs,
+            init_kwargs=init_kwargs,
             max_steps=max_steps,
             max_tool_calls=max_tool_calls,
             initial_state=self._get_state(),
         )
-
-        outcome = self._execute()
-        self._vlm = ExecutorVLM(parameters=self._parameters)
-
-        self.report.outcome = outcome
-        self.report.final_state = self._get_state()
 
     # ------------------------------------------------------------------
     # Abstract interface — subclasses must implement
@@ -219,3 +235,239 @@ class Executor(ABC):
         :rtype: Dict[Type[HighLevelAction], str]
         """
         return self._env.get_action_strings(return_all=return_all)
+
+
+class SimpleExecutor(Executor):
+    """
+    A straightforward VLM-driven executor.
+
+    At each iteration the executor:
+
+    1. Builds a text + image prompt from the current game frame, the task, the
+       available high-level actions, the available tools (omitted once the tool
+       budget is exhausted), and the result of the previous tool call (or an
+       error message if the last response was unparseable).
+    2. Calls the VLM and parses the structured response::
+
+           Reasoning: <free text>
+           Action: <single action string>
+           [STOP]
+
+    3. Dispatches the action:
+
+       - **Valid tool call** (budget not yet exhausted): executes the tool,
+         forwards its result to the next prompt, does **not** count as an
+         environment step.
+       - **Valid env action**: steps the environment, increments the env-step
+         counter.
+       - **Unparseable or unrecognised**: logs to :attr:`~execution.report.SimpleReport.invalid_steps`,
+         passes an error message into the next prompt, and counts as an
+         environment step to prevent infinite loops.
+
+    Terminates early when the environment signals ``terminated`` or
+    ``truncated``, recording the reason in
+    :attr:`~execution.report.ExecutorReport.termination_reason`.
+
+    .. warning:: **Subclass initialisation order**
+
+        Per :class:`Executor` contract, call ``super().__init__()`` **last**.
+    """
+
+    def _make_report(self, task, init_kwargs, max_steps, max_tool_calls) -> SimpleReport:
+        return SimpleReport(
+            task=task,
+            init_kwargs=init_kwargs,
+            max_steps=max_steps,
+            max_tool_calls=max_tool_calls,
+            initial_state=self._get_state(),
+        )
+
+    # ------------------------------------------------------------------
+    # Abstract method implementations
+    # ------------------------------------------------------------------
+
+    def _take_action(self, action_class: Type[HighLevelAction], **kwargs) -> EnvironmentStepRecord:
+        """
+        Execute a high-level action, record it, and stash the env's
+        ``terminated`` / ``truncated`` flags on ``self`` for :meth:`_execute`
+        to inspect.
+        """
+        obs, reward, terminated, truncated, info = self._env.step_high_level_action(
+            action_class, **kwargs
+        )
+        if "previous_action_details" in info.get("core", {}):
+            _, _, transition_states, action_success, _ = info["core"]["previous_action_details"]
+        else:
+            transition_states, action_success = [], -1
+
+        record = EnvironmentStepRecord(
+            action_class=action_class,
+            kwargs=kwargs,
+            transition_states=transition_states,
+            action_success=action_success,
+        )
+        self.report.steps.append(record)
+        self._last_terminated = terminated
+        self._last_truncated = truncated
+        return record
+
+    def _execute(self) -> int:
+        self._last_terminated = False
+        self._last_truncated = False
+
+        tool_call_message: Optional[str] = None
+        error_message: Optional[str] = None
+        n_env_steps: int = 0
+
+        while n_env_steps < self._max_steps:
+            state = self._get_state()
+            frame = state["core"]["current_frame"]
+
+            n_tool_calls = sum(1 for s in self.report.steps if isinstance(s, ToolCallRecord))
+            tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
+
+            prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
+
+            response = self._vlm.infer(
+                texts=prompt,
+                images=[frame],
+                max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
+            )
+
+            # ---- parse structured response --------------------------------
+            action_str = self._parse_action(response)
+
+            if action_str is None:
+                error_message = (
+                    "Your previous response could not be parsed. "
+                    "You must end your response with:\n"
+                    "  Action: <action>\n"
+                    "  [STOP]"
+                )
+                tool_call_message = None
+                n_env_steps += 1
+                self.report.invalid_steps.append(response)
+                continue
+
+            # ---- try tool call (if budget not exhausted) ------------------
+            if not tool_calls_exceeded:
+                tool_result = self._try_parse_tool_call(action_str)
+                if tool_result is not None:
+                    tool_class, tool_kwargs = tool_result
+                    record = self._use_tool(tool_class, **tool_kwargs)
+                    tool_call_message = str(record.result)
+                    error_message = None
+                    continue  # tool calls do not count as env steps
+
+            # ---- try env action -------------------------------------------
+            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
+            if action_class is not None:
+                self._take_action(action_class, **(action_kwargs or {}))
+                tool_call_message = None
+                error_message = None
+                n_env_steps += 1
+
+                if self._last_terminated:
+                    self.report.termination_reason = "terminated"
+                    return 1
+                if self._last_truncated:
+                    self.report.termination_reason = "truncated"
+                    return 2
+            else:
+                # Parseable format but unrecognised action string
+                error_message = (
+                    f"'{action_str}' is not a recognised action. "
+                    "Choose exactly one from the listed actions."
+                )
+                tool_call_message = None
+                n_env_steps += 1
+                self.report.invalid_steps.append(
+                    f"Unrecognised action string: {action_str!r}"
+                )
+
+        self.report.termination_reason = "max_steps"
+        return 0
+
+    # ------------------------------------------------------------------
+    # Prompt helpers
+    # ------------------------------------------------------------------
+
+    def _build_prompt(
+        self,
+        tool_call_message: Optional[str],
+        error_message: Optional[str],
+        tool_calls_exceeded: bool,
+    ) -> str:
+        """Construct the text portion of the VLM prompt for one iteration."""
+        lines: List[str] = []
+
+        lines.append(f"Task: {self._task}")
+        lines.append("")
+        lines.append(
+            "You are playing a GameBoy game. The current screen is shown in the image."
+        )
+        lines.append("")
+
+        if error_message is not None:
+            lines.append(f"[ERROR] {error_message}")
+            lines.append("")
+
+        if tool_call_message is not None:
+            lines.append(f"Tool result: {tool_call_message}")
+            lines.append("")
+
+        # Available env actions
+        action_strings = self._get_action_strings()
+        lines.append("Available environment actions:")
+        for action_str in action_strings.values():
+            lines.append(f"  {action_str}")
+        lines.append("")
+
+        # Available tools (suppressed once budget is exhausted)
+        if not tool_calls_exceeded and self.available_tools:
+            lines.append(
+                "Available tool calls (do not advance the game, "
+                f"{self._max_tool_calls} total budget):"
+            )
+            for tool_class in self.available_tools:
+                lines.append(f"  {tool_class.verbalize()}")
+            lines.append("")
+
+        lines.append(
+            "Reason about the best next action, then respond in exactly this format:"
+        )
+        lines.append("Reasoning: <your reasoning>")
+        if not tool_calls_exceeded and self.available_tools:
+            lines.append("Action: <one environment action OR one tool call>")
+        else:
+            lines.append("Action: <one environment action>")
+        lines.append("[STOP]")
+
+        return "\n".join(lines)
+
+    def _parse_action(self, response: str) -> Optional[str]:
+        """Extract the action string from a structured VLM response."""
+        for line in response.splitlines():
+            stripped = line.strip()
+            if stripped.lower().startswith("action:"):
+                action_str = stripped[len("action:"):].strip()
+                action_str = action_str.replace("[STOP]", "").strip()
+                return action_str if action_str else None
+        return None
+
+    def _try_parse_tool_call(
+        self, action_str: str
+    ) -> Optional[tuple]:
+        """
+        Try to parse ``action_str`` as a call to one of :attr:`available_tools`.
+
+        :return: ``(tool_class, kwargs)`` on success, ``None`` otherwise.
+        """
+        for tool_class in self.available_tools:
+            try:
+                kwargs = tool_class.string_to_kwargs(action_str)
+                if kwargs is not None:
+                    return tool_class, kwargs
+            except Exception:
+                continue
+        return None
