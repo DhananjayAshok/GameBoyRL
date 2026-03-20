@@ -125,6 +125,10 @@ class OCRVLM(NamedVLM):
     NAME = "ocr"
 
 
+class ObjectDetectionVLM(NamedVLM):
+    NAME = "object_detection"
+
+
 def merge_ocr_strings(strings, min_overlap=3):
     """
     Merges a list of strings by removing subsets and combining overlapping fragments.
@@ -223,7 +227,7 @@ def ocr(
     max_new_tokens = parameters["ocr_max_new_tokens"]
     texts = [text_prompt] * len(images)
     if vlm is None:
-        vlm = OCRVLM()
+        vlm = OCRVLM(parameters=parameters)
     ocred = vlm.infer(texts=texts, images=images, max_new_tokens=max_new_tokens)
     for i, res in enumerate(ocred):
         if res.strip().lower() == "none":
@@ -235,3 +239,83 @@ def ocr(
     if do_merge:
         ocred = merge_ocr_strings(ocred)
     return ocred
+
+
+def object_detection(
+    description: str,
+    images: List[np.ndarray],
+    text_prompt: str = None,
+    model: VLM = None,
+    parameters: dict = None,
+) -> List[bool]:
+    """
+    Performs object detection on the given images with the given texts.
+
+    :param images: List of images that may contain the object described in texts
+    :type images: List[np.ndarray]
+    :param text_prompt: A prompt with the textual description of the object to detect, and that requests a Yes/No answer.
+    :type text_prompt: str
+    :return: List of booleans indicating whether the object was detected in each image.
+    :rtype: List[bool]
+    """
+    if text_prompt is None:
+        text_prompt = f"""You are playing a gameboy game and are given a screen capture of the game. 
+        Your job is to locate the target that best fits the description `{description}`
+
+        Do you see the target described? Answer with a single sentence and then [YES] or [NO]
+        [STOP]
+        Output:
+        """
+    if model is None:
+        model = ObjectDetectionVLM(parameters=parameters)
+    outputs = model.infer(
+        texts=[text_prompt for _ in images],
+        images=[[image] for image in images],
+        max_new_tokens=60,
+    )
+    founds = []
+    for i, output in enumerate(outputs):
+        if "yes" in output.lower():
+            founds.append(True)
+        else:
+            founds.append(False)
+    return founds
+
+
+def identify_matches(
+    description: str,
+    screens: List[np.ndarray],
+    reference: Image.Image,
+    text_prompt: str = None,
+    model: VLM = None,
+    parameters: dict = None,
+) -> List[bool]:
+    """
+    Identifies which screens match the given reference image based on the description.
+    Args:
+        description: A textual description of the target object.
+        screens: A list of screen images in numpy array format (H x W x C).
+        reference: A PIL Image of the reference object.
+        text_prompt: Optional prompt to guide the VLM that requests a yes/ no answer.
+        model: Optional VLM instance to use for inference. If None, uses the object detection VLM.
+
+    Returns:
+        A list of booleans indicating whether each screen contains the target object.
+    """
+    reference = convert_numpy_greyscale_to_pillow(reference)
+    if text_prompt is None:
+        text_prompt = f"The target, described as {description} is shown as reference in Picture 1. Does Picture 2 contain the object from Picture 1 in it? Answer in the following format: \nExplanation: <briefly describe what is in Picture 2, with reference to the image in Picture 1>\nAnswer: <Yes or No>[STOP]"
+    texts = [text_prompt for _ in screens]
+    images = []
+    for screen in screens:
+        images.append([reference, screen])
+    if model is None:
+        model = ObjectDetectionVLM(parameters=parameters)
+    outputs = model.infer(texts=texts, images=images, max_new_tokens=120)
+    results = []
+    for output in outputs:
+        if "yes" in output.lower():
+            results.append(True)
+        else:
+            results.append(False)
+    return results
