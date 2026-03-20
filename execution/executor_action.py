@@ -1,16 +1,13 @@
-from gameboy_worlds.interface import HighLevelAction
-
 from utils import (
     object_detection,
     identify_matches,
 )
-from typing import Tuple, List, Dict, Any
+from typing import Tuple, List, Dict, Any, Optional
 import numpy as np
-from PIL import Image
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 
-class ExecutorAction(HighLevelAction):
+class ExecutorAction(ABC):
     """
     Passive (non-interactive) actions that can be called on by an Executor to understand the game state.
     Will often include VLM inference to understand the game screen in some manner.
@@ -19,29 +16,14 @@ class ExecutorAction(HighLevelAction):
     If you want to implement an action that does that, you probably want to be doing that in an Executor class instead.
     """
 
-    def parameters_to_space(self, **kwargs):
-        raise NotImplementedError(
-            f"ExecutorAction does not implement parameters_to_space. Ensure that it is not being treated as a typical HighLevelAction."
-        )
-
-    def space_to_parameters(self, **kwargs):
-        raise NotImplementedError(
-            f"ExecutorAction does not implement space_to_parameters. Ensure that it is not being treated as a typical HighLevelAction."
-        )
-
-    def get_action_space(self):
-        raise NotImplementedError(
-            f"ExecutorAction does not implement get_action_space. Ensure that it is not being treated as a typical HighLevelAction."
-        )
-
     @abstractmethod
-    def _execute(self, **kwargs) -> Tuple[Dict[str, Any], int]:
+    def _execute(self, info: Dict[str, Dict[str, Any]], **kwargs) -> Tuple[Dict[str, Any], int]:
         """
         Executes the specified executor action.
-        Does not check for validity
-        Development Note: Unlike HighLevelAction, ExecutorAction does NOT call emulator.step.
-        If you want to implement an action that does that, you probably want to be doing that in an Executor class instead.
 
+        :param info: Full state information from the environment, as returned by
+            :meth:`~gameboy_worlds.interface.Environment.get_info`.
+        :type info: Dict[str, Dict[str, Any]]
         :param kwargs: Additional arguments required for the specific executor action.
         :return: A tuple containing:
 
@@ -50,6 +32,86 @@ class ExecutorAction(HighLevelAction):
         :rtype: Tuple[Dict[str, Any], int]
         """
         raise NotImplementedError
+
+    def is_valid(self, **kwargs) -> bool:
+        """
+        Validates the arguments before execution. Returns ``True`` by default.
+        Subclasses may override to reject invalid inputs early.
+
+        :return: Whether the provided kwargs are valid for this action.
+        :rtype: bool
+        """
+        return True
+
+    @classmethod
+    @abstractmethod
+    def verbalize(cls) -> str:
+        """
+        Return a human-readable string that fully describes this tool call for
+        inclusion in a VLM prompt.
+
+        .. warning:: **Format contract**
+
+            The string returned here is the **exact format** the VLM is expected
+            to reproduce when it decides to invoke this tool.  :meth:`string_to_kwargs`
+            must be able to parse every string that ``verbalize`` declares as valid.
+            If the two are out of sync the executor will silently drop tool calls.
+
+        A good verbalization includes:
+
+        - The tool name (use a stable, unambiguous identifier).
+        - Every parameter name, its type, and a brief description.
+        - One concrete example in the exact output format.
+
+        Example return value::
+
+            "locate(target: str) — find a named object on the current screen.\\n"
+            "  target: the object to search for (e.g. 'pokémon center door').\\n"
+            "  Example: locate(target=pokémon center door)"
+
+        :return: Prompt-ready description of the tool and its call syntax.
+        :rtype: str
+        """
+        raise NotImplementedError
+
+    @classmethod
+    @abstractmethod
+    def string_to_kwargs(cls, action_str: str) -> Dict[str, Any]:
+        """
+        Parse a tool-call string (in the format declared by :meth:`verbalize`)
+        into a ``kwargs`` dictionary suitable for passing to :meth:`execute`.
+
+        .. warning:: **Must mirror** :meth:`verbalize`
+
+            This method is the inverse of the call syntax shown in
+            :meth:`verbalize`.  Any format change in ``verbalize`` must be
+            reflected here, and vice versa.  The executor relies on this
+            round-trip to dispatch tool calls produced by the VLM.
+
+        :param action_str: Raw action string as output by the VLM, matching the
+            format advertised in :meth:`verbalize`.
+        :type action_str: str
+        :return: Keyword arguments to forward to :meth:`execute`.
+        :rtype: Dict[str, Any]
+        """
+        raise NotImplementedError
+
+    def execute(self, info: Dict[str, Dict[str, Any]], **kwargs) -> Tuple[Optional[Dict[str, Any]], Optional[int]]:
+        """
+        Public entry point. Validates arguments then delegates to :meth:`_execute`.
+
+        :param info: Full state information from the environment.
+        :type info: Dict[str, Dict[str, Any]]
+        :param kwargs: Additional arguments forwarded to :meth:`_execute`.
+        :return: A tuple containing:
+
+            - A dictionary with execution return information, or ``None`` if the arguments were invalid.
+            - An integer success code, or ``None`` if the arguments were invalid.
+        :rtype: Tuple[Optional[Dict[str, Any]], Optional[int]]
+        """
+        if not self.is_valid(**kwargs):
+            return None, None
+        return self._execute(info, **kwargs)
 
 
 class LocateAction(ExecutorAction):
@@ -102,7 +164,7 @@ class LocateAction(ExecutorAction):
         coord_strings = [self.coord_to_string(coord) for coord in coords]
         return "[" + ", ".join(coord_strings) + "]"
 
-    def is_valid(self, target: str = None):
+    def is_valid(self, target: str = None, **kwargs) -> bool:
         if target is not None:
             if not isinstance(target, str):
                 return False
@@ -149,16 +211,23 @@ class LocateAction(ExecutorAction):
     ) -> Tuple[bool, List[Tuple[int, int]], List[Tuple[int, int]]]:
         """
         Recursively divides the grid cells into quadrants and checks each quadrant for the target.
-        Args:
-            grid_cells: the dict of the subset of grid cells to search over
-            description: description of target
-            image_reference: reference image for the target
 
-        Returns:
-            found (bool): whether the target was found in any of the grid cells at any point.
-            potential_cells (List[Tuple[int, int]]): list of grid cell coordinates that may contain the target. If found is true, this is almost always populated with something
-                                                    The only exception is when the item was found at too high a scan and not found at lower levels (and so too many cells would have been potentials)
-            definitive_cells (List[Tuple[int, int]]): list of grid cell coordinates that, with high confidence, contain the target.
+        :param grid_cells: The dict of the subset of grid cells to search over.
+        :type grid_cells: Dict[Tuple[int, int], np.ndarray]
+        :param description: Description of target.
+        :type description: str
+        :param image_reference: Reference image key for the target.
+        :type image_reference: str
+        :return: A tuple containing:
+
+            - ``found`` (``bool``): whether the target was found in any of the grid cells at any point.
+            - ``potential_cells`` (``List[Tuple[int, int]]``): list of grid cell coordinates that may contain the target.
+              If found is true, this is almost always populated with something.
+              The only exception is when the item was found at too high a scan and not found at lower levels
+              (and so too many cells would have been potentials).
+            - ``definitive_cells`` (``List[Tuple[int, int]]``): list of grid cell coordinates that, with high
+              confidence, contain the target.
+        :rtype: Tuple[bool, List[Tuple[int, int]], List[Tuple[int, int]]]
         """
         quadrant_keys = ["tl", "tr", "bl", "br"]
         if len(grid_cells) == 1:
@@ -225,7 +294,7 @@ class LocateAction(ExecutorAction):
         self, description: str, image_reference: str = None
     ) -> Tuple[Dict[str, Any], int]:
         """
-        Performs the locate action to find the target described by `description` in the current screen.
+        Performs the locate action to find the target described by ``description`` in the current screen.
 
         :param description: Description of the target to locate.
         :type description: str
@@ -235,11 +304,11 @@ class LocateAction(ExecutorAction):
 
             - A dictionary with:
 
-                * `found` (`bool`): whether the target was found in any of the grid cells at any point.
-                * `potential_cells` (`List[Tuple[int, int]]`): list of grid cell coordinates that may contain the target.
-                * `definitive_cells` (`List[Tuple[int, int]]`): list of grid cell coordinates that, with high confidence, contain the target.
-                * `potential_cells_str` (`str`): string representation of potential_cells for logging.
-                * `definitive_cells_str` (`str`): string representation of definitive_cells for logging.
+                * ``found`` (``bool``): whether the target was found in any of the grid cells at any point.
+                * ``potential_cells`` (``List[Tuple[int, int]]``): list of grid cell coordinates that may contain the target.
+                * ``definitive_cells`` (``List[Tuple[int, int]]``): list of grid cell coordinates that, with high confidence, contain the target.
+                * ``potential_cells_str`` (``str``): string representation of potential_cells for logging.
+                * ``definitive_cells_str`` (``str``): string representation of definitive_cells for logging.
 
             - An integer representing the action success code.
         :rtype: Tuple[Dict[str, Any], int]
@@ -275,7 +344,7 @@ class LocateAction(ExecutorAction):
                     action_success = 1
         return ret_dict, action_success
 
-    def _execute(self, target: str):
+    def _execute(self, info: Dict[str, Dict[str, Any]], target: str, **kwargs) -> Tuple[Dict[str, Any], int]:
         if target in self.image_references:
             return self.do_location(
                 description=self.pre_described_options[target],
