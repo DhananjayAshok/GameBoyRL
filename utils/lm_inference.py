@@ -34,6 +34,7 @@ class InferenceModel(ABC):
         texts: list[str],
         max_new_tokens: int,
         images: list[list[Image.Image]] = None,
+        temperature: Optional[float] = None,
     ) -> list[str]:
         """
         Run inference on a batch of text prompts with associated images. Assumes validated inputs
@@ -54,6 +55,7 @@ class InferenceModel(ABC):
         texts: Union[str, list[str]],
         max_new_tokens: int,
         images: Union[list[Image.Image], list[list[Image.Image]]] = None,
+        temperature: Optional[float] = None,
     ) -> Union[str, list[str]]:
         """
         Run inference on a batch of text prompts with associated images.
@@ -122,7 +124,7 @@ class InferenceModel(ABC):
                 )
         else:
             images = [[] for _ in texts]
-        results = self.do_infer(texts, images, max_new_tokens)
+        results = self.do_infer(texts, images, max_new_tokens, temperature=temperature)
         if passed_in_str:
             return results[0]
         else:
@@ -244,7 +246,7 @@ class APIModel(InferenceModel, ABC):
         pass
 
     @abstractmethod
-    def query_client(self, messages: list[dict], max_new_tokens: int) -> Any:
+    def query_client(self, messages: list[dict], max_new_tokens: int, temperature: Optional[float] = None) -> Any:
         """
         Send messages to the API client and return raw response texts.
 
@@ -289,6 +291,7 @@ class APIModel(InferenceModel, ABC):
         texts: list[str],
         images: list[list[Image.Image]],
         max_new_tokens: int,
+        temperature: Optional[float] = None,
     ) -> list[str]:
         """
         Encodes all images to base64, constructs API message dicts, enforces
@@ -300,6 +303,8 @@ class APIModel(InferenceModel, ABC):
         :type images: list[list[Image.Image]]
         :param max_new_tokens: Maximum number of tokens to generate per response.
         :type max_new_tokens: int
+        :param temperature: Sampling temperature. None means model default.
+        :type temperature: Optional[float]
         :return: Post-processed output strings, one per sample.
         :rtype: list[str]
         """
@@ -327,7 +332,7 @@ class APIModel(InferenceModel, ABC):
         ) in (
             inputs
         ):  # there is no pricing advantage for batch_size > 1, so just do them sequentially to allow the caller of this function to pass lists of any size.
-            response = self.query_client([input_message], max_new_tokens)
+            response = self.query_client([input_message], max_new_tokens, temperature=temperature)
             responses.append(response)
         outputs = []
         for response in responses:
@@ -388,7 +393,7 @@ class OpenAIAPIModel(APIModel):
             "image_url": {"url": f"data:image/jpeg;base64,{image}"},
         }
 
-    def query_client(self, messages: list[dict], max_new_tokens: int) -> Any:
+    def query_client(self, messages: list[dict], max_new_tokens: int, temperature: Optional[float] = None) -> Any:
         """
         Send a message to the OpenAI chat completions endpoint.
 
@@ -396,14 +401,15 @@ class OpenAIAPIModel(APIModel):
         :type messages: list[dict]
         :param max_new_tokens: Maximum number of tokens to generate.
         :type max_new_tokens: int
+        :param temperature: Sampling temperature. None means model default.
+        :type temperature: Optional[float]
         :return: The raw API response object.
         :rtype: Any
         """
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            max_tokens=max_new_tokens,
-        )
+        kwargs = dict(model=self.model, messages=messages, max_tokens=max_new_tokens)
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        response = self.client.chat.completions.create(**kwargs)
         return response
 
     def get_output_texts(self, response: Any) -> str:
@@ -519,7 +525,7 @@ class AnthropicModel(APIModel):
             },
         }
 
-    def query_client(self, messages: list[dict], max_new_tokens: int) -> Any:
+    def query_client(self, messages: list[dict], max_new_tokens: int, temperature: Optional[float] = None) -> Any:
         """
         Send a message to the Anthropic messages endpoint.
 
@@ -527,14 +533,15 @@ class AnthropicModel(APIModel):
         :type messages: list[dict]
         :param max_new_tokens: Maximum number of tokens to generate.
         :type max_new_tokens: int
+        :param temperature: Sampling temperature. None means model default.
+        :type temperature: Optional[float]
         :return: The raw API response object.
         :rtype: Any
         """
-        response = self.client.messages.create(
-            model=self.model,
-            messages=messages,
-            max_tokens=max_new_tokens,
-        )
+        kwargs = dict(model=self.model, messages=messages, max_tokens=max_new_tokens)
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        response = self.client.messages.create(**kwargs)
         return response
 
     def get_output_texts(self, response: Any) -> str:
@@ -687,6 +694,7 @@ class HuggingFaceModel(InferenceModel):
         texts: list[str],
         images: list[list[Image.Image]],
         max_new_tokens: int,
+        temperature: Optional[float] = None,
     ) -> list[str]:
         if self.is_defunct:
             log_error(
@@ -710,12 +718,13 @@ class HuggingFaceModel(InferenceModel):
         else:
             tokenizer = processor
         start_index = inputs["input_ids"].shape[1]
+        do_sample = temperature is not None and temperature > 0
         outputs = model.generate(
             **inputs,
             max_new_tokens=max_new_tokens,
-            do_sample=False,
+            do_sample=do_sample,
             top_p=None,
-            temperature=None,
+            temperature=temperature if do_sample else None,
             top_k=None,
             repetition_penalty=1.2,
             stop_strings=["[STOP]"],

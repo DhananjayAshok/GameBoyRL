@@ -80,11 +80,16 @@ class VLM:
             list[Union[Image.Image, np.ndarray]],
             list[list[Union[Image.Image, np.ndarray]]],
         ] = None,
-    ) -> Union[str, list[str]]:
+        temperature: float = None,
+        n_outputs: int = 1,
+    ) -> Union[str, list[str], list[list[str]]]:
         """
         Performs inference using the VLM.
 
-        If a single string is passed, a single string is returned. If a list is passed, a list is returned.
+        If a single string is passed and n_outputs==1, a single string is returned.
+        If a list is passed and n_outputs==1, a list is returned.
+        If n_outputs > 1 and texts is a single string, a list of n_outputs strings is returned.
+        If n_outputs > 1 and texts is a list, a list of n_outputs lists is returned.
 
         :param texts: A single text prompt or a list of text prompts.
         :type texts: str or list[str]
@@ -93,15 +98,36 @@ class VLM:
         :param images: A list of images in either PIL Image or numpy array format (when ``texts`` is a single string) or a list of lists
             of images (when ``texts`` is a list). If None, no images are passed.
         :type images: list[Union[Image.Image, np.ndarray]] or list[list[Union[Image.Image, np.ndarray]]] or None
-        :return: A single output string if ``texts`` was a string, otherwise a list of output strings.
-        :rtype: str or list[str]
+        :param temperature: Sampling temperature. None means model default (greedy).
+        :type temperature: float or None
+        :param n_outputs: Number of independent samples to draw. When > 1 always returns a list.
+        :type n_outputs: int
+        :return: A single output string if ``texts`` was a string and n_outputs==1, a list of
+            output strings if ``texts`` was a list and n_outputs==1, or a list of n_outputs strings
+            if n_outputs > 1 and ``texts`` was a single string, or list of n_outputs lists otherwise.
+        :rtype: str or list[str] or list[list[str]]
         """
         if images is not None:
             treated_images = get_converted_image_list(images)
             images = treated_images
-        return self._vlm.infer(
-            texts=texts, images=images, max_new_tokens=max_new_tokens
-        )
+        if n_outputs == 1:
+            return self._vlm.infer(
+                texts=texts, images=images, max_new_tokens=max_new_tokens, temperature=temperature
+            )
+        # n_outputs > 1: call independently n times and collect results
+        results = []
+        for _ in range(n_outputs):
+            result = self._vlm.infer(
+                texts=texts, images=images, max_new_tokens=max_new_tokens, temperature=temperature
+            )
+            results.append(result)
+        # results is list[str] (if texts was str) or list[list[str]] (if texts was list)
+        # transpose so outer index is output-index, inner is sample-index
+        if isinstance(texts, str):
+            return results  # list of n_outputs strings
+        else:
+            # results[i] is a list[str] for sample i; transpose to list[list[str]] indexed by output
+            return [list(col) for col in zip(*results)]
 
 
 class NamedVLM(VLM, ABC):

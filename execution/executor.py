@@ -44,6 +44,8 @@ from execution.report import EnvironmentStepRecord, ExecutorReport, SimpleReport
 from utils import load_parameters
 from utils.vlm import ExecutorVLM
 
+MAX_CONSECUTIVE_INVALID = 10
+
 
 class Executor(ABC):
     """
@@ -318,6 +320,7 @@ class SimpleExecutor(Executor):
         tool_call_message: Optional[str] = None
         error_message: Optional[str] = None
         n_env_steps: int = 0
+        consecutive_invalid: int = 0
 
         while n_env_steps < self._max_steps:
             state = self._get_state()
@@ -346,7 +349,11 @@ class SimpleExecutor(Executor):
                 )
                 tool_call_message = None
                 n_env_steps += 1
+                consecutive_invalid += 1
                 self.report.invalid_steps.append(response)
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
                 continue
 
             # ---- try tool call (if budget not exhausted) ------------------
@@ -357,6 +364,7 @@ class SimpleExecutor(Executor):
                     record = self._use_tool(tool_class, **tool_kwargs)
                     tool_call_message = str(record.result)
                     error_message = None
+                    consecutive_invalid = 0
                     continue  # tool calls do not count as env steps
 
             # ---- try env action -------------------------------------------
@@ -366,6 +374,7 @@ class SimpleExecutor(Executor):
                 tool_call_message = None
                 error_message = None
                 n_env_steps += 1
+                consecutive_invalid = 0
 
                 if self._last_terminated:
                     self.report.termination_reason = "terminated"
@@ -381,9 +390,13 @@ class SimpleExecutor(Executor):
                 )
                 tool_call_message = None
                 n_env_steps += 1
+                consecutive_invalid += 1
                 self.report.invalid_steps.append(
                     f"Unrecognised action string: {action_str!r}"
                 )
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
 
         self.report.termination_reason = "max_steps"
         return 0
@@ -471,3 +484,1439 @@ class SimpleExecutor(Executor):
             except Exception:
                 continue
         return None
+
+
+class HistoryAwareExecutor(SimpleExecutor):
+    """
+    Extends :class:`SimpleExecutor` by including the last *k* environment steps
+    in each prompt so the VLM can see what it has already tried.
+
+    :param history_k: Number of recent env steps to include in context (default 5).
+    :type history_k: int
+    """
+
+    def __init__(self, env, task, max_steps, max_tool_calls, history_k: int = 5, **kwargs):
+        self._history_k = history_k
+        self._action_history: List[tuple] = []  # (action_str, success_code)
+        super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
+
+    def _take_action(self, action_class, **kwargs) -> EnvironmentStepRecord:
+        record = super()._take_action(action_class, **kwargs)
+        action_str = self._get_action_strings(return_all=True).get(action_class, action_class.__name__)
+        self._action_history.append((action_str, record.action_success))
+        return record
+
+    def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
+        base = super()._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
+        if not self._action_history:
+            return base
+        recent = self._action_history[-self._history_k:]
+        history_lines = ["Recent actions (oldest first):"]
+        for action_str, success in recent:
+            status = "ok" if success == 1 else ("failed" if success == 0 else "unknown")
+            history_lines.append(f"  {action_str}  [{status}]")
+        history_section = "\n".join(history_lines) + "\n"
+        # Insert history before the format instructions (last 4 lines)
+        lines = base.split("\n")
+        # Find the "Reason about" line and insert history before it
+        for i, line in enumerate(lines):
+            if line.startswith("Reason about"):
+                lines.insert(i, "")
+                lines.insert(i, history_section.rstrip())
+                break
+        return "\n".join(lines)
+
+
+class SequencePlannerExecutor(SimpleExecutor):
+    """
+    VLM outputs a comma-separated sequence of actions per call.  The sequence
+    is executed as a committed plan until it is exhausted or an action fails,
+    at which point the VLM is re-queried.
+
+    Response format::
+
+        Reasoning: <text>
+        Action: UP, UP, RIGHT, A
+        [STOP]
+    """
+
+    def _make_report(self, task, init_kwargs, max_steps, max_tool_calls) -> SimpleReport:
+        return SimpleReport(
+            task=task,
+            init_kwargs=init_kwargs,
+            max_steps=max_steps,
+            max_tool_calls=max_tool_calls,
+            initial_state=self._get_state(),
+        )
+
+    def _execute(self) -> int:
+        self._last_terminated = False
+        self._last_truncated = False
+
+        pending_sequence: List[str] = []
+        error_message: Optional[str] = None
+        n_env_steps: int = 0
+        consecutive_invalid: int = 0
+
+        while n_env_steps < self._max_steps:
+            # Re-query when sequence is exhausted
+            if not pending_sequence:
+                state = self._get_state()
+                frame = state["core"]["current_frame"]
+                prompt = self._build_sequence_prompt(error_message)
+                response = self._vlm.infer(
+                    texts=prompt,
+                    images=[frame],
+                    max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
+                )
+                sequence = self._parse_sequence(response)
+                if sequence is None:
+                    error_message = (
+                        "Your previous response could not be parsed. "
+                        "You must end your response with:\n"
+                        "  Action: ACTION1, ACTION2, ...\n"
+                        "  [STOP]"
+                    )
+                    self.report.invalid_steps.append(response)
+                    n_env_steps += 1
+                    consecutive_invalid += 1
+                    if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                        self.report.termination_reason = "max_invalid"
+                        return -1
+                    continue
+                pending_sequence = sequence
+                error_message = None
+
+            # Execute next action in sequence
+            action_str = pending_sequence.pop(0)
+            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
+            if action_class is None:
+                error_message = (
+                    f"'{action_str}' in planned sequence is not a recognised action. "
+                    "Re-plan with valid actions."
+                )
+                self.report.invalid_steps.append(f"Unrecognised sequence action: {action_str!r}")
+                pending_sequence = []  # abort remainder of sequence
+                n_env_steps += 1
+                consecutive_invalid += 1
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
+                continue
+
+            self._take_action(action_class, **(action_kwargs or {}))
+            n_env_steps += 1
+            consecutive_invalid = 0
+
+            if self._last_terminated:
+                self.report.termination_reason = "terminated"
+                return 1
+            if self._last_truncated:
+                self.report.termination_reason = "truncated"
+                return 2
+
+            # If action failed, abort remaining sequence and re-plan
+            last_record = self.report.steps[-1]
+            if isinstance(last_record, EnvironmentStepRecord) and last_record.action_success == 0:
+                error_message = (
+                    f"Action '{action_str}' failed (blocked or invalid). Re-plan."
+                )
+                pending_sequence = []
+
+        self.report.termination_reason = "max_steps"
+        return 0
+
+    def _build_sequence_prompt(self, error_message: Optional[str]) -> str:
+        lines: List[str] = []
+        lines.append(f"Task: {self._task}")
+        lines.append("")
+        lines.append("You are playing a GameBoy game. The current screen is shown in the image.")
+        lines.append("")
+
+        if error_message is not None:
+            lines.append(f"[ERROR] {error_message}")
+            lines.append("")
+
+        action_strings = self._get_action_strings()
+        lines.append("Available environment actions:")
+        for action_str in action_strings.values():
+            lines.append(f"  {action_str}")
+        lines.append("")
+        lines.append(
+            "Plan a short sequence of actions (1–5) to make progress on the task. "
+            "Respond in exactly this format:"
+        )
+        lines.append("Reasoning: <your reasoning>")
+        lines.append("Action: <ACTION1, ACTION2, ...>")
+        lines.append("[STOP]")
+        return "\n".join(lines)
+
+    def _parse_sequence(self, response: str) -> Optional[List[str]]:
+        """Parse a comma-separated action sequence from a structured VLM response."""
+        for line in response.splitlines():
+            stripped = line.strip()
+            if stripped.lower().startswith("action:"):
+                action_part = stripped[len("action:"):].strip()
+                action_part = action_part.replace("[STOP]", "").strip()
+                if not action_part:
+                    return None
+                parts = [p.strip() for p in action_part.split(",") if p.strip()]
+                return parts if parts else None
+        return None
+
+
+class SubgoalDecomposerExecutor(SimpleExecutor):
+    """
+    Before the main loop, asks the VLM to decompose the task into 2-4 ordered
+    subgoals.  The current subgoal is injected into every step prompt, and
+    advances after a configurable number of steps or when the VLM signals completion.
+
+    :param steps_per_subgoal: Env steps before automatically advancing to next subgoal (default 10).
+    :type steps_per_subgoal: int
+    """
+
+    def __init__(self, env, task, max_steps, max_tool_calls, steps_per_subgoal: int = 10, **kwargs):
+        self._steps_per_subgoal = steps_per_subgoal
+        self._subgoals: List[str] = []
+        self._subgoal_idx: int = 0
+        self._steps_on_subgoal: int = 0
+        super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
+
+    def _decompose_task(self) -> List[str]:
+        """Call the VLM once to decompose the task into ordered subgoals."""
+        state = self._get_state()
+        frame = state["core"]["current_frame"]
+        prompt = (
+            f"Task: {self._task}\n\n"
+            "You are playing a GameBoy game. The current screen is shown in the image.\n\n"
+            "Break this task into 2-4 clear, ordered subgoals. "
+            "Each subgoal should be a short action phrase.\n\n"
+            "Respond in exactly this format:\n"
+            "Subgoal 1: <first subgoal>\n"
+            "Subgoal 2: <second subgoal>\n"
+            "... (up to Subgoal 4)\n"
+            "[STOP]"
+        )
+        response = self._vlm.infer(
+            texts=prompt,
+            images=[frame],
+            max_new_tokens=200,
+        )
+        subgoals = []
+        for line in response.splitlines():
+            stripped = line.strip()
+            lower = stripped.lower()
+            if lower.startswith("subgoal"):
+                colon_idx = stripped.find(":")
+                if colon_idx != -1:
+                    sg = stripped[colon_idx + 1:].strip()
+                    if sg:
+                        subgoals.append(sg)
+        return subgoals if subgoals else [self._task]
+
+    def _execute(self) -> int:
+        self._last_terminated = False
+        self._last_truncated = False
+
+        # Decompose before main loop
+        self._subgoals = self._decompose_task()
+        self._subgoal_idx = 0
+        self._steps_on_subgoal = 0
+
+        tool_call_message: Optional[str] = None
+        error_message: Optional[str] = None
+        n_env_steps: int = 0
+        consecutive_invalid: int = 0
+
+        while n_env_steps < self._max_steps:
+            state = self._get_state()
+            frame = state["core"]["current_frame"]
+
+            n_tool_calls = sum(1 for s in self.report.steps if isinstance(s, ToolCallRecord))
+            tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
+
+            prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
+            response = self._vlm.infer(
+                texts=prompt,
+                images=[frame],
+                max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
+            )
+
+            action_str = self._parse_action(response)
+            if action_str is None:
+                error_message = (
+                    "Your previous response could not be parsed. "
+                    "You must end your response with:\n"
+                    "  Action: <action>\n"
+                    "  [STOP]"
+                )
+                tool_call_message = None
+                n_env_steps += 1
+                consecutive_invalid += 1
+                self.report.invalid_steps.append(response)
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
+                continue
+
+            if not tool_calls_exceeded:
+                tool_result = self._try_parse_tool_call(action_str)
+                if tool_result is not None:
+                    tool_class, tool_kwargs = tool_result
+                    record = self._use_tool(tool_class, **tool_kwargs)
+                    tool_call_message = str(record.result)
+                    error_message = None
+                    consecutive_invalid = 0
+                    continue
+
+            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
+            if action_class is not None:
+                self._take_action(action_class, **(action_kwargs or {}))
+                tool_call_message = None
+                error_message = None
+                n_env_steps += 1
+                consecutive_invalid = 0
+                self._steps_on_subgoal += 1
+
+                # Advance subgoal after steps_per_subgoal steps
+                if (self._steps_on_subgoal >= self._steps_per_subgoal
+                        and self._subgoal_idx < len(self._subgoals) - 1):
+                    self._subgoal_idx += 1
+                    self._steps_on_subgoal = 0
+
+                if self._last_terminated:
+                    self.report.termination_reason = "terminated"
+                    return 1
+                if self._last_truncated:
+                    self.report.termination_reason = "truncated"
+                    return 2
+            else:
+                error_message = (
+                    f"'{action_str}' is not a recognised action. "
+                    "Choose exactly one from the listed actions."
+                )
+                tool_call_message = None
+                n_env_steps += 1
+                consecutive_invalid += 1
+                self.report.invalid_steps.append(f"Unrecognised action string: {action_str!r}")
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
+
+        self.report.termination_reason = "max_steps"
+        return 0
+
+    def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
+        base = super()._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
+        if not self._subgoals:
+            return base
+        current_subgoal = self._subgoals[self._subgoal_idx]
+        subgoal_line = (
+            f"Current subgoal ({self._subgoal_idx + 1}/{len(self._subgoals)}): {current_subgoal}"
+        )
+        lines = base.split("\n")
+        # Insert after the task line (line 0)
+        lines.insert(1, subgoal_line)
+        return "\n".join(lines)
+
+
+class ScreenDiffExecutor(SimpleExecutor):
+    """
+    Passes both the previous frame and the current frame to the VLM, prompting
+    it to reason about what changed before choosing an action.  On the very
+    first step only the current frame is available.
+    """
+
+    def __init__(self, env, task, max_steps, max_tool_calls, **kwargs):
+        self._prev_frame = None
+        super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
+
+    def _execute(self) -> int:
+        self._last_terminated = False
+        self._last_truncated = False
+        self._prev_frame = None
+
+        tool_call_message: Optional[str] = None
+        error_message: Optional[str] = None
+        n_env_steps: int = 0
+        consecutive_invalid: int = 0
+
+        while n_env_steps < self._max_steps:
+            state = self._get_state()
+            frame = state["core"]["current_frame"]
+
+            n_tool_calls = sum(1 for s in self.report.steps if isinstance(s, ToolCallRecord))
+            tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
+
+            prompt = self._build_diff_prompt(tool_call_message, error_message, tool_calls_exceeded)
+
+            # Pass [prev, curr] when previous frame exists, else just [curr]
+            if self._prev_frame is not None:
+                images = [self._prev_frame, frame]
+            else:
+                images = [frame]
+
+            response = self._vlm.infer(
+                texts=prompt,
+                images=images,
+                max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
+            )
+
+            action_str = self._parse_action(response)
+            if action_str is None:
+                error_message = (
+                    "Your previous response could not be parsed. "
+                    "You must end your response with:\n"
+                    "  Action: <action>\n"
+                    "  [STOP]"
+                )
+                tool_call_message = None
+                n_env_steps += 1
+                consecutive_invalid += 1
+                self.report.invalid_steps.append(response)
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
+                continue
+
+            if not tool_calls_exceeded:
+                tool_result = self._try_parse_tool_call(action_str)
+                if tool_result is not None:
+                    tool_class, tool_kwargs = tool_result
+                    record = self._use_tool(tool_class, **tool_kwargs)
+                    tool_call_message = str(record.result)
+                    error_message = None
+                    consecutive_invalid = 0
+                    continue
+
+            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
+            if action_class is not None:
+                self._prev_frame = frame
+                self._take_action(action_class, **(action_kwargs or {}))
+                tool_call_message = None
+                error_message = None
+                n_env_steps += 1
+                consecutive_invalid = 0
+
+                if self._last_terminated:
+                    self.report.termination_reason = "terminated"
+                    return 1
+                if self._last_truncated:
+                    self.report.termination_reason = "truncated"
+                    return 2
+            else:
+                error_message = (
+                    f"'{action_str}' is not a recognised action. "
+                    "Choose exactly one from the listed actions."
+                )
+                tool_call_message = None
+                n_env_steps += 1
+                consecutive_invalid += 1
+                self.report.invalid_steps.append(f"Unrecognised action string: {action_str!r}")
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
+
+        self.report.termination_reason = "max_steps"
+        return 0
+
+    def _build_diff_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
+        lines: List[str] = []
+        lines.append(f"Task: {self._task}")
+        lines.append("")
+        if self._prev_frame is not None:
+            lines.append(
+                "You are playing a GameBoy game. "
+                "Image 1 is the PREVIOUS screen, Image 2 is the CURRENT screen. "
+                "Note what changed between frames to understand the effect of your last action."
+            )
+        else:
+            lines.append(
+                "You are playing a GameBoy game. The current screen is shown in the image."
+            )
+        lines.append("")
+
+        if error_message is not None:
+            lines.append(f"[ERROR] {error_message}")
+            lines.append("")
+        if tool_call_message is not None:
+            lines.append(f"Tool result: {tool_call_message}")
+            lines.append("")
+
+        action_strings = self._get_action_strings()
+        lines.append("Available environment actions:")
+        for action_str in action_strings.values():
+            lines.append(f"  {action_str}")
+        lines.append("")
+
+        if not tool_calls_exceeded and self.available_tools:
+            lines.append(
+                f"Available tool calls (do not advance the game, "
+                f"{self._max_tool_calls} total budget):"
+            )
+            for tool_class in self.available_tools:
+                lines.append(f"  {tool_class.verbalize()}")
+            lines.append("")
+
+        lines.append("Reason about the best next action, then respond in exactly this format:")
+        lines.append("Reasoning: <your reasoning>")
+        if not tool_calls_exceeded and self.available_tools:
+            lines.append("Action: <one environment action OR one tool call>")
+        else:
+            lines.append("Action: <one environment action>")
+        lines.append("[STOP]")
+        return "\n".join(lines)
+
+
+class SelfConsistencyExecutor(SimpleExecutor):
+    """
+    Samples the VLM *k* times at a given temperature and takes a majority vote
+    on the chosen action.  Falls back to the first parseable response if there
+    is no majority.
+
+    :param k: Number of samples per decision (default 3).
+    :type k: int
+    :param temperature: Sampling temperature (default 0.7).
+    :type temperature: float
+    """
+
+    def __init__(self, env, task, max_steps, max_tool_calls,
+                 k: int = 3, temperature: float = 0.7, **kwargs):
+        self._k = k
+        self._temperature = temperature
+        super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
+
+    def _execute(self) -> int:
+        self._last_terminated = False
+        self._last_truncated = False
+
+        tool_call_message: Optional[str] = None
+        error_message: Optional[str] = None
+        n_env_steps: int = 0
+        consecutive_invalid: int = 0
+
+        while n_env_steps < self._max_steps:
+            state = self._get_state()
+            frame = state["core"]["current_frame"]
+
+            n_tool_calls = sum(1 for s in self.report.steps if isinstance(s, ToolCallRecord))
+            tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
+
+            prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
+
+            # Sample k responses
+            responses = self._vlm.infer(
+                texts=prompt,
+                images=[frame],
+                max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
+                temperature=self._temperature,
+                n_outputs=self._k,
+            )
+
+            # Parse all action strings and take majority vote
+            action_str = self._majority_vote(responses)
+
+            if action_str is None:
+                error_message = (
+                    "Your previous response could not be parsed. "
+                    "You must end your response with:\n"
+                    "  Action: <action>\n"
+                    "  [STOP]"
+                )
+                tool_call_message = None
+                n_env_steps += 1
+                consecutive_invalid += 1
+                self.report.invalid_steps.append(str(responses))
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
+                continue
+
+            if not tool_calls_exceeded:
+                tool_result = self._try_parse_tool_call(action_str)
+                if tool_result is not None:
+                    tool_class, tool_kwargs = tool_result
+                    record = self._use_tool(tool_class, **tool_kwargs)
+                    tool_call_message = str(record.result)
+                    error_message = None
+                    consecutive_invalid = 0
+                    continue
+
+            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
+            if action_class is not None:
+                self._take_action(action_class, **(action_kwargs or {}))
+                tool_call_message = None
+                error_message = None
+                n_env_steps += 1
+                consecutive_invalid = 0
+
+                if self._last_terminated:
+                    self.report.termination_reason = "terminated"
+                    return 1
+                if self._last_truncated:
+                    self.report.termination_reason = "truncated"
+                    return 2
+            else:
+                error_message = (
+                    f"'{action_str}' is not a recognised action. "
+                    "Choose exactly one from the listed actions."
+                )
+                tool_call_message = None
+                n_env_steps += 1
+                consecutive_invalid += 1
+                self.report.invalid_steps.append(f"Unrecognised action string: {action_str!r}")
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
+
+        self.report.termination_reason = "max_steps"
+        return 0
+
+    def _majority_vote(self, responses: List[str]) -> Optional[str]:
+        """Parse each response and return the most common action string."""
+        parsed = []
+        for r in responses:
+            action = self._parse_action(r)
+            if action is not None:
+                parsed.append(action)
+        if not parsed:
+            return None
+        # Majority vote (case-insensitive key, return original casing of first occurrence)
+        counts: Dict[str, int] = {}
+        first_seen: Dict[str, str] = {}
+        for a in parsed:
+            key = a.lower()
+            counts[key] = counts.get(key, 0) + 1
+            if key not in first_seen:
+                first_seen[key] = a
+        best_key = max(counts, key=lambda k: counts[k])
+        return first_seen[best_key]
+
+
+class ReflectiveExecutor(SimpleExecutor):
+    """
+    Every *reflection_interval* env steps, calls the VLM with the recent action
+    history and current frame to produce a short critique and revised plan.
+    That plan is injected into subsequent step prompts.
+
+    :param reflection_interval: Env steps between reflection calls (default 5).
+    :type reflection_interval: int
+    """
+
+    def __init__(self, env, task, max_steps, max_tool_calls,
+                 reflection_interval: int = 5, **kwargs):
+        self._reflection_interval = reflection_interval
+        self._plan_summary: str = ""
+        self._steps_since_reflection: int = 0
+        self._reflection_action_log: List[str] = []
+        super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
+
+    def _take_action(self, action_class, **kwargs) -> EnvironmentStepRecord:
+        record = super()._take_action(action_class, **kwargs)
+        action_str = self._get_action_strings(return_all=True).get(action_class, action_class.__name__)
+        status = "ok" if record.action_success == 1 else "failed"
+        self._reflection_action_log.append(f"{action_str} [{status}]")
+        self._steps_since_reflection += 1
+        return record
+
+    def _reflect(self, frame) -> None:
+        history_str = ", ".join(self._reflection_action_log) if self._reflection_action_log else "none"
+        self._reflection_action_log = []
+        self._steps_since_reflection = 0
+
+        prior = f"Prior plan: {self._plan_summary}\n\n" if self._plan_summary else ""
+        prompt = (
+            f"Task: {self._task}\n\n"
+            f"{prior}"
+            f"Recent actions taken: {history_str}\n\n"
+            "The current game screen is shown in the image.\n\n"
+            "Briefly critique whether the recent actions made progress toward the task. "
+            "Then state a concise plan for the next few steps (1-2 sentences).\n"
+            "[STOP]"
+        )
+        result = self._vlm.infer(
+            texts=prompt,
+            images=[frame],
+            max_new_tokens=200,
+        )
+        self._plan_summary = result.strip()
+
+    def _execute(self) -> int:
+        self._last_terminated = False
+        self._last_truncated = False
+
+        tool_call_message: Optional[str] = None
+        error_message: Optional[str] = None
+        n_env_steps: int = 0
+        consecutive_invalid: int = 0
+
+        while n_env_steps < self._max_steps:
+            state = self._get_state()
+            frame = state["core"]["current_frame"]
+
+            if self._steps_since_reflection >= self._reflection_interval:
+                self._reflect(frame)
+
+            n_tool_calls = sum(1 for s in self.report.steps if isinstance(s, ToolCallRecord))
+            tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
+
+            prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
+            response = self._vlm.infer(
+                texts=prompt,
+                images=[frame],
+                max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
+            )
+
+            action_str = self._parse_action(response)
+            if action_str is None:
+                error_message = (
+                    "Your previous response could not be parsed. "
+                    "You must end your response with:\n"
+                    "  Action: <action>\n"
+                    "  [STOP]"
+                )
+                tool_call_message = None
+                n_env_steps += 1
+                consecutive_invalid += 1
+                self.report.invalid_steps.append(response)
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
+                continue
+
+            if not tool_calls_exceeded:
+                tool_result = self._try_parse_tool_call(action_str)
+                if tool_result is not None:
+                    tool_class, tool_kwargs = tool_result
+                    record = self._use_tool(tool_class, **tool_kwargs)
+                    tool_call_message = str(record.result)
+                    error_message = None
+                    consecutive_invalid = 0
+                    continue
+
+            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
+            if action_class is not None:
+                self._take_action(action_class, **(action_kwargs or {}))
+                tool_call_message = None
+                error_message = None
+                n_env_steps += 1
+                consecutive_invalid = 0
+
+                if self._last_terminated:
+                    self.report.termination_reason = "terminated"
+                    return 1
+                if self._last_truncated:
+                    self.report.termination_reason = "truncated"
+                    return 2
+            else:
+                error_message = (
+                    f"'{action_str}' is not a recognised action. "
+                    "Choose exactly one from the listed actions."
+                )
+                tool_call_message = None
+                n_env_steps += 1
+                consecutive_invalid += 1
+                self.report.invalid_steps.append(f"Unrecognised action string: {action_str!r}")
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
+
+        self.report.termination_reason = "max_steps"
+        return 0
+
+    def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
+        base = super()._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
+        if not self._plan_summary:
+            return base
+        plan_section = f"Current plan: {self._plan_summary}"
+        lines = base.split("\n")
+        for i, line in enumerate(lines):
+            if line.startswith("Reason about"):
+                lines.insert(i, "")
+                lines.insert(i, plan_section)
+                break
+        return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Second generation executors
+# ---------------------------------------------------------------------------
+
+class SpatialMapExecutor(SimpleExecutor):
+    """
+    After each env step, calls the VLM to describe what is visible in each
+    cardinal direction in compact notation.  The resulting spatial map is
+    injected into subsequent prompts to aid navigation.
+
+    Example map entry: "N: wall, S: open path, E: pokemon centre entrance, W: grass"
+    """
+
+    def __init__(self, env, task, max_steps, max_tool_calls, **kwargs):
+        self._spatial_map: str = ""
+        self._last_action_str: str = ""
+        super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
+
+    def _update_map(self, frame, last_action_str: str) -> None:
+        action_context = f"You just took the action: {last_action_str}.\n\n" if last_action_str else ""
+        prompt = (
+            f"Task: {self._task}\n\n"
+            f"{action_context}"
+            "The current game screen is shown in the image.\n\n"
+            "Describe what you can see in each direction using short phrases. "
+            "Respond in exactly this format:\n"
+            "N: <what is north>\n"
+            "S: <what is south>\n"
+            "E: <what is east>\n"
+            "W: <what is west>\n"
+            "Here: <describe current location>\n"
+            "[STOP]"
+        )
+        result = self._vlm.infer(texts=prompt, images=[frame], max_new_tokens=100)
+        # Extract only the N/S/E/W/Here lines
+        lines = []
+        for line in result.splitlines():
+            s = line.strip()
+            if s.lower().startswith(("n:", "s:", "e:", "w:", "here:")):
+                lines.append(s)
+        if lines:
+            self._spatial_map = " | ".join(lines)
+
+    def _take_action(self, action_class, **kwargs) -> EnvironmentStepRecord:
+        action_str = self._get_action_strings(return_all=True).get(action_class, action_class.__name__)
+        self._last_action_str = action_str
+        return super()._take_action(action_class, **kwargs)
+
+    def _execute(self) -> int:
+        self._last_terminated = False
+        self._last_truncated = False
+        self._spatial_map = ""
+        self._last_action_str = ""
+
+        tool_call_message: Optional[str] = None
+        error_message: Optional[str] = None
+        n_env_steps: int = 0
+        consecutive_invalid: int = 0
+
+        while n_env_steps < self._max_steps:
+            state = self._get_state()
+            frame = state["core"]["current_frame"]
+
+            # Update map after every env step (not on tool calls)
+            if n_env_steps > 0 or not self._spatial_map:
+                self._update_map(frame, self._last_action_str)
+
+            n_tool_calls = sum(1 for s in self.report.steps if isinstance(s, ToolCallRecord))
+            tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
+
+            prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
+            response = self._vlm.infer(
+                texts=prompt, images=[frame],
+                max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
+            )
+
+            action_str = self._parse_action(response)
+            if action_str is None:
+                error_message = (
+                    "Your previous response could not be parsed. "
+                    "You must end your response with:\n  Action: <action>\n  [STOP]"
+                )
+                tool_call_message = None
+                n_env_steps += 1
+                consecutive_invalid += 1
+                self.report.invalid_steps.append(response)
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
+                continue
+
+            if not tool_calls_exceeded:
+                tool_result = self._try_parse_tool_call(action_str)
+                if tool_result is not None:
+                    tool_class, tool_kwargs = tool_result
+                    record = self._use_tool(tool_class, **tool_kwargs)
+                    tool_call_message = str(record.result)
+                    error_message = None
+                    consecutive_invalid = 0
+                    continue
+
+            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
+            if action_class is not None:
+                self._take_action(action_class, **(action_kwargs or {}))
+                tool_call_message = None
+                error_message = None
+                n_env_steps += 1
+                consecutive_invalid = 0
+                if self._last_terminated:
+                    self.report.termination_reason = "terminated"
+                    return 1
+                if self._last_truncated:
+                    self.report.termination_reason = "truncated"
+                    return 2
+            else:
+                error_message = (
+                    f"'{action_str}' is not a recognised action. "
+                    "Choose exactly one from the listed actions."
+                )
+                tool_call_message = None
+                n_env_steps += 1
+                consecutive_invalid += 1
+                self.report.invalid_steps.append(f"Unrecognised action string: {action_str!r}")
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
+
+        self.report.termination_reason = "max_steps"
+        return 0
+
+    def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
+        base = super()._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
+        if not self._spatial_map:
+            return base
+        map_section = f"Spatial map: {self._spatial_map}"
+        lines = base.split("\n")
+        for i, line in enumerate(lines):
+            if line.startswith("Reason about"):
+                lines.insert(i, "")
+                lines.insert(i, map_section)
+                break
+        return "\n".join(lines)
+
+
+class ConfidenceGatedExecutor(SimpleExecutor):
+    """
+    Asks the VLM to also output a confidence score 1-5 with each action.
+    If the score is at or below *low_confidence_threshold*, the VLM is
+    re-queried once with an explicit "think harder" instruction before
+    the action is executed.
+
+    Response format::
+
+        Reasoning: <text>
+        Confidence: <1-5>
+        Action: <action>
+        [STOP]
+
+    :param low_confidence_threshold: Re-query if confidence ≤ this value (default 2).
+    :type low_confidence_threshold: int
+    """
+
+    def __init__(self, env, task, max_steps, max_tool_calls,
+                 low_confidence_threshold: int = 2, **kwargs):
+        self._low_confidence_threshold = low_confidence_threshold
+        super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
+
+    def _parse_confidence(self, response: str) -> Optional[int]:
+        for line in response.splitlines():
+            stripped = line.strip()
+            if stripped.lower().startswith("confidence:"):
+                val = stripped[len("confidence:"):].strip()
+                for ch in val:
+                    if ch.isdigit() and 1 <= int(ch) <= 5:
+                        return int(ch)
+        return None
+
+    def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
+        base = super()._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
+        # Replace the format instructions to include Confidence line
+        lines = base.split("\n")
+        for i, line in enumerate(lines):
+            if line.strip() == "Reasoning: <your reasoning>":
+                # Insert Confidence line after Reasoning
+                if i + 1 < len(lines) and lines[i + 1].startswith("Action:"):
+                    lines.insert(i + 1, "Confidence: <1-5 how confident you are this is the right action>")
+                break
+        return "\n".join(lines)
+
+    def _build_rethink_prompt(self, original_response: str, frame_context: str) -> str:
+        return (
+            f"{frame_context}\n\n"
+            f"Your previous response had low confidence:\n{original_response}\n\n"
+            "Think more carefully. What are you missing? Reconsider all options, "
+            "then provide your final answer with higher confidence if possible.\n"
+            "Reasoning: <your revised reasoning>\n"
+            "Confidence: <1-5>\n"
+            "Action: <one environment action>\n"
+            "[STOP]"
+        )
+
+    def _execute(self) -> int:
+        self._last_terminated = False
+        self._last_truncated = False
+
+        tool_call_message: Optional[str] = None
+        error_message: Optional[str] = None
+        n_env_steps: int = 0
+        consecutive_invalid: int = 0
+
+        while n_env_steps < self._max_steps:
+            state = self._get_state()
+            frame = state["core"]["current_frame"]
+
+            n_tool_calls = sum(1 for s in self.report.steps if isinstance(s, ToolCallRecord))
+            tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
+
+            prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
+            response = self._vlm.infer(
+                texts=prompt, images=[frame],
+                max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
+            )
+
+            # Re-query if confidence is low
+            confidence = self._parse_confidence(response)
+            if confidence is not None and confidence <= self._low_confidence_threshold:
+                rethink_prompt = self._build_rethink_prompt(response, prompt)
+                response = self._vlm.infer(
+                    texts=rethink_prompt, images=[frame],
+                    max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
+                )
+
+            action_str = self._parse_action(response)
+            if action_str is None:
+                error_message = (
+                    "Your previous response could not be parsed. "
+                    "You must end your response with:\n  Action: <action>\n  [STOP]"
+                )
+                tool_call_message = None
+                n_env_steps += 1
+                consecutive_invalid += 1
+                self.report.invalid_steps.append(response)
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
+                continue
+
+            if not tool_calls_exceeded:
+                tool_result = self._try_parse_tool_call(action_str)
+                if tool_result is not None:
+                    tool_class, tool_kwargs = tool_result
+                    record = self._use_tool(tool_class, **tool_kwargs)
+                    tool_call_message = str(record.result)
+                    error_message = None
+                    consecutive_invalid = 0
+                    continue
+
+            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
+            if action_class is not None:
+                self._take_action(action_class, **(action_kwargs or {}))
+                tool_call_message = None
+                error_message = None
+                n_env_steps += 1
+                consecutive_invalid = 0
+                if self._last_terminated:
+                    self.report.termination_reason = "terminated"
+                    return 1
+                if self._last_truncated:
+                    self.report.termination_reason = "truncated"
+                    return 2
+            else:
+                error_message = (
+                    f"'{action_str}' is not a recognised action. "
+                    "Choose exactly one from the listed actions."
+                )
+                tool_call_message = None
+                n_env_steps += 1
+                consecutive_invalid += 1
+                self.report.invalid_steps.append(f"Unrecognised action string: {action_str!r}")
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
+
+        self.report.termination_reason = "max_steps"
+        return 0
+
+
+# ---------------------------------------------------------------------------
+# Third generation executors
+# ---------------------------------------------------------------------------
+
+class ActionValueEstimatorExecutor(SimpleExecutor):
+    """
+    Instead of asking the VLM to directly choose an action, this executor asks
+    it to score every available action on a 1-5 scale, then automatically
+    selects the highest-scored one.  Ties are broken by order in the list.
+
+    This forces systematic evaluation of all options rather than anchoring on
+    the first plausible action that comes to mind.
+
+    Score prompt response format::
+
+        <action_string>: <1-5>
+        <action_string>: <1-5>
+        ...
+        [STOP]
+    """
+
+    def _score_actions(self, frame, error_message: Optional[str]) -> Optional[str]:
+        """Ask VLM to score each available action. Returns best action string or None."""
+        action_strings = self._get_action_strings()
+        if not action_strings:
+            return None
+
+        action_list = "\n".join(f"  {s}" for s in action_strings.values())
+        error_block = f"[ERROR] {error_message}\n\n" if error_message else ""
+        prompt = (
+            f"Task: {self._task}\n\n"
+            f"{error_block}"
+            "You are playing a GameBoy game. The current screen is shown in the image.\n\n"
+            "Score each available action on how useful it would be RIGHT NOW "
+            "for making progress toward the task (1=useless, 5=very useful).\n\n"
+            f"Actions:\n{action_list}\n\n"
+            "Respond with one line per action in exactly this format:\n"
+            "<action>: <score>\n"
+            "...\n"
+            "[STOP]"
+        )
+        response = self._vlm.infer(texts=prompt, images=[frame], max_new_tokens=300)
+
+        # Parse scores
+        best_score = -1
+        best_action_str = None
+        for line in response.splitlines():
+            stripped = line.strip()
+            if ":" not in stripped:
+                continue
+            # Find last colon to split action from score
+            last_colon = stripped.rfind(":")
+            action_part = stripped[:last_colon].strip()
+            score_part = stripped[last_colon + 1:].strip()
+            # Parse score digit
+            score = None
+            for ch in score_part:
+                if ch.isdigit():
+                    score = int(ch)
+                    break
+            if score is None:
+                continue
+            if score > best_score:
+                best_score = score
+                best_action_str = action_part
+
+        return best_action_str
+
+    def _execute(self) -> int:
+        self._last_terminated = False
+        self._last_truncated = False
+
+        error_message: Optional[str] = None
+        n_env_steps: int = 0
+        consecutive_invalid: int = 0
+
+        while n_env_steps < self._max_steps:
+            state = self._get_state()
+            frame = state["core"]["current_frame"]
+
+            action_str = self._score_actions(frame, error_message)
+
+            if action_str is None:
+                error_message = "Could not determine a valid action from scoring. Try again."
+                n_env_steps += 1
+                consecutive_invalid += 1
+                self.report.invalid_steps.append("Failed to parse action scores")
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
+                continue
+
+            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
+            if action_class is not None:
+                self._take_action(action_class, **(action_kwargs or {}))
+                error_message = None
+                n_env_steps += 1
+                consecutive_invalid = 0
+                if self._last_terminated:
+                    self.report.termination_reason = "terminated"
+                    return 1
+                if self._last_truncated:
+                    self.report.termination_reason = "truncated"
+                    return 2
+            else:
+                error_message = (
+                    f"Highest-scored action '{action_str}' is not a recognised action string. "
+                    "Re-score using exact action strings from the list."
+                )
+                n_env_steps += 1
+                consecutive_invalid += 1
+                self.report.invalid_steps.append(f"Unrecognised scored action: {action_str!r}")
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
+
+        self.report.termination_reason = "max_steps"
+        return 0
+
+
+class BeliefStateExecutor(SimpleExecutor):
+    """
+    Maintains a structured belief state about the game world as a set of
+    key-value facts (not prose).  After each env step the VLM updates the
+    belief state based on the new frame.  The belief state is injected into
+    every step prompt.
+
+    Example belief state::
+
+        location: outside Pokemon Centre
+        obstacles: wall to the north, path to the south
+        goal_proximity: very close
+        last_action_result: moved south successfully
+    """
+
+    def __init__(self, env, task, max_steps, max_tool_calls, **kwargs):
+        self._belief_state: str = ""
+        self._last_action_str: str = ""
+        super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
+
+    def _update_belief(self, frame, last_action_str: str) -> None:
+        prior = f"Prior belief state:\n{self._belief_state}\n\n" if self._belief_state else ""
+        action_ctx = f"Last action taken: {last_action_str}\n\n" if last_action_str else ""
+        prompt = (
+            f"Task: {self._task}\n\n"
+            f"{prior}"
+            f"{action_ctx}"
+            "The current game screen is shown in the image.\n\n"
+            "Update the belief state as a compact list of facts. "
+            "Use short key: value pairs, one per line. Include:\n"
+            "- location: where you appear to be\n"
+            "- obstacles: what is blocking movement\n"
+            "- goal_proximity: how close you are to the task goal\n"
+            "- last_action_result: what the last action achieved\n\n"
+            "Respond only with the key: value pairs.\n"
+            "[STOP]"
+        )
+        result = self._vlm.infer(texts=prompt, images=[frame], max_new_tokens=120)
+        # Keep only key: value lines
+        lines = []
+        for line in result.splitlines():
+            stripped = line.strip()
+            if ":" in stripped and not stripped.startswith("["):
+                lines.append(stripped)
+        if lines:
+            self._belief_state = "\n".join(lines)
+
+    def _take_action(self, action_class, **kwargs) -> EnvironmentStepRecord:
+        action_str = self._get_action_strings(return_all=True).get(action_class, action_class.__name__)
+        self._last_action_str = action_str
+        record = super()._take_action(action_class, **kwargs)
+        return record
+
+    def _execute(self) -> int:
+        self._last_terminated = False
+        self._last_truncated = False
+        self._belief_state = ""
+        self._last_action_str = ""
+
+        tool_call_message: Optional[str] = None
+        error_message: Optional[str] = None
+        n_env_steps: int = 0
+        consecutive_invalid: int = 0
+
+        # Initial belief state
+        state = self._get_state()
+        self._update_belief(state["core"]["current_frame"], "")
+
+        while n_env_steps < self._max_steps:
+            state = self._get_state()
+            frame = state["core"]["current_frame"]
+
+            n_tool_calls = sum(1 for s in self.report.steps if isinstance(s, ToolCallRecord))
+            tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
+
+            prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
+            response = self._vlm.infer(
+                texts=prompt, images=[frame],
+                max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
+            )
+
+            action_str = self._parse_action(response)
+            if action_str is None:
+                error_message = (
+                    "Your previous response could not be parsed. "
+                    "You must end your response with:\n  Action: <action>\n  [STOP]"
+                )
+                tool_call_message = None
+                n_env_steps += 1
+                consecutive_invalid += 1
+                self.report.invalid_steps.append(response)
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
+                continue
+
+            if not tool_calls_exceeded:
+                tool_result = self._try_parse_tool_call(action_str)
+                if tool_result is not None:
+                    tool_class, tool_kwargs = tool_result
+                    record = self._use_tool(tool_class, **tool_kwargs)
+                    tool_call_message = str(record.result)
+                    error_message = None
+                    consecutive_invalid = 0
+                    continue
+
+            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
+            if action_class is not None:
+                self._take_action(action_class, **(action_kwargs or {}))
+                tool_call_message = None
+                error_message = None
+                n_env_steps += 1
+                consecutive_invalid = 0
+                # Update belief after each env step
+                new_state = self._get_state()
+                self._update_belief(new_state["core"]["current_frame"], self._last_action_str)
+                if self._last_terminated:
+                    self.report.termination_reason = "terminated"
+                    return 1
+                if self._last_truncated:
+                    self.report.termination_reason = "truncated"
+                    return 2
+            else:
+                error_message = (
+                    f"'{action_str}' is not a recognised action. "
+                    "Choose exactly one from the listed actions."
+                )
+                tool_call_message = None
+                n_env_steps += 1
+                consecutive_invalid += 1
+                self.report.invalid_steps.append(f"Unrecognised action string: {action_str!r}")
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
+
+        self.report.termination_reason = "max_steps"
+        return 0
+
+    def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
+        base = super()._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
+        if not self._belief_state:
+            return base
+        belief_section = f"Current belief state:\n{self._belief_state}"
+        lines = base.split("\n")
+        for i, line in enumerate(lines):
+            if line.startswith("Reason about"):
+                lines.insert(i, "")
+                lines.insert(i, belief_section)
+                break
+        return "\n".join(lines)
+
+
+class AdversarialSamplingExecutor(SimpleExecutor):
+    """
+    Three-call decision process per step:
+
+    1. **Propose**: VLM proposes a candidate action with reasoning.
+    2. **Challenge**: A second VLM call acts as devil's advocate — argues why
+       the proposed action might be wrong.
+    3. **Decide**: A third VLM call receives both perspectives and makes the
+       final decision.
+
+    More expensive but forces consideration of counterarguments before acting.
+    """
+
+    def _propose(self, prompt: str, frame) -> Optional[str]:
+        """First call: propose a candidate action."""
+        response = self._vlm.infer(
+            texts=prompt, images=[frame],
+            max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
+        )
+        return response
+
+    def _challenge(self, proposal: str, frame) -> str:
+        """Second call: argue against the proposal."""
+        prompt = (
+            f"Task: {self._task}\n\n"
+            "You are playing a GameBoy game. The current screen is shown in the image.\n\n"
+            f"Another agent proposed the following:\n{proposal}\n\n"
+            "Act as devil's advocate. In 2-3 sentences, argue why this action "
+            "might be WRONG or suboptimal. What could go wrong? What better "
+            "alternative exists?\n"
+            "[STOP]"
+        )
+        return self._vlm.infer(texts=prompt, images=[frame], max_new_tokens=200)
+
+    def _decide(self, proposal: str, challenge: str, original_prompt: str, frame) -> str:
+        """Third call: final decision given proposal and challenge."""
+        prompt = (
+            f"{original_prompt}\n\n"
+            f"--- Proposed action ---\n{proposal}\n\n"
+            f"--- Devil's advocate argument ---\n{challenge}\n\n"
+            "Consider both perspectives. Make your FINAL decision. "
+            "You may stick with the original or choose differently.\n"
+            "Reasoning: <final reasoning>\n"
+            "Action: <one environment action>\n"
+            "[STOP]"
+        )
+        return self._vlm.infer(texts=prompt, images=[frame], max_new_tokens=400)
+
+    def _execute(self) -> int:
+        self._last_terminated = False
+        self._last_truncated = False
+
+        error_message: Optional[str] = None
+        n_env_steps: int = 0
+        consecutive_invalid: int = 0
+
+        while n_env_steps < self._max_steps:
+            state = self._get_state()
+            frame = state["core"]["current_frame"]
+
+            n_tool_calls = sum(1 for s in self.report.steps if isinstance(s, ToolCallRecord))
+            tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
+
+            base_prompt = self._build_prompt(None, error_message, tool_calls_exceeded)
+
+            # Three-call pipeline
+            proposal = self._propose(base_prompt, frame)
+            challenge = self._challenge(proposal, frame)
+            final_response = self._decide(proposal, challenge, base_prompt, frame)
+
+            action_str = self._parse_action(final_response)
+            if action_str is None:
+                # Fall back to proposal
+                action_str = self._parse_action(proposal)
+
+            if action_str is None:
+                error_message = (
+                    "Your previous response could not be parsed. "
+                    "You must end your response with:\n  Action: <action>\n  [STOP]"
+                )
+                n_env_steps += 1
+                consecutive_invalid += 1
+                self.report.invalid_steps.append(final_response)
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
+                continue
+
+            if not tool_calls_exceeded:
+                tool_result = self._try_parse_tool_call(action_str)
+                if tool_result is not None:
+                    tool_class, tool_kwargs = tool_result
+                    record = self._use_tool(tool_class, **tool_kwargs)
+                    error_message = None
+                    consecutive_invalid = 0
+                    continue
+
+            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
+            if action_class is not None:
+                self._take_action(action_class, **(action_kwargs or {}))
+                error_message = None
+                n_env_steps += 1
+                consecutive_invalid = 0
+                if self._last_terminated:
+                    self.report.termination_reason = "terminated"
+                    return 1
+                if self._last_truncated:
+                    self.report.termination_reason = "truncated"
+                    return 2
+            else:
+                error_message = (
+                    f"'{action_str}' is not a recognised action. "
+                    "Choose exactly one from the listed actions."
+                )
+                n_env_steps += 1
+                consecutive_invalid += 1
+                self.report.invalid_steps.append(f"Unrecognised action string: {action_str!r}")
+                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
+                    self.report.termination_reason = "max_invalid"
+                    return -1
+
+        self.report.termination_reason = "max_steps"
+        return 0
