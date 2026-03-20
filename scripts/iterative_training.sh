@@ -161,4 +161,12 @@ done
 
 # for now do grouping of trajectories here:
 cd cleanrl
-python cleanrl_utils/group_trajectories.py --replay_buffer_folder $storage_dir/replay_buffers/${ARGS["game"]}/$replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/$replay_buffer_save_folder/
+observation_embedder_part=""
+if [[ "${ARGS["observation_embedder"]}" != "none" ]]; then
+    observation_embedder_part="--observation_embedder ${ARGS["observation_embedder"]}"
+fi
+if [[ "${ARGS["embedder_load_path"]}" != "none" ]]; then
+    observation_embedder_part+=" --embedder_load_path $storage_dir/${ARGS["observation_embedder"]}/${ARGS["game"]}/${ARGS["embedder_load_path"]} "
+fi
+
+python cleanrl_utils/group_trajectories.py --replay_buffer_folder $storage_dir/replay_buffers/${ARGS["game"]}/$replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/$replay_buffer_save_folder/ $observation_embedder_part
