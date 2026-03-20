@@ -108,9 +108,9 @@ for key in "${!ARGS[@]}"; do
 done
 
 
-SEEDS=(0 1)
+SEEDS=(0 1 2)
 GAMMAS=(0.99 0.995 0.999)
-ALGORITHMS=(ppo)
+ALGORITHMS=(ppo dqn sac)
 
 
 true_buffer_save_path=${ARGS["buffer_save_path"]}
