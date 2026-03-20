@@ -158,3 +158,7 @@ for ((i=0; i<${ARGS["n_agents"]}; i++)); do
     prev_buffer_load_path=$buffer_save_path
     buffer_save_path="${all_buffer_save_paths}$((i+2))"
 done
+
+# for now do grouping of trajectories here:
+cd cleanrl
+python cleanrl_utils/group_trajectories.py --replay_buffer_folder $storage_dir/replay_buffers/${ARGS["game"]}/$replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/$replay_buffer_save_folder/
