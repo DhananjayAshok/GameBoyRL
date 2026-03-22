@@ -109,7 +109,7 @@ class ExperimentName(StringFunction):
 
     def add_to_exp_name(self, exp_name, keys, kwargs):
         for i, key in enumerate(keys):
-            exp_name += f"{key}_{kwargs[key]}"
+            exp_name += f"{kwargs[key]}"
             if i != len(keys) - 1:
                 exp_name += "_"
         return exp_name
@@ -142,7 +142,7 @@ class ExperimentName(StringFunction):
             exp_name += f"-{depathify(kwargs['buffer_load_path'])}_"
         else:
             exp_name += f"_"
-        exp_name += f"seed_{kwargs['seed']}"
+        exp_name += f"{kwargs['seed']}"
         return exp_name
 
 
