@@ -38,9 +38,10 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Type
 
 from gameboy_worlds.interface import Environment, HighLevelAction
+from gameboy_worlds.interface.action import LowLevelAction
 
 from execution.executor_action import ExecutorAction
-from execution.report import EnvironmentStepRecord, ExecutorReport, SimpleReport, ToolCallRecord
+from execution.report import EnvironmentStepRecord, ExecutorReport, SimpleReport, ToolCallRecord, VLMCallRecord
 from utils import load_parameters
 from utils.vlm import ExecutorVLM
 
@@ -225,6 +226,37 @@ class Executor(ABC):
         """
         return self._env.get_info()
 
+    def _vlm_call(self, tag: str, **kwargs: Any):
+        """
+        Invoke the VLM and log every response to :attr:`report.vlm_call_log`.
+
+        This is the **only** way executors should call the VLM — never call
+        ``self._vlm.infer`` directly.  All keyword arguments are forwarded
+        verbatim to :meth:`~utils.vlm.ExecutorVLM.infer`.
+
+        When ``n_outputs > 1`` the VLM returns a :class:`list` of strings;
+        each element is logged as a separate :class:`~execution.report.VLMCallRecord`
+        with the same *tag*.  The raw return value (``str`` or ``List[str]``)
+        is returned unchanged so callers can use it as before.
+
+        :param tag: Short label for the call's role, e.g. ``"action"``,
+            ``"reflection"``, ``"map_update"``, ``"belief_update"``,
+            ``"decompose"``, ``"score"``, ``"rethink"``, ``"propose"``,
+            ``"challenge"``, ``"decide"``.
+        :type tag: str
+        :param kwargs: Keyword arguments forwarded to
+            :meth:`~utils.vlm.ExecutorVLM.infer`.
+        :return: Raw VLM output — a single string or a list of strings when
+            ``n_outputs > 1``.
+        """
+        result = self._vlm.infer(**kwargs)
+        if isinstance(result, list):
+            for r in result:
+                self.report.vlm_call_log.append(VLMCallRecord(tag=tag, response=r))
+        else:
+            self.report.vlm_call_log.append(VLMCallRecord(tag=tag, response=result))
+        return result
+
     def _get_action_strings(self, return_all: bool = False) -> Dict[Type[HighLevelAction], str]:
         """
         Return the verbalized high-level actions available in the current state.
@@ -331,7 +363,8 @@ class SimpleExecutor(Executor):
 
             prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
 
-            response = self._vlm.infer(
+            response = self._vlm_call(
+                "action",
                 texts=prompt,
                 images=[frame],
                 max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
@@ -497,13 +530,13 @@ class HistoryAwareExecutor(SimpleExecutor):
 
     def __init__(self, env, task, max_steps, max_tool_calls, history_k: int = 5, **kwargs):
         self._history_k = history_k
-        self._action_history: List[tuple] = []  # (action_str, success_code)
+        self._action_history: List[tuple] = []  # (action_class, action_str, success_code)
         super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
 
     def _take_action(self, action_class, **kwargs) -> EnvironmentStepRecord:
         record = super()._take_action(action_class, **kwargs)
         action_str = self._get_action_strings(return_all=True).get(action_class, action_class.__name__)
-        self._action_history.append((action_str, record.action_success))
+        self._action_history.append((action_class, action_str, record.action_success))
         return record
 
     def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
@@ -512,9 +545,12 @@ class HistoryAwareExecutor(SimpleExecutor):
             return base
         recent = self._action_history[-self._history_k:]
         history_lines = ["Recent actions (oldest first):"]
-        for action_str, success in recent:
-            status = "ok" if success == 1 else ("failed" if success == 0 else "unknown")
-            history_lines.append(f"  {action_str}  [{status}]")
+        for action_cls, action_str, success in recent:
+            if issubclass(action_cls, LowLevelAction):
+                history_lines.append(f"  {action_str}")
+            else:
+                status = "ok" if success == 1 else ("failed" if success == 0 else "unknown")
+                history_lines.append(f"  {action_str}  [{status}]")
         history_section = "\n".join(history_lines) + "\n"
         # Insert history before the format instructions (last 4 lines)
         lines = base.split("\n")
@@ -564,7 +600,8 @@ class SequencePlannerExecutor(SimpleExecutor):
                 state = self._get_state()
                 frame = state["core"]["current_frame"]
                 prompt = self._build_sequence_prompt(error_message)
-                response = self._vlm.infer(
+                response = self._vlm_call(
+                    "action",
                     texts=prompt,
                     images=[frame],
                     max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
@@ -615,9 +652,15 @@ class SequencePlannerExecutor(SimpleExecutor):
                 self.report.termination_reason = "truncated"
                 return 2
 
-            # If action failed, abort remaining sequence and re-plan
+            # If action failed, abort remaining sequence and re-plan.
+            # LowLevelActions always return success=0 by convention (not a failure signal),
+            # so skip the check for them entirely.
             last_record = self.report.steps[-1]
-            if isinstance(last_record, EnvironmentStepRecord) and last_record.action_success == 0:
+            if (
+                not issubclass(action_class, LowLevelAction)
+                and isinstance(last_record, EnvironmentStepRecord)
+                and last_record.action_success == 0
+            ):
                 error_message = (
                     f"Action '{action_str}' failed (blocked or invalid). Re-plan."
                 )
@@ -697,7 +740,8 @@ class SubgoalDecomposerExecutor(SimpleExecutor):
             "... (up to Subgoal 4)\n"
             "[STOP]"
         )
-        response = self._vlm.infer(
+        response = self._vlm_call(
+            "decompose",
             texts=prompt,
             images=[frame],
             max_new_tokens=200,
@@ -736,7 +780,8 @@ class SubgoalDecomposerExecutor(SimpleExecutor):
             tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
 
             prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-            response = self._vlm.infer(
+            response = self._vlm_call(
+                "action",
                 texts=prompt,
                 images=[frame],
                 max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
@@ -856,7 +901,8 @@ class ScreenDiffExecutor(SimpleExecutor):
             else:
                 images = [frame]
 
-            response = self._vlm.infer(
+            response = self._vlm_call(
+                "action",
                 texts=prompt,
                 images=images,
                 max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
@@ -1004,8 +1050,9 @@ class SelfConsistencyExecutor(SimpleExecutor):
 
             prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
 
-            # Sample k responses
-            responses = self._vlm.infer(
+            # Sample k responses — each logged separately with tag "action"
+            responses = self._vlm_call(
+                "action",
                 texts=prompt,
                 images=[frame],
                 max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
@@ -1114,8 +1161,11 @@ class ReflectiveExecutor(SimpleExecutor):
     def _take_action(self, action_class, **kwargs) -> EnvironmentStepRecord:
         record = super()._take_action(action_class, **kwargs)
         action_str = self._get_action_strings(return_all=True).get(action_class, action_class.__name__)
-        status = "ok" if record.action_success == 1 else "failed"
-        self._reflection_action_log.append(f"{action_str} [{status}]")
+        if issubclass(action_class, LowLevelAction):
+            self._reflection_action_log.append(action_str)
+        else:
+            status = "ok" if record.action_success == 1 else "failed"
+            self._reflection_action_log.append(f"{action_str} [{status}]")
         self._steps_since_reflection += 1
         return record
 
@@ -1134,7 +1184,8 @@ class ReflectiveExecutor(SimpleExecutor):
             "Then state a concise plan for the next few steps (1-2 sentences).\n"
             "[STOP]"
         )
-        result = self._vlm.infer(
+        result = self._vlm_call(
+            "reflection",
             texts=prompt,
             images=[frame],
             max_new_tokens=200,
@@ -1161,7 +1212,8 @@ class ReflectiveExecutor(SimpleExecutor):
             tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
 
             prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-            response = self._vlm.infer(
+            response = self._vlm_call(
+                "action",
                 texts=prompt,
                 images=[frame],
                 max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
@@ -1271,7 +1323,7 @@ class SpatialMapExecutor(SimpleExecutor):
             "Here: <describe current location>\n"
             "[STOP]"
         )
-        result = self._vlm.infer(texts=prompt, images=[frame], max_new_tokens=100)
+        result = self._vlm_call("map_update", texts=prompt, images=[frame], max_new_tokens=100)
         # Extract only the N/S/E/W/Here lines
         lines = []
         for line in result.splitlines():
@@ -1309,7 +1361,8 @@ class SpatialMapExecutor(SimpleExecutor):
             tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
 
             prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-            response = self._vlm.infer(
+            response = self._vlm_call(
+                "action",
                 texts=prompt, images=[frame],
                 max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
             )
@@ -1456,7 +1509,8 @@ class ConfidenceGatedExecutor(SimpleExecutor):
             tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
 
             prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-            response = self._vlm.infer(
+            response = self._vlm_call(
+                "action",
                 texts=prompt, images=[frame],
                 max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
             )
@@ -1465,7 +1519,8 @@ class ConfidenceGatedExecutor(SimpleExecutor):
             confidence = self._parse_confidence(response)
             if confidence is not None and confidence <= self._low_confidence_threshold:
                 rethink_prompt = self._build_rethink_prompt(response, prompt)
-                response = self._vlm.infer(
+                response = self._vlm_call(
+                    "rethink",
                     texts=rethink_prompt, images=[frame],
                     max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
                 )
@@ -1566,7 +1621,7 @@ class ActionValueEstimatorExecutor(SimpleExecutor):
             "...\n"
             "[STOP]"
         )
-        response = self._vlm.infer(texts=prompt, images=[frame], max_new_tokens=300)
+        response = self._vlm_call("score", texts=prompt, images=[frame], max_new_tokens=300)
 
         # Parse scores
         best_score = -1
@@ -1682,7 +1737,7 @@ class BeliefStateExecutor(SimpleExecutor):
             "Respond only with the key: value pairs.\n"
             "[STOP]"
         )
-        result = self._vlm.infer(texts=prompt, images=[frame], max_new_tokens=120)
+        result = self._vlm_call("belief_update", texts=prompt, images=[frame], max_new_tokens=120)
         # Keep only key: value lines
         lines = []
         for line in result.splitlines():
@@ -1721,7 +1776,8 @@ class BeliefStateExecutor(SimpleExecutor):
             tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
 
             prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-            response = self._vlm.infer(
+            response = self._vlm_call(
+                "action",
                 texts=prompt, images=[frame],
                 max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
             )
@@ -1812,11 +1868,11 @@ class AdversarialSamplingExecutor(SimpleExecutor):
 
     def _propose(self, prompt: str, frame) -> Optional[str]:
         """First call: propose a candidate action."""
-        response = self._vlm.infer(
+        return self._vlm_call(
+            "propose",
             texts=prompt, images=[frame],
             max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
         )
-        return response
 
     def _challenge(self, proposal: str, frame) -> str:
         """Second call: argue against the proposal."""
@@ -1829,7 +1885,7 @@ class AdversarialSamplingExecutor(SimpleExecutor):
             "alternative exists?\n"
             "[STOP]"
         )
-        return self._vlm.infer(texts=prompt, images=[frame], max_new_tokens=200)
+        return self._vlm_call("challenge", texts=prompt, images=[frame], max_new_tokens=200)
 
     def _decide(self, proposal: str, challenge: str, original_prompt: str, frame) -> str:
         """Third call: final decision given proposal and challenge."""
@@ -1843,7 +1899,7 @@ class AdversarialSamplingExecutor(SimpleExecutor):
             "Action: <one environment action>\n"
             "[STOP]"
         )
-        return self._vlm.infer(texts=prompt, images=[frame], max_new_tokens=400)
+        return self._vlm_call("decide", texts=prompt, images=[frame], max_new_tokens=400)
 
     def _execute(self) -> int:
         self._last_terminated = False
@@ -1862,7 +1918,7 @@ class AdversarialSamplingExecutor(SimpleExecutor):
 
             base_prompt = self._build_prompt(None, error_message, tool_calls_exceeded)
 
-            # Three-call pipeline
+            # Three-call pipeline — each call is logged individually via _vlm_call
             proposal = self._propose(base_prompt, frame)
             challenge = self._challenge(proposal, frame)
             final_response = self._decide(proposal, challenge, base_prompt, frame)

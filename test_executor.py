@@ -25,19 +25,19 @@ EXECUTORS = [
     # Baseline
     ("SimpleExecutor",               SimpleExecutor,               {}),
     # Generation 1
-    ("HistoryAwareExecutor",         HistoryAwareExecutor,         {"history_k": 5}),
-    ("SequencePlannerExecutor",      SequencePlannerExecutor,      {}),
-    ("SubgoalDecomposerExecutor",    SubgoalDecomposerExecutor,    {"steps_per_subgoal": 7}),
-    ("ScreenDiffExecutor",           ScreenDiffExecutor,           {}),
-    ("SelfConsistencyExecutor",      SelfConsistencyExecutor,      {"k": 3, "temperature": 0.7}),
+    #("HistoryAwareExecutor",         HistoryAwareExecutor,         {"history_k": 5}),
+    #("SequencePlannerExecutor",      SequencePlannerExecutor,      {}),
+    #("SubgoalDecomposerExecutor",    SubgoalDecomposerExecutor,    {"steps_per_subgoal": 7}),
+    #("ScreenDiffExecutor",           ScreenDiffExecutor,           {}),
+    #("SelfConsistencyExecutor",      SelfConsistencyExecutor,      {"k": 3, "temperature": 0.7}),
     ("ReflectiveExecutor",           ReflectiveExecutor,           {"reflection_interval": 5}),
     # Generation 2
-    ("SpatialMapExecutor",           SpatialMapExecutor,           {}),
-    ("ConfidenceGatedExecutor",      ConfidenceGatedExecutor,      {"low_confidence_threshold": 2}),
+    #("SpatialMapExecutor",           SpatialMapExecutor,           {}),
+    #("ConfidenceGatedExecutor",      ConfidenceGatedExecutor,      {"low_confidence_threshold": 2}),
     # Generation 3
-    ("ActionValueEstimatorExecutor", ActionValueEstimatorExecutor, {}),
-    ("BeliefStateExecutor",          BeliefStateExecutor,          {}),
-    ("AdversarialSamplingExecutor",  AdversarialSamplingExecutor,  {}),
+    #("ActionValueEstimatorExecutor", ActionValueEstimatorExecutor, {}),
+    #("BeliefStateExecutor",          BeliefStateExecutor,          {}),
+    #("AdversarialSamplingExecutor",  AdversarialSamplingExecutor,  {}),
 ]
 
 

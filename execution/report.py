@@ -75,6 +75,25 @@ class EnvironmentStepRecord:
 
 
 @dataclass
+class VLMCallRecord:
+    """
+    Record of a single VLM inference call made during an executor run.
+
+    :param tag: Short label identifying the role of this call within the
+        executor's logic (e.g. ``"action"``, ``"reflection"``,
+        ``"map_update"``, ``"belief_update"``, ``"decompose"``,
+        ``"score"``, ``"rethink"``, ``"propose"``, ``"challenge"``,
+        ``"decide"``).
+    :type tag: str
+    :param response: The raw text returned by the VLM.
+    :type response: str
+    """
+
+    tag: str
+    response: str
+
+
+@dataclass
 class ExecutorReport:
     """
     Complete record of a single executor run.
@@ -118,6 +137,14 @@ class ExecutorReport:
     max_tool_calls: int
     initial_state: Dict[str, Any]
     steps: List[Union[ToolCallRecord, EnvironmentStepRecord]] = field(default_factory=list)
+    vlm_call_log: List[VLMCallRecord] = field(default_factory=list)
+    """
+    Ordered log of every VLM inference call made during the run, regardless
+    of which internal method triggered it.  Each entry carries a ``tag``
+    identifying the call's role (e.g. ``"action"``, ``"reflection"``,
+    ``"map_update"``).  Use this to reconstruct the full reasoning trajectory
+    including auxiliary calls that do not produce a step record.
+    """
     final_state: Optional[Dict[str, Any]] = None
     outcome: Optional[int] = None
     notes: Optional[str] = None
