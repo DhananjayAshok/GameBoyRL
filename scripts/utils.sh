@@ -152,10 +152,10 @@ EVALUATION_ESSENTIALS+=("algorithm" "exp_name")
 EVALUATION_ARG_KEYS=("${EVALUATION_ESSENTIALS[@]}" "${!EVALUATION_DEFAULTS[@]}")
 
 declare -A WORLD_MODEL_DEFAULTS
-WORLD_MODEL_ESSENTIALS=()
+WORLD_MODEL_ESSENTIALS=("latest_replay_buffer_folder")
 populate_dict ALL_DEFAULTS WORLD_MODEL_DEFAULTS
 populate_array ESSENTIAL_ARGS WORLD_MODEL_ESSENTIALS
-SAME_AS_TRAINING=("observation_embedder" "embedder_load_path" "latest_replay_buffer_folder" "buffer_save_path" "buffer_load_path" "controller")
+SAME_AS_TRAINING=("observation_embedder" "embedder_load_path" "buffer_save_path" "buffer_load_path" "controller")
 populate_dict_subset TRAINING_DEFAULTS WORLD_MODEL_DEFAULTS SAME_AS_TRAINING
 
 WORLD_MODEL_ARG_KEYS=("${WORLD_MODEL_ESSENTIALS[@]}" "${!WORLD_MODEL_DEFAULTS[@]}")

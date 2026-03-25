@@ -79,7 +79,6 @@ for key in "${!ARGS[@]}"; do
 done
 
 
-cd cleanrl
 
 # Logic here:
 
@@ -109,7 +108,7 @@ fi
 
 
 echo "Training World Model:"
-
+cd cleanrl
 python cleanrl_utils/train_world_model.py --seed 1 --env-id $env_id \
     --track --wandb-project-name $WANDB_PROJECT \
     --observation_embedder ${ARGS["observation_embedder"]} $extra_arg_part
