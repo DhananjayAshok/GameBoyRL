@@ -103,7 +103,7 @@ if [[ "${ARGS["buffer_load_path"]}" != "none" ]]; then
     extra_arg_part+="--buffer_load_path $storage_dir/curiosity_buffers/${ARGS["curiosity_module"]}/${ARGS["game"]}/${ARGS["buffer_load_path"]} "
 fi
 if [[ "${ARGS["embedder_load_path"]}" != "none" ]]; then
-    extra_arg_part+="--embedder_load_path $storage_dir/${ARGS["observation_embedder"]}/${ARGS["game"]}/${ARGS["embedder_load_path"]} "
+    extra_arg_part+="--embedder_load_path $storage_dir/observation_embedders/${ARGS["game"]}/${ARGS["embedder_load_path"]} "
 fi
 
 
