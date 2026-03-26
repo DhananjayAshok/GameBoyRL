@@ -10,13 +10,13 @@
 import json
 import os
 import pickle
+from tqdm import tqdm
 import random
 
 import click
 
 from utils import load_parameters
 from utils.vlm import VLM, convert_numpy_greyscale_to_pillow
-
 
 # ---------------------------------------------------------------------------
 # Module-level prompt constants ([GAME] is replaced at call time)
@@ -157,12 +157,8 @@ def infer_task(trajectory, vlm: VLM, game: str, max_new_tokens: int) -> str | No
     Returns a refined imperative task string, or None if parsing fails.
     """
     observations, actions, high_level_actions, rewards = trajectory
-
-    # TODO: check obs shape — shape is unusual: [n_timesteps, n_envs, n_steps, H, W, C]
-    # The lines below are best-effort; verify with breakpoint before relying on this
-    breakpoint()  # TODO: check obs shape before indexing
-    final_frame = observations[-1, 0, -1]       # H x W x C
-    penultimate_frame = observations[-1, 0, -2]  # H x W x C
+    final_frame = observations[-1]       # H x W
+    penultimate_frame = observations[-2]  # H x W
 
     # --- Stage 1: DESCRIBE ---
     describe_prompt = DESCRIBE_PROMPT.replace("[GAME]", game)
@@ -171,6 +167,7 @@ def infer_task(trajectory, vlm: VLM, game: str, max_new_tokens: int) -> str | No
         images=[penultimate_frame, final_frame],
         max_new_tokens=max_new_tokens,
     ).lower()
+    print(f"DESCRIBE output:\n{describe_output}\n---")
 
     # Best-effort: fill "" for any field that failed to parse so INFER prompt is still usable
     frame1_desc = _parse_key(describe_output, "Frame 1 description") or ""
@@ -187,11 +184,13 @@ def infer_task(trajectory, vlm: VLM, game: str, max_new_tokens: int) -> str | No
         .replace("[SIMILARITIES]", similarities)
         .replace("[DIFFERENCES]", differences)
     )
+    print(f"INFER prompt:\n{infer_prompt}\n---")
     infer_output = vlm.infer(
         texts=infer_prompt,
         images=[penultimate_frame, final_frame],
         max_new_tokens=max_new_tokens,
     ).lower()
+    print(f"INFER output:\n{infer_output}\n---")
     candidate_task = _parse_key(infer_output, "Task")
 
     if candidate_task is None:
@@ -209,6 +208,7 @@ def infer_task(trajectory, vlm: VLM, game: str, max_new_tokens: int) -> str | No
     if refined_task is None:
         print(f"Warning: infer_task failed to parse Task from REFINE stage. Falling back to candidate.")
         return candidate_task
+    print(f"REFINE output:\n{refine_output}\n---")
 
     return refined_task
 
@@ -240,9 +240,7 @@ def infer_group_task(
     # Pick a random final frame for the consolidation call
     random_trajectory = random.choice(group)
     observations = random_trajectory[0]
-    # TODO: check obs shape — see infer_task for shape note
-    breakpoint()  # TODO: check obs shape before indexing
-    random_final_frame = observations[-1, 0, -1]
+    random_final_frame = observations[-1]
 
     candidate_list_str = "\n".join(f"- {c}" for c in candidates)
     consolidate_prompt = (
@@ -331,10 +329,8 @@ def infer(obj, sample_size, max_new_tokens):
 
     with open(trajectory_path, "rb") as f:
         grouped_trajectories = pickle.load(f)
-
     output = {}
-    for group_idx, group in grouped_trajectories.items():
-        print(f"Processing group {group_idx} ({len(group)} trajectories)...")
+    for group_idx, group in tqdm(enumerate(grouped_trajectories), desc="Processing groups", total=len(grouped_trajectories)):
         canonical_task, candidates = infer_group_task(
             group, vlm, game, sample_size, max_new_tokens
         )
@@ -383,7 +379,7 @@ def reason(obj, max_rollback, max_new_tokens):
         grouped_trajectories = pickle.load(f)
 
     dense_output = {}
-    for group_idx, group in grouped_trajectories.items():
+    for group_idx, group in tqdm(enumerate(grouped_trajectories), desc="Processing groups", total=len(grouped_trajectories)):
         group_key = str(group_idx)
         # canonical task string is the first element
         task_strings = task_annotation.get(group_key, task_annotation.get(group_idx, []))
@@ -393,10 +389,7 @@ def reason(obj, max_rollback, max_new_tokens):
         for traj_idx, trajectory in enumerate(group):
             observations, actions, high_level_actions, rewards = trajectory
 
-            # TODO: check obs shape — shape is unusual: [n_timesteps, n_envs, n_steps, H, W, C]
-            breakpoint()  # TODO: check obs shape before indexing
-
-            n_steps = observations.shape[0]  # best-effort: treat first dim as time
+            n_steps = len(observations)  # best-effort: treat first dim as time
             start = 0 if max_rollback is None else max(0, n_steps - max_rollback)
 
             for step in range(start, n_steps - 1):

@@ -22,6 +22,8 @@ def convert_numpy_greyscale_to_pillow(arr: np.ndarray) -> Image:
     Returns:
         image: PIL Image
     """
+    if len(arr.shape) == 2:
+        arr = arr.reshape(arr.shape[0], arr.shape[1], 1)
     rgb = np.stack([arr[:, :, 0], arr[:, :, 0], arr[:, :, 0]], axis=2)
     return Image.fromarray(rgb)
 

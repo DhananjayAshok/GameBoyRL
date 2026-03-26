@@ -678,15 +678,10 @@ class HuggingFaceModel(InferenceModel):
         HUGGINGFACE_MODEL_MAPPING[model].users.append(self)
 
     def get_single_message_list(self, text: str, images: list[Image.Image]) -> dict:
-        if images:
+        if self.model_kind in VLM_MODELS:
             content = [{"type": "text", "text": text}]
             for img in images:
-                content.append(
-                    {
-                        "type": "image",
-                        "image": img,
-                    }
-                )
+                content.append({"type": "image", "image": img})
         else:
             content = text
         return [{"role": "user", "content": content}]
