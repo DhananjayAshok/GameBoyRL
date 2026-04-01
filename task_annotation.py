@@ -19,7 +19,7 @@ from PIL import Image
 from utils import load_parameters
 from utils.vlm import VLM, convert_numpy_greyscale_to_pillow
 
-VERBOSE = False
+VERBOSE = True
 
 # ---------------------------------------------------------------------------
 # Module-level prompt constants ([GAME] is replaced at call time)
@@ -286,12 +286,12 @@ def infer_group_tasks(
     Returns trajectory_data_list: per-trajectory dicts with traj_idx, tasks, frame_descriptions.
     """
     trajectory_data = []
-
+    use_traj_idxes = list(range(len(group)))
     if len(group) > max_trajectories_per_group:
-        trajectories = random.sample(group, max_trajectories_per_group)
-    else:
-        trajectories = group
-    for traj_idx, trajectory in tqdm(enumerate(trajectories), leave=False, total=len(trajectories), desc="Trajectories"):
+        use_traj_idxes = random.sample(use_traj_idxes, max_trajectories_per_group)
+    for traj_idx in tqdm(use_traj_idxes, leave=False, total=len(use_traj_idxes), desc="Trajectories"):
+        print(f"Processing trajectory {traj_idx} of {len(group)} in group...")
+        trajectory = group[traj_idx]
         result = infer_task(trajectory, vlm, game, max_new_tokens, lookback)
         if result is not None:
             trajectory_data.append({
@@ -300,7 +300,7 @@ def infer_group_tasks(
                 "tasks": result["tasks"],
                 "frame_descriptions": result["frame_descriptions"],
             })
-
+    assert False, "Intentional crash for testing"
     return trajectory_data
 
 
@@ -350,6 +350,8 @@ def infer(obj, max_new_tokens, lookback, max_trajectories_per_group):
     trajectory_output = {}
 
     for group_idx, group in tqdm(enumerate(grouped_trajectories), desc="Processing groups", total=len(grouped_trajectories)):
+        if group_idx != 196:
+            continue
         trajectory_data = infer_group_tasks(
             group, vlm, game, max_new_tokens, lookback, max_trajectories_per_group
         )
@@ -357,7 +359,6 @@ def infer(obj, max_new_tokens, lookback, max_trajectories_per_group):
             print(f"Warning: skipping group {group_idx} — could not infer any task strings.")
             continue
         trajectory_output[group_idx] = trajectory_data
-        assert False, "debug"
 
     out_dir = os.path.dirname(trajectory_path)
     traj_path = os.path.join(out_dir, f"trajectory_annotation_{model_save_name}.json")

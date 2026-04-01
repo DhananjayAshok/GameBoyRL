@@ -130,9 +130,17 @@ mkdir -p "$(dirname "$log_file")"
 
 echo "Starting Experiment: $exp_name logging to $log_file"
 
+# model save path is: model_save_path
+# if model_save_path exists, we should exit to avoid overwriting
+if [[ -d "$model_save_path" ]]; then
+    echo "Model $model_save_path already exists. Skipping Run. Delete to re-run."
+    exit 0
+fi
+
+
 python cleanrl/${ARGS["algorithm"]}_curiosity.py --exp_name $exp_name --seed ${ARGS["seed"]} --gamma ${ARGS["gamma"]} --env-id $train_env_id --total-timesteps ${ARGS["timesteps"]} --track \
     --wandb-project-name $WANDB_PROJECT --model_save_path $model_save_path --save_model \
     --observation_embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} \
-    --curiosity-module ${ARGS["curiosity_module"]} --reset-curiosity-module $extra_arg_part #&> $log_file
+    --curiosity-module ${ARGS["curiosity_module"]} --reset-curiosity-module $extra_arg_part &> $log_file
 
 cd ..
