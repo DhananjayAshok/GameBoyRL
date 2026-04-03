@@ -11,6 +11,8 @@ populate_array SWEEP_ESSENTIALS REQUIRED_ARGS
 ARGS["n_agents"]=4
 ARGS["sweep"]=false
 ARGS["combination_buffer_sweep"]=true
+ARGS["call_grouping"]=false
+ARGS["init_state_group"]="none"
 combination_buffer_ocr_alphas=(0.5 1.0)
 
 
@@ -84,6 +86,7 @@ done
 
 
 sweeping=false
+init_state_name=${ARGS["init_state"]}
 if [ "${ARGS["sweep"]}" == "true" ]; then
     run_name="iterative_sweep"
     sweeping=true
@@ -98,15 +101,18 @@ if [ "$ocr_alpha_sweep" = true ] && [ "${ARGS["ocr_alpha"]}" != "0.0" ]; then
     ARGS["ocr_alpha"]=0.0
     echo "Warning: combination_buffer_sweep is true but ocr_alpha is not 0.0. Setting ocr_alpha to 0.0 for sweeping."
 fi
+if [ "${ARGS["init_state_group"]}" != "none" ]; then
+    init_state_name="${ARGS["init_state_group"]}"
+fi
 
-replay_buffer_save_folder=iterative/${ARGS["init_state"]}/$run_name/
+replay_buffer_save_folder=iterative/${init_state_name}/$run_name/
 ARGS["latest_replay_buffer_folder"]=$replay_buffer_save_folder
 ARGS["replay_buffer_save_folder"]=$replay_buffer_save_folder
 
 
 
 prev_buffer_load_path="none"
-log_folder="${ARGS["game"]}/iterative/$run_name/${ARGS["init_state"]}/"
+log_folder="${ARGS["game"]}/iterative/$run_name/$init_state_name/"
 
 function call_agent(){
     local buffer_load_path="$1"
@@ -149,9 +155,9 @@ function train_world_model(){
 ## Execution starts here
 
 if [ "$sweeping" = true ]; then
-    all_buffer_save_paths=iterative/${ARGS["init_state"]}/sweep_
+    all_buffer_save_paths=iterative/${init_state_name}/sweep_
 else
-    all_buffer_save_paths=iterative/${ARGS["init_state"]}/${ARGS["algorithm"]}_agent_
+    all_buffer_save_paths=iterative/${init_state_name}/${ARGS["algorithm"]}_agent_
 fi
 
 
@@ -184,15 +190,7 @@ for ((i=0; i<${ARGS["n_agents"]}; i++)); do
     buffer_save_path="${all_buffer_save_paths}$((i+2))"
 done
 
-# for now do grouping of trajectories here:
-cd cleanrl
-observation_embedder_part=""
-if [[ "${ARGS["observation_embedder"]}" != "none" ]]; then
-    observation_embedder_part="--observation_embedder ${ARGS["observation_embedder"]}"
+# if call_grouping
+if [ "${ARGS["call_grouping"]}" == "true" ]; then
+    bash scripts/group_trajectories.sh --game ${ARGS["game"]} --replay_buffer_folder $replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/$replay_buffer_save_folder/
 fi
-if [[ "${ARGS["embedder_load_path"]}" != "none" ]]; then
-    observation_embedder_part+=" --embedder_load_path $storage_dir/${ARGS["observation_embedder"]}/${ARGS["game"]}/${ARGS["embedder_load_path"]} "
-fi
-
-echo python cleanrl_utils/group_trajectories.py --replay_buffer_folder $storage_dir/replay_buffers/${ARGS["game"]}/$replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/$replay_buffer_save_folder/ $observation_embedder_part
-python cleanrl_utils/group_trajectories.py --replay_buffer_folder $storage_dir/replay_buffers/${ARGS["game"]}/$replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/$replay_buffer_save_folder/ $observation_embedder_part
