@@ -79,6 +79,12 @@ for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
+# if the curiosity_module is not combinationbuffer, force ocr_alpha to be 0.0
+if [[ "${ARGS["curiosity_module"]}" != "combinationbuffer" ]]; then
+    ARGS["ocr_alpha"]=0.0
+fi
+
+
 # Logic here:
 exp_name="${ARGS["exp_name"]}"
 test_env_id=$(get_string_from_args "env_id" ARGS)

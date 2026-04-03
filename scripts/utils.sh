@@ -111,7 +111,8 @@ declare -A ALGORITHM_DEFAULTS=(
 )
 
 declare -A CURIOUSITY_DEFAULTS=(
-    ["curiosity_module"]="embedbuffer"
+    ["curiosity_module"]="combinationbuffer"
+    ["ocr_alpha"]=0.0
     ["buffer_load_path"]="none"
     ["similarity_metric"]="cosine"    
     ["observation_embedder"]="random_patch"

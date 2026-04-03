@@ -103,6 +103,7 @@ class ExperimentName(StringFunction):
         "embedder_load_path",
         "similarity_metric",
         "curiosity_module",
+        "ocr_alpha",
         "buffer_load_path",
         "seed",
     ]
@@ -136,7 +137,9 @@ class ExperimentName(StringFunction):
         else:
             exp_name += f"_"
         exp_name = self.add_to_exp_name(
-            exp_name, keys=["similarity_metric", "curiosity_module"], kwargs=kwargs
+            exp_name,
+            keys=["similarity_metric", "curiosity_module", "ocr_alpha"],
+            kwargs=kwargs,
         )
         if kwargs["buffer_load_path"] is not None:
             exp_name += f"-{depathify(kwargs['buffer_load_path'])}_"

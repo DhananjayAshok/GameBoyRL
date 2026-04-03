@@ -78,6 +78,11 @@ for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
+# if the curiosity_module is not combinationbuffer, force ocr_alpha to be 0.0
+if [[ "${ARGS["curiosity_module"]}" != "combinationbuffer" ]]; then
+    ARGS["ocr_alpha"]=0.0
+fi
+
 cd cleanrl
 
 # Logic here:

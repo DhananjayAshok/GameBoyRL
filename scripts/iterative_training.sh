@@ -10,7 +10,8 @@ populate_array SWEEP_ESSENTIALS REQUIRED_ARGS
 
 ARGS["n_agents"]=4
 ARGS["sweep"]=false
-ARGS["alternate_curiosity_buffer"]=true
+ARGS["combination_buffer_sweep"]=true
+combination_buffer_ocr_alphas=(0.5 1.0)
 
 
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -89,12 +90,19 @@ if [ "${ARGS["sweep"]}" == "true" ]; then
 else
     run_name="iterative_agent"
 fi
+ocr_alpha_sweep=false
+if [ "${ARGS["combination_buffer_sweep"]}" == "true" ] && [ "${ARGS["curiosity_module"]}" == "combinationbuffer" ]; then
+    ocr_alpha_sweep=true
+fi
+if [ "$ocr_alpha_sweep" = true ] && [ "${ARGS["ocr_alpha"]}" != "0.0" ]; then
+    ARGS["ocr_alpha"]=0.0
+    echo "Warning: combination_buffer_sweep is true but ocr_alpha is not 0.0. Setting ocr_alpha to 0.0 for sweeping."
+fi
 
 replay_buffer_save_folder=iterative/${ARGS["init_state"]}/$run_name/
 ARGS["latest_replay_buffer_folder"]=$replay_buffer_save_folder
 ARGS["replay_buffer_save_folder"]=$replay_buffer_save_folder
 
-## Set up functions for iterative training
 
 
 prev_buffer_load_path="none"
@@ -108,9 +116,25 @@ function call_agent(){
     if [ "$sweeping" = true ]; then
         argstring=$(args_to_flags_subset ARGS SWEEP_ARG_KEYS)
         bash scripts/sweep.sh $argstring
+        if [ "$ocr_alpha_sweep" = true ]; then
+            for ocr_alpha in "${combination_buffer_ocr_alphas[@]}"; do
+                ARGS["ocr_alpha"]=$ocr_alpha
+                argstring=$(args_to_flags_subset ARGS SWEEP_ARG_KEYS)
+                bash scripts/sweep.sh $argstring
+            done
+            ARGS["ocr_alpha"]=0.0 # reset to default after sweep
+        fi
     else
         argstring=$(args_to_flags_subset ARGS TRAINING_ARG_KEYS)    
         bash scripts/default_rl.sh $argstring
+        if [ "$ocr_alpha_sweep" = true ]; then
+            for ocr_alpha in "${combination_buffer_ocr_alphas[@]}"; do
+                ARGS["ocr_alpha"]=$ocr_alpha
+                argstring=$(args_to_flags_subset ARGS TRAINING_ARG_KEYS)    
+                bash scripts/default_rl.sh $argstring
+            done
+            ARGS["ocr_alpha"]=0.0 # reset to default after sweep
+        fi
     fi
 }
 
