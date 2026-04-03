@@ -98,13 +98,13 @@ ENV_ESSENTIALS=() # should be init_state later.
 declare -A ENV_DEFAULTS=(
     ["env"]="default"
     ["controller"]="low_level"
-    ["max_steps"]=50    
+    ["max_steps"]=30   
     ["init_state"]="default" # move this to essentials later
 )
 
 
 declare -A ALGORITHM_DEFAULTS=(
-    ["timesteps"]=50000
+    ["timesteps"]=100000
     ["algorithm"]="ppo"
     ["gamma"]="0.99"
     ["seed"]=1

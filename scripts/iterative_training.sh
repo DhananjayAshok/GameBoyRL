@@ -8,8 +8,9 @@ REQUIRED_ARGS=()
 populate_dict SWEEP_DEFAULTS ARGS
 populate_array SWEEP_ESSENTIALS REQUIRED_ARGS
 
-ARGS["n_agents"]=10
+ARGS["n_agents"]=4
 ARGS["sweep"]=false
+ARGS["alternate_curiosity_buffer"]=true
 
 
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
