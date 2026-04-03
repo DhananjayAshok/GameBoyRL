@@ -123,6 +123,7 @@ declare -A SAVE_DEFAULTS=(
     ["buffer_save_path"]="none"
     ["replay_buffer_save_folder"]="none"
     ["model_dir"]="none"
+    ["overwrite_model"]=false
     ["log_folder"]="none"
     ["capture_video"]=false
 )
