@@ -155,9 +155,9 @@ function train_world_model(){
 ## Execution starts here
 
 if [ "$sweeping" = true ]; then
-    all_buffer_save_paths=iterative/${init_state_name}/sweep_
+    all_buffer_save_paths=iterative/${ARGS["init_state"]}/sweep_
 else
-    all_buffer_save_paths=iterative/${init_state_name}/${ARGS["algorithm"]}_agent_
+    all_buffer_save_paths=iterative/${ARGS["init_state"]}/${ARGS["algorithm"]}_agent_
 fi
 
 
