@@ -137,8 +137,8 @@ echo "Starting Experiment: $exp_name logging to $log_file"
 
 # model save path is: model_save_path
 # if model_save_path exists, we should exit to avoid overwriting
-if [[ -d "$model_save_path" ]]; then
-    echo "Model $model_save_path already exists. Skipping Run. Delete to re-run."
+if [[ -d "$model_save_path" ]] && [[ ${ARGS["overwrite_model"]} != "true" ]]; then
+    echo "Model $model_save_path already exists. Skipping Run. Use --overwrite_model true to overwrite."
     exit 0
 fi
 

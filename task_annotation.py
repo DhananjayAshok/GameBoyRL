@@ -300,7 +300,6 @@ def infer_group_tasks(
                 "tasks": result["tasks"],
                 "frame_descriptions": result["frame_descriptions"],
             })
-    assert False, "Intentional crash for testing"
     return trajectory_data
 
 
