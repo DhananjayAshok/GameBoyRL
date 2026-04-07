@@ -192,5 +192,5 @@ done
 
 # if call_grouping
 if [ "${ARGS["call_grouping"]}" == "true" ]; then
-    bash scripts/group_trajectories.sh --game ${ARGS["game"]} --replay_buffer_folder $replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/$replay_buffer_save_folder/
+    bash scripts/group_trajectories.sh --game ${ARGS["game"]} --replay_buffer_folder $replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/$replay_buffer_save_folder/ --z_min 6.0
 fi

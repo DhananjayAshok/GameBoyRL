@@ -19,7 +19,7 @@ from PIL import Image
 from utils import load_parameters
 from utils.vlm import VLM, convert_numpy_greyscale_to_pillow
 
-VERBOSE = True
+VERBOSE = False
 
 # ---------------------------------------------------------------------------
 # Module-level prompt constants ([GAME] is replaced at call time)
