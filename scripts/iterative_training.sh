@@ -13,6 +13,7 @@ ARGS["sweep"]=false
 ARGS["combination_buffer_sweep"]=true
 ARGS["call_grouping"]=false
 ARGS["init_state_group"]="none"
+ARGS["run_name"]="iterative"
 combination_buffer_ocr_alphas=(0.5 1.0)
 
 
@@ -105,14 +106,14 @@ if [ "${ARGS["init_state_group"]}" != "none" ]; then
     init_state_name="${ARGS["init_state_group"]}"
 fi
 
-replay_buffer_save_folder=iterative/${init_state_name}/$run_name/
+replay_buffer_save_folder=${ARGS["run_name"]}/${init_state_name}/$run_name/
 ARGS["latest_replay_buffer_folder"]=$replay_buffer_save_folder
 ARGS["replay_buffer_save_folder"]=$replay_buffer_save_folder
 
 
 
 prev_buffer_load_path="none"
-log_folder="${ARGS["game"]}/iterative/$run_name/$init_state_name/"
+log_folder="${ARGS["game"]}/${ARGS["run_name"]}/$run_name/$init_state_name/"
 
 function call_agent(){
     local buffer_load_path="$1"
@@ -155,9 +156,9 @@ function train_world_model(){
 ## Execution starts here
 
 if [ "$sweeping" = true ]; then
-    all_buffer_save_paths=iterative/${ARGS["init_state"]}/${ARGS["observation_embedder"]}/sweep_
+    all_buffer_save_paths=${ARGS["run_name"]}/${ARGS["init_state"]}/${ARGS["observation_embedder"]}/sweep_
 else
-    all_buffer_save_paths=iterative/${ARGS["init_state"]}/${ARGS["observation_embedder"]}/${ARGS["algorithm"]}_agent_
+    all_buffer_save_paths=${ARGS["run_name"]}/${ARGS["init_state"]}/${ARGS["observation_embedder"]}/${ARGS["algorithm"]}_agent_
 fi
 
 

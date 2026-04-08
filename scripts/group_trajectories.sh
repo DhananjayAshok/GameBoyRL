@@ -7,6 +7,7 @@ REQUIRED_ARGS=("game" "replay_buffer_folder" "save_path")
 
 ARGS["observation_embedder"]=random_patch
 ARGS["z_min"]=2.0
+ARGS["z_kind"]="global"
 
 
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -85,5 +86,5 @@ fi
 
 replay_buffer_save_folder="${ARGS["replay_buffer_folder"]}"
 cd cleanrl
-python cleanrl_utils/group_trajectories.py --replay_buffer_folder $storage_dir/replay_buffers/${ARGS["game"]}/$replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/$replay_buffer_save_folder/ --z_min ${ARGS["z_min"]}
+python cleanrl_utils/group_trajectories.py --replay_buffer_folder $storage_dir/replay_buffers/${ARGS["game"]}/$replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/$replay_buffer_save_folder/ --z_min ${ARGS["z_min"]} --z_kind ${ARGS["z_kind"]}
 cd ..
