@@ -36,27 +36,21 @@ Initial Frame Description: <describe what is visible in the initial frame>
 Differences: <what has changed between frame 1 and frame 2>
 [STOP]"""
 
-INFER_PROMPT = """You are analysing two consecutive screenshots from a game of [GAME].
+INFER_PROMPT = """You are analysing two screenshots from a game of [GAME].
 
 Here is a description of the sequence of frames and the changes that occured in between
 [DESC_AND_CHANGES]
 
-Based on the descriptions, answer:
-What action or task did the player perform over the course these two frames? There may be multiple tasks performed over various timesteps in that case, split them up and report each as a single, distinct task. 
+Over the course of some of these frames, a single primary task may have been performed by the player, with the task being completed either at the very end or in some frame close to the end. 
+Describe, with a single phrase, the action or task the player performed over the course these frames? Do not use conjunctions like "and" or "while" in your description. If there are multiple distinct tasks that seem to be happening, try to describe the whole subtrajectory wholistically and omit the less important subtasks. If there is no clear task, say "NO TASK".
 Be specific but concise, each task should be a single, specific and meaningful action and not trivial. Describe only what is clearly supported by the evidence above.
 
-This means that tasks should almost never contain conjunctions like "and" or "while". If you find multiple actions that seem to be happening simultaneously or conditionally, try to split them into separate tasks.
-
-If you think there is no clear task, respond with "NO TASK"
+If there is no clear task, respond with "NO TASK"
 Otherwise, respond in exactly this format:
 Reasoning: <one single, short sentence describing your thinking>
 Task: <one or two sentence description of what the player did or is doing>
-Start: <integer index of starting frame>
+Start: <integer index of starting frame> this is to indicate when the player seems to be moving with the intent to perform the task, not simply the step right before the task is executed. This may be several frames before the task is completed, and will depend on the specific task and context.
 End: <integer index of frame where task is performed or executed or completed or first detected>
-[SEP]
-Task: <another task, if multiple tasks are detected>
-Start: <integer index of starting frame for this task>
-End: <integer index of ending frame for this task>
 [STOP]"""
 
 REFINE_PROMPT = """You are given a description of what a player did over the course of some game frames:
@@ -154,33 +148,28 @@ def _parse_bullet_list(text: str) -> list[str]:
     return results
 
 
-def _parse_infer_blocks(text: str) -> list[dict]:
-    """Parse one or more Task/Start/End blocks from INFER output, separated by [SEP].
-    Returns a list of dicts with keys: task, start, end. Skips blocks missing a Task."""
+def _parse_infer_block(text: str) -> dict | None:
+    """Parse a single Task/Start/End block from INFER output.
+    Returns a dict with keys: task, start, end, or None if no Task found or task is NO TASK."""
     text = text.lower()
-    # Split on [sep], discard anything after [stop]
     stop_idx = text.find("[stop]")
     if stop_idx != -1:
         text = text[:stop_idx]
-    raw_blocks = text.split("[sep]")
 
-    results = []
-    for block in raw_blocks:
-        task = _parse_key(block, "Task")
-        if task is None:
-            continue
-        start_str = _parse_key(block, "Start")
-        end_str = _parse_key(block, "End")
-        try:
-            start = int(start_str)
-        except (TypeError, ValueError):
-            start = None
-        try:
-            end = int(end_str)
-        except (TypeError, ValueError):
-            end = None
-        results.append({"task": task, "start": start, "end": end})
-    return results
+    task = _parse_key(text, "Task")
+    if task is None or "no task" in task:
+        return None
+    start_str = _parse_key(text, "Start")
+    end_str = _parse_key(text, "End")
+    try:
+        start = int(start_str)
+    except (TypeError, ValueError):
+        start = None
+    try:
+        end = int(end_str)
+    except (TypeError, ValueError):
+        end = None
+    return {"task": task, "start": start, "end": end}
 
 
 # ---------------------------------------------------------------------------
@@ -244,29 +233,25 @@ def infer_task(trajectory, vlm: VLM, game: str, max_new_tokens: int, lookback: i
             print("INFER returned NO TASK.")
         return None
 
-    parsed_blocks = _parse_infer_blocks(infer_output)
-    if not parsed_blocks:
-        print(f"Warning: infer_task failed to parse any Task blocks from INFER stage. Output was:\n{infer_output}")
+    parsed_block = _parse_infer_block(infer_output)
+    if parsed_block is None:
+        print(f"Warning: infer_task failed to parse Task block from INFER stage. Output was:\n{infer_output}")
         return None
 
-    # --- Stage 3: REFINE each task (text only) ---
-    refined_tasks = []
-    for block in parsed_blocks:
-        refine_prompt = REFINE_PROMPT.replace("[CANDIDATE_TASK]", block["task"])
-        refine_output = vlm.infer(
-            texts=refine_prompt,
-            max_new_tokens=max_new_tokens,
-        ).lower()
-        if VERBOSE:
-            print(f"REFINE output:\n{refine_output}\n---")
-        refined_task = _parse_key(refine_output, "Task")
-        if refined_task is None:
-            #print(f"Warning: REFINE failed to parse Task. Falling back to candidate.")
-            refined_task = block["task"]
-        refined_tasks.append({"task": refined_task, "start": block["start"], "end": block["end"]})
+    # --- Stage 3: REFINE (text only) ---
+    refine_prompt = REFINE_PROMPT.replace("[CANDIDATE_TASK]", parsed_block["task"])
+    refine_output = vlm.infer(
+        texts=refine_prompt,
+        max_new_tokens=max_new_tokens,
+    ).lower()
+    if VERBOSE:
+        print(f"REFINE output:\n{refine_output}\n---")
+    refined_task = _parse_key(refine_output, "Task")
+    if refined_task is None:
+        refined_task = refine_output.lower().split("[stop]")[0].strip()  # fallback: take everything before [stop]
 
     return {
-        "tasks": refined_tasks,
+        "task": {"task": refined_task, "start": parsed_block["start"], "end": parsed_block["end"]},
         "frame_descriptions": frame_descs,
         "used_lookback": k,
     }
@@ -297,7 +282,7 @@ def infer_group_tasks(
             trajectory_data.append({
                 "traj_idx": traj_idx,
                 "used_lookback": result["used_lookback"],
-                "tasks": result["tasks"],
+                "task": result["task"],
                 "frame_descriptions": result["frame_descriptions"],
             })
     return trajectory_data
@@ -402,49 +387,49 @@ def reason(obj, safety_rollback, max_new_tokens):
             k = used_lookback
             window_offset = n - k  # absolute index of window[0]
 
-            for task_entry in traj_data["tasks"]:
-                task_name = task_entry["task"]
-                task_start = task_entry["start"]
-                task_end = task_entry["end"]
+            task_entry = traj_data["task"]
+            task_name = task_entry["task"]
+            task_start = task_entry["start"]
+            task_end = task_entry["end"]
 
-                if task_start is None or task_end is None:
+            if task_start is None or task_end is None:
+                continue
+
+            step_start = max(0, task_start - safety_rollback)
+            for win_step in range(step_start, task_end):
+                abs_step = window_offset + win_step
+                if abs_step + 1 >= n:
                     continue
 
-                step_start = max(0, task_start - safety_rollback)
-                for win_step in range(step_start, task_end):
-                    abs_step = window_offset + win_step
-                    if abs_step + 1 >= n:
-                        continue
+                frame_t = observations[abs_step]
+                frame_t1 = observations[abs_step + 1]
 
-                    frame_t = observations[abs_step]
-                    frame_t1 = observations[abs_step + 1]
+                action_entry = high_level_actions[abs_step] if abs_step < len(high_level_actions) else (type(None), {})
+                action_class, action_kwargs = action_entry
+                action_str = high_level_action_to_string(action_class, action_kwargs)
 
-                    action_entry = high_level_actions[abs_step] if abs_step < len(high_level_actions) else (type(None), {})
-                    action_class, action_kwargs = action_entry
-                    action_str = high_level_action_to_string(action_class, action_kwargs)
+                reason_prompt = (
+                    REASON_PROMPT
+                    .replace("[GAME]", game)
+                    .replace("[ACTION]", action_str)
+                    .replace("[TASK]", task_name)
+                )
+                reason_output = vlm.infer(
+                    texts=reason_prompt,
+                    images=[frame_t, frame_t1],
+                    max_new_tokens=max_new_tokens,
+                ).lower()
+                reasoning = _parse_key(reason_output, "Reasoning")
+                if reasoning is None:
+                    print(f"Warning: failed to parse Reasoning for group {group_idx} traj {traj_idx} step {win_step}.")
 
-                    reason_prompt = (
-                        REASON_PROMPT
-                        .replace("[GAME]", game)
-                        .replace("[ACTION]", action_str)
-                        .replace("[TASK]", task_name)
-                    )
-                    reason_output = vlm.infer(
-                        texts=reason_prompt,
-                        images=[frame_t, frame_t1],
-                        max_new_tokens=max_new_tokens,
-                    ).lower()
-                    reasoning = _parse_key(reason_output, "Reasoning")
-                    if reasoning is None:
-                        print(f"Warning: failed to parse Reasoning for group {group_idx} traj {traj_idx} step {win_step}.")
-
-                    records.append({
-                        "traj_idx": traj_idx,
-                        "task_name": task_name,
-                        "step": win_step,
-                        "action_str": action_str,
-                        "reasoning": reasoning,
-                    })
+                records.append({
+                    "traj_idx": traj_idx,
+                    "task_name": task_name,
+                    "step": win_step,
+                    "action_str": action_str,
+                    "reasoning": reasoning,
+                })
 
         dense_output[group_idx] = records
         print(f"Group {group_idx}: annotated {len(records)} records.")
