@@ -148,6 +148,7 @@ function call_agent(){
 function train_world_model(){
     local buffer_save_path="$1"
     ARGS["buffer_save_path"]=$buffer_save_path
+    ARGS["buffer_load_path"]="none" # world model will train on all trajectories in the replay buffer folder, so no need to specify a single buffer to load from.
     # Don't bother with buffer_load_path, this will just make the WM train from scratch on all trajectories in the replay buffer folder. 
     argstring=$(args_to_flags_subset ARGS WORLD_MODEL_ARG_KEYS)
     bash scripts/train_world_model.sh $argstring 
@@ -183,7 +184,7 @@ for ((i=0; i<${ARGS["n_agents"]}; i++)); do
     # Don't train world model on the last iteration since we won't be using the buffer again
     if [ $i -lt $((${ARGS["n_agents"]}-1)) ]; then
         if [ "${ARGS["curiosity_module"]}" == "world_model" ]; then
-            train_world_model $prev_buffer_load_path $buffer_save_path    
+            train_world_model $buffer_save_path    
         fi
     fi
 
