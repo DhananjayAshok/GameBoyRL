@@ -25,6 +25,7 @@ dependencies = [
     "tqdm>=4.67.2",
     "numpy>=2.4.2",
     "pillow>=11.3.0",
+    "gdown>=6.0.0",
 ]
 
 [tool.uv.sources]

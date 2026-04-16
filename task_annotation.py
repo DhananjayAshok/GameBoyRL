@@ -318,7 +318,7 @@ def main(ctx, model_name, vlm_kind, trajectory_path, game):
 @main.command()
 @click.option("--max_new_tokens", default=300, show_default=True, help="Max tokens for each VLM call")
 @click.option("--lookback", default=8, show_default=True, help="Number of frames from the end of each trajectory to analyse")
-@click.option("--max_trajectories_per_group", default=5, show_default=True, help="Max trajectories to sample per group")
+@click.option("--max_trajectories_per_group", default=20, show_default=True, help="Max trajectories to sample per group")
 @click.pass_obj
 def infer(obj, max_new_tokens, lookback, max_trajectories_per_group):
     """Infer task strings for each trajectory group."""
