@@ -6,15 +6,13 @@ source scripts/utils.sh || { echo "Could not source utils"; exit 1; }
 declare -A ARGS
 ARGS["executor_vlm_model"]="google/gemini-3.1-pro-preview"
 ARGS["executor_vlm_kind"]="openrouter"   # use "none" for absent optionals, never ""
-ARGS["max_steps"]="2"
+ARGS["max_steps"]="20"
 ARGS["max_resets"]="3"
 ARGS["random_sample"]="2"
+ARGS["regenerate"]="false"
 
 REQUIRED_ARGS=("game")
 
-# OPTIONAL: merge shared args from utils.sh (do this BEFORE ALLOWED_FLAGS)
-populate_common_optional_training_args ARGS
-populate_common_required_training_args REQUIRED_ARGS
 
 # --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -63,8 +61,11 @@ max_resets=3
 max_steps=30
 
 
-common=python run_benchmark_zeroshot.py --game ${ARGS["game"]} --save_video True --max_resets ${ARGS["max_resets"]} --max_steps ${ARGS["max_steps"]} --executor_vlm_model ${ARGS["executor_vlm_model"]} --executor_vlm_kind ${ARGS["executor_vlm_kind"]} 
+regenerate_flag=""
+if [[ "${ARGS["regenerate"]}" == "true" ]]; then regenerate_flag="--regenerate"; fi
 
-eval $common --random_sample ${ARGS["random_sample"]} --verbose
+common="python run_benchmark_zeroshot.py --game ${ARGS["game"]} --save_video True --max_resets ${ARGS["max_resets"]} --max_steps ${ARGS["max_steps"]} --executor_vlm_model ${ARGS["executor_vlm_model"]} --executor_vlm_kind ${ARGS["executor_vlm_kind"]} $regenerate_flag"
 
-eval $common
+$common --random_sample ${ARGS["random_sample"]} --verbose
+
+#$common

@@ -42,10 +42,11 @@ from gameboy_worlds.interface.action import LowLevelAction
 
 from execution.executor_action import ExecutorAction
 from execution.report import EnvironmentStepRecord, ExecutorReport, SimpleReport, ToolCallRecord, VLMCallRecord
-from utils import load_parameters
+from utils import load_parameters, log_info
 from utils.vlm import ExecutorVLM
 
 MAX_CONSECUTIVE_INVALID = 10
+DEBUG_ON_INVALID = False
 
 
 class Executor(ABC):
@@ -114,6 +115,7 @@ class Executor(ABC):
         if vlm_kind is not None:
             self._parameters["executor_vlm_kind"] = vlm_kind
         self._vlm = ExecutorVLM(parameters=self._parameters)
+        self._max_new_tokens = self._parameters.get("executor_vlm_max_new_tokens", 512)
 
         self.report = self._make_report(task, kwargs, max_steps, max_tool_calls)
 
@@ -187,6 +189,13 @@ class Executor(ABC):
     # Concrete helpers — uniform across all executors
     # ------------------------------------------------------------------
 
+    def _record_invalid(self, response: str) -> None:
+        """Append an invalid step and trigger a breakpoint if DEBUG_ON_INVALID is set."""
+        self.report.invalid_steps.append(response)
+        log_info(f"Invalid response recorded: \n{response}", parameters=self._parameters)
+        if DEBUG_ON_INVALID:
+            breakpoint()
+
     def _use_tool(
         self,
         executor_action_class: Type[ExecutorAction],
@@ -255,6 +264,7 @@ class Executor(ABC):
         :return: Raw VLM output — a single string or a list of strings when
             ``n_outputs > 1``.
         """
+        kwargs.setdefault("max_new_tokens", self._max_new_tokens)
         result = self._vlm.infer(**kwargs)
         if isinstance(result, list):
             for r in result:
@@ -373,7 +383,6 @@ class SimpleExecutor(Executor):
                 "action",
                 texts=prompt,
                 images=[frame],
-                max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
             )
 
             # ---- parse structured response --------------------------------
@@ -389,7 +398,7 @@ class SimpleExecutor(Executor):
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append(response)
+                self._record_invalid(response)
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -430,7 +439,7 @@ class SimpleExecutor(Executor):
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append(
+                self._record_invalid(
                     f"Unrecognised action string: {action_str!r}"
                 )
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
@@ -610,8 +619,7 @@ class SequencePlannerExecutor(SimpleExecutor):
                     "action",
                     texts=prompt,
                     images=[frame],
-                    max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
-                )
+                    )
                 sequence = self._parse_sequence(response)
                 if sequence is None:
                     error_message = (
@@ -620,7 +628,7 @@ class SequencePlannerExecutor(SimpleExecutor):
                         "  Action: ACTION1, ACTION2, ...\n"
                         "  [STOP]"
                     )
-                    self.report.invalid_steps.append(response)
+                    self._record_invalid(response)
                     n_env_steps += 1
                     consecutive_invalid += 1
                     if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
@@ -638,7 +646,7 @@ class SequencePlannerExecutor(SimpleExecutor):
                     f"'{action_str}' in planned sequence is not a recognised action. "
                     "Re-plan with valid actions."
                 )
-                self.report.invalid_steps.append(f"Unrecognised sequence action: {action_str!r}")
+                self._record_invalid(f"Unrecognised sequence action: {action_str!r}")
                 pending_sequence = []  # abort remainder of sequence
                 n_env_steps += 1
                 consecutive_invalid += 1
@@ -790,7 +798,6 @@ class SubgoalDecomposerExecutor(SimpleExecutor):
                 "action",
                 texts=prompt,
                 images=[frame],
-                max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
             )
 
             action_str = self._parse_action(response)
@@ -804,7 +811,7 @@ class SubgoalDecomposerExecutor(SimpleExecutor):
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append(response)
+                self._record_invalid(response)
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -849,7 +856,7 @@ class SubgoalDecomposerExecutor(SimpleExecutor):
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append(f"Unrecognised action string: {action_str!r}")
+                self._record_invalid(f"Unrecognised action string: {action_str!r}")
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -911,7 +918,6 @@ class ScreenDiffExecutor(SimpleExecutor):
                 "action",
                 texts=prompt,
                 images=images,
-                max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
             )
 
             action_str = self._parse_action(response)
@@ -925,7 +931,7 @@ class ScreenDiffExecutor(SimpleExecutor):
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append(response)
+                self._record_invalid(response)
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -964,7 +970,7 @@ class ScreenDiffExecutor(SimpleExecutor):
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append(f"Unrecognised action string: {action_str!r}")
+                self._record_invalid(f"Unrecognised action string: {action_str!r}")
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -1061,7 +1067,6 @@ class SelfConsistencyExecutor(SimpleExecutor):
                 "action",
                 texts=prompt,
                 images=[frame],
-                max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
                 temperature=self._temperature,
                 n_outputs=self._k,
             )
@@ -1079,7 +1084,7 @@ class SelfConsistencyExecutor(SimpleExecutor):
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append(str(responses))
+                self._record_invalid(str(responses))
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -1117,7 +1122,7 @@ class SelfConsistencyExecutor(SimpleExecutor):
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append(f"Unrecognised action string: {action_str!r}")
+                self._record_invalid(f"Unrecognised action string: {action_str!r}")
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -1222,7 +1227,6 @@ class ReflectiveExecutor(SimpleExecutor):
                 "action",
                 texts=prompt,
                 images=[frame],
-                max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
             )
 
             action_str = self._parse_action(response)
@@ -1236,7 +1240,7 @@ class ReflectiveExecutor(SimpleExecutor):
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append(response)
+                self._record_invalid(response)
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -1274,7 +1278,7 @@ class ReflectiveExecutor(SimpleExecutor):
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append(f"Unrecognised action string: {action_str!r}")
+                self._record_invalid(f"Unrecognised action string: {action_str!r}")
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -1370,7 +1374,6 @@ class SpatialMapExecutor(SimpleExecutor):
             response = self._vlm_call(
                 "action",
                 texts=prompt, images=[frame],
-                max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
             )
 
             action_str = self._parse_action(response)
@@ -1382,7 +1385,7 @@ class SpatialMapExecutor(SimpleExecutor):
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append(response)
+                self._record_invalid(response)
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -1419,7 +1422,7 @@ class SpatialMapExecutor(SimpleExecutor):
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append(f"Unrecognised action string: {action_str!r}")
+                self._record_invalid(f"Unrecognised action string: {action_str!r}")
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -1518,7 +1521,6 @@ class ConfidenceGatedExecutor(SimpleExecutor):
             response = self._vlm_call(
                 "action",
                 texts=prompt, images=[frame],
-                max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
             )
 
             # Re-query if confidence is low
@@ -1528,8 +1530,7 @@ class ConfidenceGatedExecutor(SimpleExecutor):
                 response = self._vlm_call(
                     "rethink",
                     texts=rethink_prompt, images=[frame],
-                    max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
-                )
+                    )
 
             action_str = self._parse_action(response)
             if action_str is None:
@@ -1540,7 +1541,7 @@ class ConfidenceGatedExecutor(SimpleExecutor):
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append(response)
+                self._record_invalid(response)
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -1577,7 +1578,7 @@ class ConfidenceGatedExecutor(SimpleExecutor):
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append(f"Unrecognised action string: {action_str!r}")
+                self._record_invalid(f"Unrecognised action string: {action_str!r}")
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -1672,7 +1673,7 @@ class ActionValueEstimatorExecutor(SimpleExecutor):
                 error_message = "Could not determine a valid action from scoring. Try again."
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append("Failed to parse action scores")
+                self._record_invalid("Failed to parse action scores")
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -1697,7 +1698,7 @@ class ActionValueEstimatorExecutor(SimpleExecutor):
                 )
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append(f"Unrecognised scored action: {action_str!r}")
+                self._record_invalid(f"Unrecognised scored action: {action_str!r}")
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -1785,7 +1786,6 @@ class BeliefStateExecutor(SimpleExecutor):
             response = self._vlm_call(
                 "action",
                 texts=prompt, images=[frame],
-                max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
             )
 
             action_str = self._parse_action(response)
@@ -1797,7 +1797,7 @@ class BeliefStateExecutor(SimpleExecutor):
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append(response)
+                self._record_invalid(response)
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -1837,7 +1837,7 @@ class BeliefStateExecutor(SimpleExecutor):
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append(f"Unrecognised action string: {action_str!r}")
+                self._record_invalid(f"Unrecognised action string: {action_str!r}")
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -1877,7 +1877,6 @@ class AdversarialSamplingExecutor(SimpleExecutor):
         return self._vlm_call(
             "propose",
             texts=prompt, images=[frame],
-            max_new_tokens=self._parameters.get("executor_max_new_tokens", 512),
         )
 
     def _challenge(self, proposal: str, frame) -> str:
@@ -1941,7 +1940,7 @@ class AdversarialSamplingExecutor(SimpleExecutor):
                 )
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append(final_response)
+                self._record_invalid(final_response)
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -1975,7 +1974,7 @@ class AdversarialSamplingExecutor(SimpleExecutor):
                 )
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self.report.invalid_steps.append(f"Unrecognised action string: {action_str!r}")
+                self._record_invalid(f"Unrecognised action string: {action_str!r}")
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1

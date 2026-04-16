@@ -85,6 +85,7 @@ def run_task(row, max_resets, controller_variant, executor_class, max_tool_calls
 @click.option("--override_index", default=None, type=int, required=False)
 @click.option("--random_sample", type=int, default=None)
 @click.option("--verbose", is_flag=True, default=False)
+@click.option("--regenerate", is_flag=True, default=False)
 def do(
     game,
     controller_variant,
@@ -98,6 +99,7 @@ def do(
     override_index,
     random_sample,
     verbose,
+    regenerate,
 ):
     project_parameters = load_parameters()
     vlm_name = executor_vlm_model or project_parameters["executor_vlm_model"]
@@ -135,7 +137,7 @@ def do(
         save_path = f"results/benchmark_zero_shot_{game}_{executor}_{model_save_name}_sample{random_sample}.csv"
     else:
         save_path = f"results/benchmark_zero_shot_{game}_{executor}_{model_save_name}.csv"
-    if os.path.exists(save_path):
+    if not regenerate and os.path.exists(save_path):
         existing_df = pd.read_csv(save_path)
         results = existing_df.values.tolist()
         n_completed = len(existing_df)
