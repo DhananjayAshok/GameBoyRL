@@ -102,6 +102,18 @@ Respond in exactly this format:
 Reasoning: <one sentence explanation>
 [STOP]"""
 
+REASON_REFINE_PROMPT = """You are given a candidate reasoning for why a particular action was taken in a game of [GAME]: 
+Task: [TASK]
+Action taken: [ACTION]
+Candidate: [CANDIDATE_REASONING]
+
+Refine this by writing it in the first person perspective of the player in the present tense, and making it more imperitive in nature. So use words such as "the screen shows X ..., it makes most sense to do Y, hence I should press Z ... or something like that.
+
+Answer in exactly this format:
+Reasoning: <refined reasoning that justifies exactly why the action was taken in context of the task in first person future planning language>
+[STOP]
+"""
+
 
 # ---------------------------------------------------------------------------
 # Helper: high-level action class + kwargs → human-readable string
@@ -414,14 +426,37 @@ def reason(obj, safety_rollback, max_new_tokens):
                     .replace("[ACTION]", action_str)
                     .replace("[TASK]", task_name)
                 )
+                if VERBOSE:
+                    print(f"REASON prompt (group {group_idx} traj {traj_idx} step {win_step}):\n{reason_prompt}\n---")
                 reason_output = vlm.infer(
                     texts=reason_prompt,
                     images=[frame_t, frame_t1],
                     max_new_tokens=max_new_tokens,
                 ).lower()
+                if VERBOSE:
+                    print(f"REASON output:\n{reason_output}\n---")
                 reasoning = _parse_key(reason_output, "Reasoning")
                 if reasoning is None:
                     print(f"Warning: failed to parse Reasoning for group {group_idx} traj {traj_idx} step {win_step}.")
+                else:
+                    refine_prompt = (
+                        REASON_REFINE_PROMPT
+                        .replace("[GAME]", game)
+                        .replace("[CANDIDATE_REASONING]", reasoning)
+                    )
+                    if VERBOSE:
+                        print(f"REASON_REFINE prompt:\n{refine_prompt}\n---")
+                    refine_output = vlm.infer(
+                        texts=refine_prompt,
+                        max_new_tokens=max_new_tokens,
+                    ).lower()
+                    if VERBOSE:
+                        print(f"REASON_REFINE output:\n{refine_output}\n---")
+                    refined_reasoning = _parse_key(refine_output, "Reasoning")
+                    if refined_reasoning is not None:
+                        reasoning = refined_reasoning
+                    else:
+                        reasoning = refine_output.lower().split("[stop]")[0].strip()  # fallback
 
                 records.append({
                     "traj_idx": traj_idx,
