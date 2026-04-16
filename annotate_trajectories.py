@@ -11,15 +11,20 @@ import json
 import os
 import pickle
 from tqdm import tqdm
-import random
 import numpy as np
 import click
 from PIL import Image
 
-from utils import load_parameters
-from utils.vlm import VLM, convert_numpy_greyscale_to_pillow
+from utils import load_parameters, log_info
+from utils.vlm import VLM
+from show_trajectories import plot_obs_transitions
 
-VERBOSE = False
+SAVE_FRAMES_DIR = "save_frames"
+
+
+def save_frames(frames, save_name):
+    os.makedirs(SAVE_FRAMES_DIR, exist_ok=True)
+    plot_obs_transitions(frames, os.path.join(SAVE_FRAMES_DIR, f"{save_name}.png"))
 
 # ---------------------------------------------------------------------------
 # Module-level prompt constants ([GAME] is replaced at call time)
@@ -102,6 +107,18 @@ Respond in exactly this format:
 Reasoning: <one sentence explanation>
 [STOP]"""
 
+REASON_REFINE_PROMPT = """You are given a candidate reasoning for why a particular action was taken in a game of [GAME]: 
+Task: [TASK]
+Action taken: [ACTION]
+Candidate: [CANDIDATE_REASONING]
+
+Refine this by writing it in the first person perspective of the player in the present tense, and making it more imperitive in nature. So use words such as "the screen shows X ..., it makes most sense to do Y, hence I should press Z ... or something like that.
+
+Answer in exactly this format:
+Reasoning: <refined reasoning that justifies exactly why the action was taken in context of the task in first person future planning language>
+[STOP]
+"""
+
 
 # ---------------------------------------------------------------------------
 # Helper: high-level action class + kwargs → human-readable string
@@ -162,11 +179,11 @@ def _parse_infer_block(text: str) -> dict | None:
     start_str = _parse_key(text, "Start")
     end_str = _parse_key(text, "End")
     try:
-        start = int(start_str)
+        start = int(start_str) - 1 # convert to 0 indexed
     except (TypeError, ValueError):
         start = None
     try:
-        end = int(end_str)
+        end = int(end_str) -1 # convert to 0 indexed
     except (TypeError, ValueError):
         end = None
     return {"task": task, "start": start, "end": end}
@@ -176,7 +193,7 @@ def _parse_infer_block(text: str) -> dict | None:
 # Core functions
 # ---------------------------------------------------------------------------
 
-def infer_task(trajectory, vlm: VLM, game: str, max_new_tokens: int, lookback: int = 5) -> dict | None:
+def infer_task(trajectory, vlm: VLM, game: str, max_new_tokens: int, lookback: int = 5, verbose: bool = False) -> dict | None:
     """
     Three-stage pipeline: DESCRIBE (pairwise over last `lookback` frames) → INFER → REFINE.
     Returns a dict with keys: tasks (list of {task, start, end}), frame_descriptions.
@@ -199,7 +216,8 @@ def infer_task(trajectory, vlm: VLM, game: str, max_new_tokens: int, lookback: i
             images=[window[i], window[i + 1]],
             max_new_tokens=max_new_tokens,
         ).lower()
-        if VERBOSE:
+        if verbose:
+            save_frames([window[i], window[i + 1]], f"describe_pair_{i}")
             print(f"DESCRIBE output (pair {i}→{i+1}):\n{describe_output}\n---")
         frame_descs[i] = _parse_key(describe_output, "Initial Frame Description") or ""
         diffs[i] = _parse_key(describe_output, "Differences") or ""
@@ -218,18 +236,19 @@ def infer_task(trajectory, vlm: VLM, game: str, max_new_tokens: int, lookback: i
         .replace("[GAME]", game)
         .replace("[DESC_AND_CHANGES]", desc_and_changes)
     )
-    if VERBOSE:
+    if verbose:
+        save_frames(list(window), "infer_window")
         print(f"INFER prompt:\n{infer_prompt}\n---")
     infer_output = vlm.infer(
         texts=infer_prompt,
         images=list(window),
         max_new_tokens=max_new_tokens,
     ).lower()
-    if VERBOSE:
+    if verbose:
         print(f"INFER output:\n{infer_output}\n---")
 
     if "no task" in infer_output:
-        if VERBOSE:
+        if verbose:
             print("INFER returned NO TASK.")
         return None
 
@@ -244,12 +263,16 @@ def infer_task(trajectory, vlm: VLM, game: str, max_new_tokens: int, lookback: i
         texts=refine_prompt,
         max_new_tokens=max_new_tokens,
     ).lower()
-    if VERBOSE:
+    if verbose:
         print(f"REFINE output:\n{refine_output}\n---")
     refined_task = _parse_key(refine_output, "Task")
     if refined_task is None:
         refined_task = refine_output.lower().split("[stop]")[0].strip()  # fallback: take everything before [stop]
 
+    if verbose:
+        print(f"Final inferred task: {refined_task}, start: {parsed_block['start']}, end: {parsed_block['end']}")
+        print("Exiting after one inference for verbose demonstration. Set VERBOSE = False to run full inference.")
+        breakpoint()
     return {
         "task": {"task": refined_task, "start": parsed_block["start"], "end": parsed_block["end"]},
         "frame_descriptions": frame_descs,
@@ -264,6 +287,7 @@ def infer_group_tasks(
     max_new_tokens: int,
     lookback: int = 5,
     max_trajectories_per_group: int = 2,
+    verbose: bool = False,
 ) -> list[dict]:
     """
     Run infer_task on all trajectories in the group.
@@ -273,11 +297,11 @@ def infer_group_tasks(
     trajectory_data = []
     use_traj_idxes = list(range(len(group)))
     if len(group) > max_trajectories_per_group:
-        use_traj_idxes = random.sample(use_traj_idxes, max_trajectories_per_group)
+        use_traj_idxes = list(np.random.choice(use_traj_idxes, max_trajectories_per_group, replace=False))
     for traj_idx in tqdm(use_traj_idxes, leave=False, total=len(use_traj_idxes), desc="Trajectories"):
         print(f"Processing trajectory {traj_idx} of {len(group)} in group...")
         trajectory = group[traj_idx]
-        result = infer_task(trajectory, vlm, game, max_new_tokens, lookback)
+        result = infer_task(trajectory, vlm, game, max_new_tokens, lookback, verbose=verbose)
         if result is not None:
             trajectory_data.append({
                 "traj_idx": traj_idx,
@@ -302,9 +326,12 @@ def infer_group_tasks(
 )
 @click.option("--trajectory_path", required=True, help="Path to grouped_high_reward_trajectories.pkl")
 @click.option("--game", required=True, help="Game name used in prompts (e.g. 'Pokemon Red')")
+@click.option("--overwrite", is_flag=True, default=False, help="Overwrite existing output files.")
+@click.option("--verbose", is_flag=True, default=False, help="Print prompts and outputs during annotation.")
 @click.pass_context
-def main(ctx, model_name, vlm_kind, trajectory_path, game):
+def main(ctx, model_name, vlm_kind, trajectory_path, game, overwrite, verbose):
     parameters = load_parameters()
+    np.random.seed(parameters['random_seed'])
     vlm = VLM(model_name, vlm_kind)
     ctx.obj = dict(
         vlm=vlm,
@@ -312,6 +339,8 @@ def main(ctx, model_name, vlm_kind, trajectory_path, game):
         game=game,
         parameters=parameters,
         model_name=model_name,
+        overwrite=overwrite,
+        verbose=verbose,
     )
 
 
@@ -328,22 +357,28 @@ def infer(obj, max_new_tokens, lookback, max_trajectories_per_group):
     model_name = obj["model_name"]
     model_save_name = model_name.split("/")[-1]
 
+    out_dir = os.path.dirname(trajectory_path)
+    traj_path = os.path.join(out_dir, f"trajectory_annotation_{model_save_name}.json")
+    if os.path.exists(traj_path) and not obj["overwrite"]:
+        log_info(f"Skipping infer — output already exists at {traj_path}. Use --overwrite to rerun.")
+        return
+
     with open(trajectory_path, "rb") as f:
         grouped_trajectories = pickle.load(f)
 
     trajectory_output = {}
 
     for group_idx, group in tqdm(enumerate(grouped_trajectories), desc="Processing groups", total=len(grouped_trajectories)):
+        if group_idx != 1:
+            continue
         trajectory_data = infer_group_tasks(
-            group, vlm, game, max_new_tokens, lookback, max_trajectories_per_group
+            group, vlm, game, max_new_tokens, lookback, max_trajectories_per_group, verbose=obj["verbose"]
         )
         if not trajectory_data:
             print(f"Warning: skipping group {group_idx} — could not infer any task strings.")
             continue
         trajectory_output[group_idx] = trajectory_data
 
-    out_dir = os.path.dirname(trajectory_path)
-    traj_path = os.path.join(out_dir, f"trajectory_annotation_{model_save_name}.json")
     with open(traj_path, "w") as f:
         json.dump(trajectory_output, f, indent=2)
     print(f"Saved trajectory annotations → {traj_path}")
@@ -360,8 +395,14 @@ def reason(obj, safety_rollback, max_new_tokens):
     game = obj["game"]
     model_name = obj["model_name"]
     model_save_name = model_name.split("/")[-1]
+    verbose = obj["verbose"]
 
     out_dir = os.path.dirname(trajectory_path)
+    out_path = os.path.join(out_dir, f"dense_annotation_{model_save_name}.json")
+    if os.path.exists(out_path) and not obj["overwrite"]:
+        log_info(f"Skipping reason — output already exists at {out_path}. Use --overwrite to rerun.")
+        return
+
     traj_annotation_path = os.path.join(out_dir, f"trajectory_annotation_{model_save_name}.json")
     if not os.path.exists(traj_annotation_path):
         raise FileNotFoundError(
@@ -414,15 +455,43 @@ def reason(obj, safety_rollback, max_new_tokens):
                     .replace("[ACTION]", action_str)
                     .replace("[TASK]", task_name)
                 )
+                if verbose:
+                    save_frames([frame_t, frame_t1], f"reason_g{group_idx}_t{traj_idx}_s{win_step}")
+                    print(f"REASON prompt (group {group_idx} traj {traj_idx} step {win_step}):\n{reason_prompt}\n---")
                 reason_output = vlm.infer(
                     texts=reason_prompt,
                     images=[frame_t, frame_t1],
                     max_new_tokens=max_new_tokens,
                 ).lower()
+                if verbose:
+                    print(f"REASON output:\n{reason_output}\n---")
                 reasoning = _parse_key(reason_output, "Reasoning")
                 if reasoning is None:
                     print(f"Warning: failed to parse Reasoning for group {group_idx} traj {traj_idx} step {win_step}.")
+                else:
+                    refine_prompt = (
+                        REASON_REFINE_PROMPT
+                        .replace("[GAME]", game)
+                        .replace("[CANDIDATE_REASONING]", reasoning)
+                    )
+                    if verbose:
+                        print(f"REASON_REFINE prompt:\n{refine_prompt}\n---")
+                    refine_output = vlm.infer(
+                        texts=refine_prompt,
+                        max_new_tokens=max_new_tokens,
+                    ).lower()
+                    if verbose:
+                        print(f"REASON_REFINE output:\n{refine_output}\n---")
+                    refined_reasoning = _parse_key(refine_output, "Reasoning")
+                    if refined_reasoning is not None:
+                        reasoning = refined_reasoning
+                    else:
+                        reasoning = refine_output.lower().split("[stop]")[0].strip()  # fallback
 
+                if verbose:
+                    print(f"Final reasoning for group {group_idx} traj {traj_idx} step {win_step}:\n{reasoning}\n===")
+                    print("Exiting after one reasoning for verbose demonstration. Set VERBOSE = False to run full annotation.")
+                    breakpoint()
                 records.append({
                     "traj_idx": traj_idx,
                     "task_name": task_name,
@@ -430,53 +499,16 @@ def reason(obj, safety_rollback, max_new_tokens):
                     "action_str": action_str,
                     "reasoning": reasoning,
                 })
+                
 
         dense_output[group_idx] = records
         print(f"Group {group_idx}: annotated {len(records)} records.")
 
-    out_path = os.path.join(out_dir, f"dense_annotation_{model_save_name}.json")
     with open(out_path, "w") as f:
         json.dump(dense_output, f, indent=2)
     print(f"Saved dense annotation → {out_path}")
 
-def plot_obs_transitions(observations, save_name):
-    # given list of frames (H x W) plot all the frames with horizontal concatenation as an image
-    total_height = observations[0].shape[0]
-    total_width = sum(obs.shape[1] for obs in observations)
-    single_image = np.zeros((total_height, total_width), dtype=observations[0].dtype)
-    current_x = 0
-    for obs in observations:
-        w = obs.shape[1]
-        single_image[:, current_x:current_x+w] = obs[:, :]  # assuming (H, W, 1)
-        current_x += w
-    img = convert_numpy_greyscale_to_pillow(single_image)
-    img.save(save_name)    
-
-
-
-@click.command()
-@click.option("--trajectory_path", required=True, help="Path to grouped_high_reward_trajectories.pkl")
-@click.option("--frac", default=1.0, show_default=True, help="Fraction of observation transitions to sample")
-def show(trajectory_path, frac):
-    """Randomly sample a fraction of observation transitions and save them as images."""
-    parameters = load_parameters()
-    with open(trajectory_path, "rb") as f:
-        grouped_trajectories = pickle.load(f)
-
-    os.makedirs(parameters["tmp_dir"], exist_ok=True)
-    indexes = list(range(len(grouped_trajectories)))
-    random.shuffle(indexes)
-    num_to_show = int(len(grouped_trajectories) * frac)
-    for i, trajectory_group in tqdm(enumerate(grouped_trajectories), desc="Plotting observation transitions", total=len(grouped_trajectories)):
-        if i not in indexes[:num_to_show]:
-            continue
-        os.makedirs(parameters["tmp_dir"] + f"/trajectories/group_{i}", exist_ok=True)
-        for j, trajectory in tqdm(enumerate(trajectory_group), leave=False, total=len(trajectory_group)):
-            observations = trajectory[0]            
-            plot_obs_transitions(observations, parameters["tmp_dir"] + f"/trajectories/group_{i}/traj_{j}.png")
-    print(f"Saved {parameters['tmp_dir']}/trajectories/")
 
 
 if __name__ == "__main__":
     main()
-    #show()

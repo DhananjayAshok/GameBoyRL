@@ -1,6 +1,6 @@
 """
 Usage: python run_benchmark_zeroshot.py --game pokemon_red --save_video True --max_resets 3 --max_steps 30
-python run_benchmark_zeroshot.py --game pokemon_red --save_video True --max_resets 3 --max_steps 30 --random_sample 2
+python run_benchmark_zeroshot.py --game pokemon_red --save_video True --max_resets 3 --max_steps 30 --random_sample 2 --verbose
 """
 
 from gameboy_worlds import (
@@ -85,6 +85,7 @@ def run_task(row, max_resets, controller_variant, executor_class, max_tool_calls
 @click.option("--override_index", default=None, type=int, required=False)
 @click.option("--random_sample", type=int, default=None)
 @click.option("--verbose", is_flag=True, default=False)
+@click.option("--regenerate", is_flag=True, default=False)
 def do(
     game,
     controller_variant,
@@ -98,6 +99,7 @@ def do(
     override_index,
     random_sample,
     verbose,
+    regenerate,
 ):
     project_parameters = load_parameters()
     vlm_name = executor_vlm_model or project_parameters["executor_vlm_model"]
@@ -131,7 +133,21 @@ def do(
             n=random_sample, random_state=42
         ).reset_index(drop=True)
     os.makedirs("results", exist_ok=True)
+    if random_sample is not None:
+        save_path = f"results/benchmark_zero_shot_{game}_{executor}_{model_save_name}_sample{random_sample}.csv"
+    else:
+        save_path = f"results/benchmark_zero_shot_{game}_{executor}_{model_save_name}.csv"
+    if not regenerate and os.path.exists(save_path):
+        existing_df = pd.read_csv(save_path)
+        results = existing_df.values.tolist()
+        n_completed = len(existing_df)
+        print(f"Resuming from checkpoint: {n_completed} tasks already completed in {save_path}")
+    else:
+        results = []
+        n_completed = 0
     for i, row in tqdm(benchmark_tasks.iterrows(), total=len(benchmark_tasks)):
+        if i < n_completed:
+            continue
         if override_index is not None and i != override_index:
             continue
         if override_index is not None:
@@ -162,9 +178,9 @@ def do(
             ]
         )
         df = pd.DataFrame(results, columns=columns)
-        save_path = f"results/benchmark_zero_shot_{game}_{executor}_{model_save_name}.csv"
         df.to_csv(save_path, index=False)
         print(f"Saved benchmark results to {save_path}")
+        print(df.to_string(index=False))
 
 
 if __name__ == "__main__":

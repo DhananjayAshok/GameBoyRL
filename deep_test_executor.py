@@ -78,10 +78,7 @@ def _indent(text: str, prefix: str = "      ") -> str:
 
 def _step_summary(step: Union[EnvironmentStepRecord, ToolCallRecord]) -> str:
     if isinstance(step, EnvironmentStepRecord):
-        return (
-            f"ENV   {step.action_class.__name__}({step.kwargs})"
-            f"  success={step.action_success}"
-        )
+        return f"ENV   {step.action_class.__name__}({step.kwargs})"
     return f"TOOL  {step.executor_action_class.__name__}({step.kwargs})  result={step.result}"
 
 
