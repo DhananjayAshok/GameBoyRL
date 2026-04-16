@@ -1,7 +1,7 @@
 """
 Deep executor test — prints the full per-step trajectory for each executor.
 
-Imports shared config from test_executor and reruns each executor, showing:
+For each executor in EXECUTORS, shows:
   - The raw VLM response (reasoning + chosen action) for every iteration
   - The resulting step record (ENV action or TOOL call)
   - Invalid iterations (parse failures / unrecognised actions)
@@ -27,7 +27,8 @@ from __future__ import annotations
 from collections import Counter
 from typing import Iterator, Union
 
-from gameboy_worlds import get_benchmark_tasks, get_test_environment
+import click
+from gameboy_worlds import AVAILABLE_GAMES, get_benchmark_tasks, get_test_environment
 
 from execution.executor import (
     SimpleExecutor,
@@ -44,7 +45,27 @@ from execution.executor import (
     AdversarialSamplingExecutor,
 )
 from execution.report import EnvironmentStepRecord, ExecutorReport, ToolCallRecord
-from test_executor import EXECUTORS, MAX_TOOL_CALLS
+
+MAX_TOOL_CALLS = 0
+
+EXECUTORS = [
+    # Baseline
+    ("SimpleExecutor",               SimpleExecutor,               {}),
+    # Generation 1
+    #("HistoryAwareExecutor",         HistoryAwareExecutor,         {"history_k": 5}),
+    #("SequencePlannerExecutor",      SequencePlannerExecutor,      {}),
+    #("SubgoalDecomposerExecutor",    SubgoalDecomposerExecutor,    {"steps_per_subgoal": 7}),
+    #("ScreenDiffExecutor",           ScreenDiffExecutor,           {}),
+    #("SelfConsistencyExecutor",      SelfConsistencyExecutor,      {"k": 3, "temperature": 0.7}),
+    ("ReflectiveExecutor",           ReflectiveExecutor,           {"reflection_interval": 5}),
+    # Generation 2
+    #("SpatialMapExecutor",           SpatialMapExecutor,           {}),
+    #("ConfidenceGatedExecutor",      ConfidenceGatedExecutor,      {"low_confidence_threshold": 2}),
+    # Generation 3
+    #("ActionValueEstimatorExecutor", ActionValueEstimatorExecutor, {}),
+    #("BeliefStateExecutor",          BeliefStateExecutor,          {}),
+    #("AdversarialSamplingExecutor",  AdversarialSamplingExecutor,  {}),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -163,31 +184,47 @@ def deep_test(executor_cls, name, row, max_env_steps, extra_kwargs=None):
     return (name, report.outcome, report.termination_reason, step_count, invalid_count, None)
 
 
-if __name__ == "__main__":
-    row = get_benchmark_tasks(game="pokemon_red").iloc[0]
-    max_env_steps = 20
+@click.command()
+@click.option("--game", default="pokemon_red", type=click.Choice(AVAILABLE_GAMES))
+@click.option("--random_sample", default=None, type=int, help="Number of tasks to sample; omit to run all.")
+@click.option("--max_env_steps", default=20, type=int)
+def main(game, random_sample, max_env_steps):
+    benchmark_tasks = get_benchmark_tasks(game=game)
+    if random_sample is not None:
+        benchmark_tasks = benchmark_tasks.sample(n=random_sample, random_state=42).reset_index(drop=True)
 
-    results = []
-    for name, cls, extra_kwargs in EXECUTORS:
+    for task_idx, row in benchmark_tasks.iterrows():
+        print(f"\n{'#'*60}")
+        print(f"TASK {task_idx}  ({game})")
+        for col in row.index:
+            print(f"  {col}: {row[col]}")
+        print(f"{'#'*60}")
+
+        results = []
+        for name, cls, extra_kwargs in EXECUTORS:
+            print(f"\n{'='*60}")
+            print(f"Running: {name}")
+            print(f"{'='*60}")
+            try:
+                result = deep_test(cls, name, row, max_env_steps, extra_kwargs)
+                results.append(result)
+            except Exception as e:
+                import traceback
+                print(f"  ERROR: {e}")
+                traceback.print_exc()
+                results.append((name, None, "error", 0, 0, str(e)))
+
         print(f"\n{'='*60}")
-        print(f"Running: {name}")
+        print(f"SUMMARY — task {task_idx}")
         print(f"{'='*60}")
-        try:
-            result = deep_test(cls, name, row, max_env_steps, extra_kwargs)
-            results.append(result)
-        except Exception as e:
-            import traceback
-            print(f"  ERROR: {e}")
-            traceback.print_exc()
-            results.append((name, None, "error", 0, 0, str(e)))
+        print(f"{'Executor':<32} {'Outcome':>7} {'Reason':<12} {'Steps':>6} {'Invalid':>8}")
+        print("-" * 68)
+        for name, outcome, reason, n_steps, n_invalid, err in results:
+            if err:
+                print(f"  {name:<30} {'ERR':>7} {str(reason):<12} {'-':>6} {'-':>8}  {err[:40]}")
+            else:
+                print(f"  {name:<30} {str(outcome):>7} {str(reason):<12} {n_steps:>6} {n_invalid:>8}")
 
-    print(f"\n{'='*60}")
-    print("SUMMARY")
-    print(f"{'='*60}")
-    print(f"{'Executor':<32} {'Outcome':>7} {'Reason':<12} {'Steps':>6} {'Invalid':>8}")
-    print("-" * 68)
-    for name, outcome, reason, n_steps, n_invalid, err in results:
-        if err:
-            print(f"  {name:<30} {'ERR':>7} {str(reason):<12} {'-':>6} {'-':>8}  {err[:40]}")
-        else:
-            print(f"  {name:<30} {str(outcome):>7} {str(reason):<12} {n_steps:>6} {n_invalid:>8}")
+
+if __name__ == "__main__":
+    main()

@@ -1,3 +1,8 @@
+"""
+Usage: python run_benchmark_zeroshot.py --game pokemon_red --save_video True --max_resets 3 --max_steps 30
+python run_benchmark_zeroshot.py --game pokemon_red --save_video True --max_resets 3 --max_steps 30 --random_sample 2
+"""
+
 from gameboy_worlds import (
     AVAILABLE_GAMES,
     get_environment,
@@ -6,104 +11,98 @@ from gameboy_worlds import (
 )
 import click
 from utils import load_parameters
-from execution.supervisor import SimpleSupervisor
-from execution.pokemon.executors import PokemonExecutor
-from execution.pokemon.reports import SimplePokemonExecutionReport
+from execution.registry import AVAILABLE_EXECUTORS
+from deep_test_executor import print_trajectory
 from tqdm import tqdm
 import pandas as pd
 import traceback
 import os
 
 
-def run_task(row, max_resets, controller_variant, **emulator_kwargs):
+def run_task(row, max_resets, controller_variant, executor_class, max_tool_calls, vlm_model=None, vlm_kind=None, verbose=False, **emulator_kwargs):
     success = False
     n_resets = 1
     n_steps_total = 0
-    n_steps = 0
+    n_invalid_total = 0
     subgoals_reached = []
     subgoals_all = None
     mission = row["task"]
     task_str = mission.replace(" ", "_").lower()
     emulator_kwargs = emulator_kwargs.copy()
     emulator_kwargs["session_name"] += f"/{task_str}/"
-    environment = get_test_environment(
-        row=row, controller_variant=controller_variant, **emulator_kwargs
-    )
-    supervisor = SimpleSupervisor(
-        game=row["game"],
-        environment=environment,
-        executor_class=PokemonExecutor,
-        execution_report_class=SimplePokemonExecutionReport,
-    )
-    supervisor.setup_play(
-        mission=mission,
-        initial_visual_context="You are seeing a screenshot of the game.",
-    )
     try:
         while n_resets < max_resets + 1:
-            supervisor_report = supervisor.play()
-            if len(supervisor_report.execution_reports) > 0:
-                last_kwargs, last_execution_report = (
-                    supervisor_report.execution_reports[-1]
-                )
-                last_execution_states = last_execution_report.get_state_infos()
-                # updated n_steps
-                if len(last_execution_states) == 0:  # manually check for success
-                    last_state = environment.get_info()
-                else:
-                    last_state = last_execution_states[-1]
-                # update subgoals
-                if subgoals_all is None:
-                    subgoals_all = last_state["subgoals"]["all"]
-                subgoals_completed = last_state["subgoals"]["completed"]
-                for subgoal in subgoals_completed:
-                    if subgoal not in subgoals_reached:
-                        subgoals_reached.append(subgoal)
-                step_count = last_state["core"]["steps"]
-                n_steps = step_count  # this counts all steps across resets
-                n_steps_total += n_steps
-                if last_execution_report.exit_code == 2:
-                    success = True
-                    break
-                if "termination_truncation" in last_state:
-                    if last_state["termination_truncation"]["terminated"]:
-                        success = True
-                        break
-            n_steps = 0
+            environment = get_test_environment(
+                row=row, controller_variant=controller_variant, **emulator_kwargs
+            )
+            executor = executor_class(
+                env=environment,
+                task=mission,
+                max_steps=emulator_kwargs["max_steps"],
+                max_tool_calls=max_tool_calls,
+                vlm_model=vlm_model,
+                vlm_kind=vlm_kind,
+            )
+            report = executor.report
+            last_state = environment.get_info()
+
+            if subgoals_all is None:
+                subgoals_all = last_state["subgoals"]["all"]
+            for subgoal in last_state["subgoals"]["completed"]:
+                if subgoal not in subgoals_reached:
+                    subgoals_reached.append(subgoal)
+
+            n_steps_total += last_state["core"]["steps"]
+            n_invalid_total += len(report.invalid_steps)
+
+            if verbose:
+                print(f"\n  Reset {n_resets} trajectory:")
+                print_trajectory(report)
+
+            environment.close()
+
+            if report.termination_reason == "terminated":
+                success = True
+                break
             n_resets += 1
 
     except Exception as e:
         traceback.print_exc()
         print(f"Error during execution of task '{mission}': {e}")
-    environment.close()
-    return success, n_resets - 1, n_steps_total, subgoals_reached, subgoals_all
+    return success, n_resets - 1, n_steps_total, n_invalid_total, subgoals_reached, subgoals_all
 
 
 @click.command()
 @click.option("--game", default="pokemon_red", type=click.Choice(AVAILABLE_GAMES))
-@click.option(
-    "--controller_variant",
-    default="state_wise",
-    type=str,
-)
+@click.option("--controller_variant", default="low_level", type=str)
+@click.option("--executor", default="simple", type=click.Choice(list(AVAILABLE_EXECUTORS.keys())))
+@click.option("--executor_vlm_model", default=None, type=str)
+@click.option("--executor_vlm_kind", default=None, type=str)
 @click.option("--save_video", type=bool, default=True)
 @click.option("--max_resets", default=3, type=int)
 @click.option("--max_steps", default=200, type=int)
+@click.option("--max_tool_calls", default=0, type=int)
 @click.option("--override_index", default=None, type=int, required=False)
 @click.option("--random_sample", type=int, default=None)
+@click.option("--verbose", is_flag=True, default=False)
 def do(
     game,
     controller_variant,
+    executor,
+    executor_vlm_model,
+    executor_vlm_kind,
     save_video,
     max_resets,
     max_steps,
+    max_tool_calls,
     override_index,
     random_sample,
+    verbose,
 ):
     project_parameters = load_parameters()
-    executor_vlm_name = project_parameters["executor_vlm_model"]
-    model_save_name = executor_vlm_name.split("/")[-1].lower()
-    session_name = f"benchmark_zero_shot_{model_save_name}"
+    vlm_name = executor_vlm_model or project_parameters["executor_vlm_model"]
+    model_save_name = vlm_name.split("/")[-1].lower()
+    session_name = f"benchmark_zero_shot_{executor}_{model_save_name}"
     headless = True
     emulator_kwargs = {
         "headless": headless,
@@ -119,6 +118,7 @@ def do(
         "success",
         "n_resets",
         "n_steps",
+        "n_invalid",
         "subgoals_reached",
         "all_subgoals",
     ]
@@ -138,10 +138,15 @@ def do(
             print(f"Running override index {override_index} on row:")
             for column in row.index:
                 print(f"  {column}: {row[column]}")
-        success, n_resets, n_steps, subgoals_reached, subgoals_all = run_task(
+        success, n_resets, n_steps, n_invalid, subgoals_reached, subgoals_all = run_task(
             row=row,
             max_resets=max_resets,
             controller_variant=controller_variant,
+            executor_class=AVAILABLE_EXECUTORS[executor],
+            max_tool_calls=max_tool_calls,
+            vlm_model=executor_vlm_model,
+            vlm_kind=executor_vlm_kind,
+            verbose=verbose,
             **emulator_kwargs,
         )
         results.append(
@@ -151,12 +156,13 @@ def do(
                 success,
                 n_resets,
                 n_steps,
+                n_invalid,
                 subgoals_reached,
                 subgoals_all,
             ]
         )
         df = pd.DataFrame(results, columns=columns)
-        save_path = f"results/benchmark_zero_shot_{game}_{model_save_name}.csv"
+        save_path = f"results/benchmark_zero_shot_{game}_{executor}_{model_save_name}.csv"
         df.to_csv(save_path, index=False)
         print(f"Saved benchmark results to {save_path}")
 

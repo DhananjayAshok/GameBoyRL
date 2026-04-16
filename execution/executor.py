@@ -100,6 +100,8 @@ class Executor(ABC):
         max_steps: int,
         max_tool_calls: int,
         parameters: Optional[dict] = None,
+        vlm_model: Optional[str] = None,
+        vlm_kind: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
         self._env = env
@@ -107,6 +109,10 @@ class Executor(ABC):
         self._max_steps = max_steps
         self._max_tool_calls = max_tool_calls
         self._parameters = load_parameters(parameters)
+        if vlm_model is not None:
+            self._parameters["executor_vlm_model"] = vlm_model
+        if vlm_kind is not None:
+            self._parameters["executor_vlm_kind"] = vlm_kind
         self._vlm = ExecutorVLM(parameters=self._parameters)
 
         self.report = self._make_report(task, kwargs, max_steps, max_tool_calls)
