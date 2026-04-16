@@ -20,26 +20,36 @@ from utils import load_parameters
 from utils.vlm import VLM, convert_numpy_greyscale_to_pillow
 
 
-def plot_obs_transitions(observations, save_name):
-    # given list of frames (H x W) plot all the frames with horizontal concatenation as an image
+try:
+    _FONT = ImageFont.load_default(size=14)
+except TypeError:
+    _FONT = ImageFont.load_default()
+
+
+def plot_transitions(observations, save_name, high_level_actions=None):
     total_height = observations[0].shape[0]
     total_width = sum(obs.shape[1] for obs in observations)
     single_image = np.zeros((total_height, total_width), dtype=observations[0].dtype)
     current_x = 0
-    for i, obs in enumerate(observations):
+    for obs in observations:
         w = obs.shape[1]
-        single_image[:, current_x:current_x+w] = obs[:, :]  # assuming (H, W, 1)
+        single_image[:, current_x:current_x + w] = obs[:, :]
         current_x += w
     img = convert_numpy_greyscale_to_pillow(single_image)
     draw = ImageDraw.Draw(img)
     current_x = 0
     for i, obs in enumerate(observations):
         w = obs.shape[1]
-        bg = np.mean(obs[:8, :max(w, 8)])
-        fill = 0 if bg > 127 else 255
-        draw.text((current_x + 2, 2), str(i), fill=fill)
+        bg_top = np.mean(obs[:12, :max(w, 12)])
+        fill = 0 if bg_top > 127 else 255
+        draw.text((current_x + 2, 2), str(i), fill=fill, font=_FONT)
+        if high_level_actions is not None and i < len(high_level_actions):
+            label = str(high_level_actions[i][1]['low_level_action']).replace("LowLevelActions.PRESS_BUTTON_", "").replace("LowLevelActions.PRESS_ARROW_", "")
+            bg_bot = np.mean(obs[-12:, :max(w, 12)])
+            fill_bot = 0 if bg_bot > 127 else 255
+            draw.text((current_x + 2, total_height - 16), label, fill=fill_bot, font=_FONT)
         current_x += w
-    img.save(save_name)    
+    img.save(save_name)
 
 
 
@@ -71,14 +81,14 @@ def show(trajectory_path, frac, group_idx, traj_idx):
         os.makedirs(group_dir, exist_ok=True)
         if traj_idx is not None:
             trajectory = trajectory_group[traj_idx]
-            observations = trajectory[0]
+            observations, _, high_level_actions, _ = trajectory
             save_path = group_dir + f"/traj_{traj_idx}.png"
-            plot_obs_transitions(observations, save_path)
+            plot_transitions(observations, save_path, high_level_actions=high_level_actions)
             print(f"Saved {save_path}")
         else:
             for j, trajectory in tqdm(enumerate(trajectory_group), leave=False, total=len(trajectory_group)):
-                observations = trajectory[0]
-                plot_obs_transitions(observations, group_dir + f"/traj_{j}.png")
+                observations, _, high_level_actions, _ = trajectory
+                plot_transitions(observations, group_dir + f"/traj_{j}.png", high_level_actions=high_level_actions)
             if group_idx is not None:
                 print(f"Saved {group_dir}/")
     if group_idx is None and traj_idx is None:
