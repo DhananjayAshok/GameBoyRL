@@ -44,7 +44,7 @@ def save(obj):
         
     data_dir = parameters["data_dir"] 
     rest_of_path = out_dir.split("grouped_trajectories/")[-1]
-    data_dir = os.path.join(data_dir, rest_of_path)
+    data_dir = os.path.join(data_dir, rest_of_path, model_save_name)
     image_dir = os.path.join(data_dir, "images")
     if os.path.exists(data_dir):
         if obj["overwrite"]:

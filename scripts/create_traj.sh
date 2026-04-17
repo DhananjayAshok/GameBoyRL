@@ -89,6 +89,7 @@ if [ "${ARGS["sweep"]}" == "true" ]; then
 else
     sweep_run_name="iterative_agent"
 fi
+init_state_group=${ARGS["init_state_group"]}
 replay_buffer_save_folder=${ARGS["run_name"]}/${init_state_group}/$sweep_run_name/
 echo "Setting replay_buffer_save_folder to $replay_buffer_save_folder for iterative training"
 
