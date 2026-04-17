@@ -63,4 +63,4 @@ common="python run_benchmark_zeroshot.py --game ${ARGS["game"]} --save_video Tru
 
 $common --random_sample ${ARGS["random_sample"]} --verbose
 
-$common
+#$common

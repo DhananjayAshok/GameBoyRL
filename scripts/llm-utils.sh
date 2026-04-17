@@ -21,7 +21,7 @@ cd llm-utils || { echo "Could not cd into llm-utils"; exit 1; }
 
 # Run the full command exactly as provided
 echo "Running command: $to_run_command"
-#eval "$to_run_command"
+eval "$to_run_command"
 
 
 # Return and reactivate project environment
