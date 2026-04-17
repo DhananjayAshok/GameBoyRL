@@ -89,7 +89,7 @@ video_session_dir="$gameboy_worlds_storage_dir/sessions/${ARGS["game"]}/"
 keep_arg_str=""
 if [[ "${ARGS["replay_buffer_save_folder"]}" != "none" ]]; then
     keep_arg_str+="--replay_buffer_save_folder $storage_dir/replay_buffers/${ARGS["game"]}/${ARGS["replay_buffer_save_folder"]} "
-    rm -rf $storage_dir/replay_buffers/${ARGS["game"]}/${ARGS["replay_buffer_save_folder"]}/*
+    #rm -rf $storage_dir/replay_buffers/${ARGS["game"]}/${ARGS["replay_buffer_save_folder"]}/*
 else
     ARGS["clear_loser_replay_buffer"]="false" # force false if replay buffer isn't saved in the first place. 
 fi

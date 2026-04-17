@@ -203,7 +203,7 @@ populate_dict ALL_DEFAULTS CREATE_DATASET_DEFAULTS
 CREATE_DATASET_DEFAULTS["overwrite"]=false
 CREATE_DATASET_DEFAULTS["verbose"]=false
 CREATE_DATASET_DEFAULTS["max_new_tokens"]=1000
-CREATE_DATASET_DEFAULTS["max_trajectories_per_group"]=20
+CREATE_DATASET_DEFAULTS["max_trajectories_per_group"]=50
 CREATE_DATASET_DEFAULTS["lookback"]=8
-CREATE_DATASET_DEFAULTS["describe_pairs"]=false
+CREATE_DATASET_DEFAULTS["describe_pairs"]=true
 CREATE_DATASET_DEFAULTS["safety_rollback"]=2

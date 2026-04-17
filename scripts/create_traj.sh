@@ -75,6 +75,12 @@ done
 
 if [ "$FAILED" = true ]; then usage; fi
 
+# error out if run_name is none or unset
+if [[ -z "${ARGS["run_name"]}" || "${ARGS["run_name"]}" == "none" ]]; then
+    echo "Error: --run_name is required and cannot be 'none'."
+    usage
+fi
+
 # Print active variables
 echo "Script: $0 Active variables:"
 for key in "${!ARGS[@]}"; do
@@ -99,6 +105,8 @@ echo "Setting replay_buffer_save_folder to $replay_buffer_save_folder for iterat
 if [ "${ARGS["skip_training"]}" == "true" ]; then
     echo "Skipping training as per --skip_training flag."
 else
+    echo "Clearing replay buffer for iterative training..."
+    rm -rf $storage_dir/replay_buffers/${ARGS["game"]}/$replay_buffer_save_folder/* # clear replay buffer to ensure we don't have old trajectories lying around.
     run_name=${ARGS["run_name"]}
     echo "Run name: $run_name | Setting model_dir to run_name for iterative training"
     ARGS["model_dir"]="${run_name}"
