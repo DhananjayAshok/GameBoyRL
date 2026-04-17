@@ -6,3 +6,7 @@
 	path = GameBoyWorlds
 	url = https://github.com/DhananjayAshok/GameBoyWorlds
 	branch = main
+[submodule "llm-utils"]
+	path = llm-utils
+	url = https://github.com/DhananjayAshok/llm-utils
+	branch = app
