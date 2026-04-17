@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+
+source scripts/utils.sh || { echo "Could not source utils"; exit 1; }
+
+# Define defaults and required args. 
+# These should be specific to this script and not shared across scripts (that is handled below).
+declare -A ARGS
+ARGS["batch_size"]="16"
+ARGS["num_train_epochs"]="50"
+ARGS["lora_rank"]="32"
+ARGS["lora_alpha"]="32"
+ARGS["learning_rate"]="2e-4"
+ARGS["weight_decay"]="0.01"
+
+REQUIRED_ARGS=("train_file" "model_name" "run_name")
+
+# Handle parsing and input errors below:
+ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
+
+USAGE_STR="Usage: $0"
+
+# Add Required to string
+for req in "${REQUIRED_ARGS[@]}"; do
+    USAGE_STR+=" --$req <value>"
+done
+
+# Add Optionals to string
+for opt in "${!ARGS[@]}"; do
+    # Only list if NOT in required (to avoid double listing)
+    if [[ ! " ${REQUIRED_ARGS[*]} " =~ " ${opt} " ]]; then
+        if [[ -z "${ARGS[$opt]}" ]]; then
+            echo "DEFAULT VALUE OF KEY \"$opt\" CANNOT BE BLANK"
+            exit 1
+        fi
+        USAGE_STR+=" [--$opt <value> (default: ${ARGS[$opt]})]"
+    fi
+done
+
+function usage() {
+    echo "$USAGE_STR"
+    exit 1
+}
+
+# Parser
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --*)
+            FLAG=${1#--}
+            VALID=false
+            for allowed in "${ALLOWED_FLAGS[@]}"; do
+                if [[ "$FLAG" == "$allowed" ]]; then
+                    VALID=true
+                    break
+                fi
+            done
+            if [ "$VALID" = false ]; then
+                echo "Error: Unknown flag --$FLAG"
+                usage
+            fi
+            ARGS["$FLAG"]="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            ;;
+        *)
+            echo "Unknown argument: $1"
+            usage
+            ;;
+    esac
+done
+
+# Validation
+for req in "${REQUIRED_ARGS[@]}"; do
+    echo $req : "${ARGS[$req]}"
+    if [[ -z "${ARGS[$req]}" ]]; then
+        echo "Error: Argument --$req is required."
+        FAILED=true
+    fi
+done
+
+if [ "$FAILED" = true ]; then usage; fi
+
+# Print active variables
+echo "Script: $0 Active variables:"
+for key in "${!ARGS[@]}"; do
+    echo "  -$key = ${ARGS[$key]}"
+done
+
+
+
+
+model_name="${ARGS["model_name"]}"
+model_save_name="${model_name#*/}"
+
+
+
+
+
+bash scripts/llm-utils.sh python train.py --training_kind sft --modality vlm --model_name ${ARGS["model_name"]} \
+        --output_dir $storage_dir/models/${ARGS["run_name"]}/$model_save_name \
+        --train_file ${ARGS["train_file"]}  \
+        --run_name vlm-sft-${ARGS["run_name"]}-$model_save_name \
+        --per_device_train_batch_size ${ARGS["batch_size"]} --per_device_eval_batch_size ${ARGS["batch_size"]} \
+        --train_validation_split 0.85 \
+        --logging_strategy steps --logging_steps 200 \
+        --save_strategy epoch --save_steps 0.5 \
+        --eval_strategy epoch --eval_steps 0.5 \
+        --early_stopping_patience 5 --load_best_model_at_end \
+        --num_train_epochs ${ARGS["num_train_epochs"]} \
+        --lora_rank ${ARGS["lora_rank"]} \
+        --lora_alpha ${ARGS["lora_alpha"]} \
+        --learning_rate ${ARGS["learning_rate"]} \
+        --weight_decay ${ARGS["weight_decay"]} \
