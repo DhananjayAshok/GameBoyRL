@@ -11,7 +11,6 @@ populate_array SWEEP_ESSENTIALS REQUIRED_ARGS
 ARGS["n_agents"]=4
 ARGS["sweep"]=false
 ARGS["combination_buffer_sweep"]=true
-ARGS["call_grouping"]=false
 ARGS["init_state_group"]="none"
 ARGS["run_name"]="iterative"
 combination_buffer_ocr_alphas=(0.5 1.0)
@@ -191,8 +190,3 @@ for ((i=0; i<${ARGS["n_agents"]}; i++)); do
     prev_buffer_load_path=$buffer_save_path
     buffer_save_path="${all_buffer_save_paths}$((i+2))"
 done
-
-# if call_grouping
-if [ "${ARGS["call_grouping"]}" == "true" ]; then
-    bash scripts/group_trajectories.sh --game ${ARGS["game"]} --replay_buffer_folder $replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/$replay_buffer_save_folder/ --z_min 6.0
-fi

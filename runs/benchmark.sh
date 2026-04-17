@@ -4,8 +4,8 @@ source scripts/utils.sh || { echo "Could not source utils"; exit 1; }
 
 # Script-specific defaults and required args
 declare -A ARGS
-ARGS["executor_vlm_model"]="google/gemini-3.1-pro-preview"
-ARGS["executor_vlm_kind"]="openrouter"   # use "none" for absent optionals, never ""
+ARGS["executor_vlm_model"]="Qwen/Qwen3-VL-8B-Instruct"   # use "none" for absent optionals, never ""
+ARGS["executor_vlm_kind"]="huggingface"   # use "none" for absent optionals, never ""
 ARGS["max_steps"]="20"
 ARGS["max_resets"]="3"
 ARGS["random_sample"]="2"
@@ -51,15 +51,10 @@ done
 if [ "$FAILED" = true ]; then usage; fi
 # --- End argument parsing ---
 
-# Put your script code below:
-
-model_name="google/gemini-3.1-pro-preview"
-model_kind="openrouter"
-
-game="pokemon_red"
-max_resets=3
-max_steps=30
-
+echo "Script: $0 Active variables:"
+for key in "${!ARGS[@]}"; do
+    echo "  -$key = ${ARGS[$key]}"
+done
 
 regenerate_flag=""
 if [[ "${ARGS["regenerate"]}" == "true" ]]; then regenerate_flag="--regenerate"; fi

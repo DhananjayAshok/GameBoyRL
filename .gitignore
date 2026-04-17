@@ -176,5 +176,6 @@ cython_debug/
 setup/.venv
 videos/
 results/
+save_frames/
 *.out
 configs/config.env

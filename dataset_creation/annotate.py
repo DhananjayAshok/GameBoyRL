@@ -49,7 +49,7 @@ Over the course of some of these frames, a single primary task may have been per
 Describe, with a single phrase, the action or task the player performed over the course these frames? Do not use conjunctions like "and" or "while" in your description. If there are multiple distinct tasks that seem to be happening, try to describe the whole subtrajectory wholistically and omit the less important subtasks. If there is no clear task, say "NO TASK".
 Be specific but concise, each task should be a single, specific and meaningful action and not trivial. Describe only what is clearly supported by the evidence above.
 
-If there is no clear task, respond with "NO TASK"
+Always try to pick the longest horizon, most multistep version of the task that is present in the trajectory. If there is no clear task, respond with "NO TASK"
 Otherwise, respond in exactly this format:
 Visual Description: <a description of the individual frames and changes that occur from leftmost frame to rightmost frame>
 Reasoning: <one single, short sentence describing your thinking. Reference visual evidence of the key frames and overall actions that led you to infer this task.>
@@ -126,14 +126,9 @@ Reasoning: <refined reasoning that justifies exactly why the action was taken in
 # ---------------------------------------------------------------------------
 
 def high_level_action_to_string(high_level_action_class, kwargs: dict) -> str:
-    # TODO: populate this mapping from (class, kwargs) to a descriptive string
-    mapping = {}
-    key = (high_level_action_class, tuple(sorted(kwargs.items())))
-    if key in mapping:
-        return mapping[key]
-    # Fallback: ClassName(key=value, ...)
-    kwargs_str = ", ".join(f"{k}={v}" for k, v in kwargs.items())
-    return f"{high_level_action_class.__name__}({kwargs_str})"
+    action = str(kwargs["low_level_action"]).replace("LowLevelActions.PRESS_ARROW_", "").replace("LowLevelActions.PRESS_BUTTON_", "")
+    return action
+    
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +139,9 @@ def _parse_key(text: str, key: str) -> str | None:
     """Return the value after 'key:' on the matching line, stripping [stop]. Case-insensitive.
     Returns None if the key is not found or the value is empty."""
     text = text.lower()
+    # if there is only one response: , then only get the stuff after
+    if text.count("response:") == 1:
+        text = text.split("response:")[1].strip()
     key = key.lower()
     n_keys = text.count(f"{key}:")
     if n_keys == 0:
@@ -205,6 +203,17 @@ def _parse_infer_block(text: str, window_offset: int = 0, n_obs: int = None) -> 
             end = max(0, min(end, n_obs - 2))
     return {"task": task, "start": start, "end": end}
 
+
+def got_bigger(subject, refined_subject, multiplier=1.5):
+    if refined_subject is None:
+        return None
+    subject_count = subject.count(" ")
+    refined_count = refined_subject.count(" ")
+    if refined_count > multiplier * subject_count:
+        return True
+    else:
+        return False
+    
 
 # ---------------------------------------------------------------------------
 # Core functions
@@ -297,7 +306,11 @@ def infer_task(trajectory, vlm: VLM, game: str, max_new_tokens: int, lookback: i
         print(f"REFINE output:\n{refine_output}\n---")
     refined_task = _parse_key(refine_output, "Task")
     if refined_task is None:
-        refined_task = refine_output.lower().split("[stop]")[0].strip()  # fallback: take everything before [stop]
+        refined_task = refine_output.lower().split("[stop]")[0].strip()  # fallback: take everything before [stop]    
+    task = parsed_block["task"]
+    if got_bigger(task, refined_task):
+       refined_task = task
+    
 
     if verbose:
         print(f"Final inferred task: {refined_task}, start: {parsed_block['start']}, end: {parsed_block['end']}")
@@ -354,37 +367,8 @@ def infer_group_tasks(
 # Click interface
 # ---------------------------------------------------------------------------
 
-@click.group()
-@click.option("--model_name", required=True, help="VLM model name (e.g. gpt-4o)")
-@click.option(
-    "--vlm_kind",
-    required=True,
-    type=click.Choice(["openai", "anthropic", "openrouter", "huggingface"]),
-    help="VLM backend kind",
-)
-@click.option("--trajectory_path", required=True, help="Path to grouped_high_reward_trajectories.pkl")
-@click.option("--game", required=True, help="Game name used in prompts (e.g. 'Pokemon Red')")
-@click.option("--overwrite", is_flag=True, default=False, help="Overwrite existing output files.")
-@click.option("--verbose", is_flag=True, default=False, help="Print prompts and outputs during annotation.")
-@click.option("--max_new_tokens", default=1000, show_default=True, help="Max tokens for each VLM call")
-@click.pass_context
-def main(ctx, model_name, vlm_kind, trajectory_path, game, overwrite, verbose, max_new_tokens):
-    parameters = load_parameters()
-    np.random.seed(parameters['random_seed'])
-    vlm = VLM(model_name, vlm_kind)
-    ctx.obj = dict(
-        vlm=vlm,
-        trajectory_path=trajectory_path,
-        game=game,
-        parameters=parameters,
-        model_name=model_name,
-        overwrite=overwrite,
-        verbose=verbose,
-        max_new_tokens=max_new_tokens,
-    )
 
-
-@main.command()
+@click.command()
 @click.option("--lookback", default=8, show_default=True, help="Number of frames from the end of each trajectory to analyse")
 @click.option("--max_trajectories_per_group", default=20, show_default=True, help="Max trajectories to sample per group")
 @click.option("--describe_pairs", is_flag=True, default=False, help="Run pairwise DESCRIBE stage before INFER.")
@@ -392,10 +376,11 @@ def main(ctx, model_name, vlm_kind, trajectory_path, game, overwrite, verbose, m
 def infer(obj, lookback, max_trajectories_per_group, describe_pairs):
     """Infer task strings for each trajectory group."""
     max_new_tokens = obj["max_new_tokens"]
-    vlm = obj["vlm"]
+    vlm_kind = obj["vlm_kind"]
     trajectory_path = obj["trajectory_path"]
     game = obj["game"]
     model_name = obj["model_name"]
+    vlm = VLM(model_name, vlm_kind)
     model_save_name = model_name.split("/")[-1]
 
     out_dir = os.path.dirname(trajectory_path)
@@ -425,16 +410,17 @@ def infer(obj, lookback, max_trajectories_per_group, describe_pairs):
     print(f"Saved trajectory annotations → {traj_path}")
 
 
-@main.command()
+@click.command()
 @click.option("--safety_rollback", default=2, show_default=True, help="Extra steps before task start to include")
 @click.pass_obj
 def reason(obj, safety_rollback):
     """Dense step-wise reasoning annotation for each task in each trajectory."""
     max_new_tokens = obj["max_new_tokens"]
-    vlm = obj["vlm"]
+    vlm_kind = obj["vlm_kind"]
     trajectory_path = obj["trajectory_path"]
     game = obj["game"]
     model_name = obj["model_name"]
+    vlm = VLM(model_name, vlm_kind)
     model_save_name = model_name.split("/")[-1]
     verbose = obj["verbose"]
 
@@ -527,10 +513,12 @@ def reason(obj, safety_rollback):
                     if verbose:
                         print(f"REASON_REFINE output:\n{refine_output}\n---")
                     refined_reasoning = _parse_key(refine_output, "Reasoning")
-                    if refined_reasoning is not None:
-                        reasoning = refined_reasoning
+                    if refined_reasoning is None:
+                        refined_reasoning = refine_output.lower().split("[stop]")[0].strip()
+                    if got_bigger(reasoning, refined_reasoning, multiplier=3.0):
+                        pass
                     else:
-                        reasoning = refine_output.lower().split("[stop]")[0].strip()
+                        reasoning = refined_reasoning
 
                 if verbose:
                     print(f"Final reasoning (good_action={good_action}) for group {group_idx} traj {traj_idx} step {abs_step}:\n{reasoning}\n===")
@@ -553,8 +541,3 @@ def reason(obj, safety_rollback):
     with open(out_path, "w") as f:
         json.dump(dense_output, f, indent=2)
     print(f"Saved dense annotation → {out_path}")
-
-
-
-if __name__ == "__main__":
-    main()

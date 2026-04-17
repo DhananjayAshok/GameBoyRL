@@ -323,6 +323,18 @@ class SimpleExecutor(Executor):
         Per :class:`Executor` contract, call ``super().__init__()`` **last**.
     """
 
+    STEP_PROMPT = """Task: [TASK]
+
+You are playing a GameBoy game. The current screen is shown in the image.
+
+[ERROR_BLOCK][TOOL_RESULT_BLOCK]Available environment actions:
+[ACTION_LIST]
+
+[TOOLS_BLOCK]Reason about the best next action, then respond in exactly this format:
+Reasoning: <your reasoning>
+[ACTION_FORMAT]
+[STOP]"""
+
     def _make_report(self, task, init_kwargs, max_steps, max_tool_calls) -> SimpleReport:
         return SimpleReport(
             task=task,
@@ -453,58 +465,47 @@ class SimpleExecutor(Executor):
     # Prompt helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _error_block(error_message: Optional[str]) -> str:
+        return f"[ERROR] {error_message}\n\n" if error_message is not None else ""
+
+    @staticmethod
+    def _tool_result_block(tool_call_message: Optional[str]) -> str:
+        return f"Tool result: {tool_call_message}\n\n" if tool_call_message is not None else ""
+
+    def _action_list_block(self) -> str:
+        return "\n".join(f"  {s}" for s in self._get_action_strings().values())
+
+    def _tools_block(self, tool_calls_exceeded: bool) -> str:
+        if tool_calls_exceeded or not self.available_tools:
+            return ""
+        lines = [
+            f"Available tool calls (do not advance the game, {self._max_tool_calls} total budget):"
+        ]
+        for tool_class in self.available_tools:
+            lines.append(f"  {tool_class.verbalize()}")
+        return "\n".join(lines) + "\n\n"
+
+    def _action_format(self, tool_calls_exceeded: bool) -> str:
+        if not tool_calls_exceeded and self.available_tools:
+            return "Action: <one environment action OR one tool call>"
+        return "Action: <one environment action>"
+
     def _build_prompt(
         self,
         tool_call_message: Optional[str],
         error_message: Optional[str],
         tool_calls_exceeded: bool,
     ) -> str:
-        """Construct the text portion of the VLM prompt for one iteration."""
-        lines: List[str] = []
-
-        lines.append(f"Task: {self._task}")
-        lines.append("")
-        lines.append(
-            "You are playing a GameBoy game. The current screen is shown in the image."
+        return (
+            self.STEP_PROMPT
+            .replace("[TASK]", self._task)
+            .replace("[ERROR_BLOCK]", self._error_block(error_message))
+            .replace("[TOOL_RESULT_BLOCK]", self._tool_result_block(tool_call_message))
+            .replace("[ACTION_LIST]", self._action_list_block())
+            .replace("[TOOLS_BLOCK]", self._tools_block(tool_calls_exceeded))
+            .replace("[ACTION_FORMAT]", self._action_format(tool_calls_exceeded))
         )
-        lines.append("")
-
-        if error_message is not None:
-            lines.append(f"[ERROR] {error_message}")
-            lines.append("")
-
-        if tool_call_message is not None:
-            lines.append(f"Tool result: {tool_call_message}")
-            lines.append("")
-
-        # Available env actions
-        action_strings = self._get_action_strings()
-        lines.append("Available environment actions:")
-        for action_str in action_strings.values():
-            lines.append(f"  {action_str}")
-        lines.append("")
-
-        # Available tools (suppressed once budget is exhausted)
-        if not tool_calls_exceeded and self.available_tools:
-            lines.append(
-                "Available tool calls (do not advance the game, "
-                f"{self._max_tool_calls} total budget):"
-            )
-            for tool_class in self.available_tools:
-                lines.append(f"  {tool_class.verbalize()}")
-            lines.append("")
-
-        lines.append(
-            "Reason about the best next action, then respond in exactly this format:"
-        )
-        lines.append("Reasoning: <your reasoning>")
-        if not tool_calls_exceeded and self.available_tools:
-            lines.append("Action: <one environment action OR one tool call>")
-        else:
-            lines.append("Action: <one environment action>")
-        lines.append("[STOP]")
-
-        return "\n".join(lines)
 
     def _parse_action(self, response: str) -> Optional[str]:
         """Extract the action string from a structured VLM response."""
@@ -554,28 +555,35 @@ class HistoryAwareExecutor(SimpleExecutor):
         self._action_history.append((action_class, action_str, record.action_success))
         return record
 
+    STEP_PROMPT = """Task: [TASK]
+
+You are playing a GameBoy game. The current screen is shown in the image.
+
+[ERROR_BLOCK][TOOL_RESULT_BLOCK]Available environment actions:
+[ACTION_LIST]
+
+[TOOLS_BLOCK][HISTORY_SECTION]Reason about the best next action, then respond in exactly this format:
+Reasoning: <your reasoning>
+[ACTION_FORMAT]
+[STOP]"""
+
     def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
-        base = super()._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-        if not self._action_history:
-            return base
-        recent = self._action_history[-self._history_k:]
-        history_lines = ["Recent actions (oldest first):"]
-        for action_cls, action_str, success in recent:
-            if issubclass(action_cls, LowLevelAction):
-                history_lines.append(f"  {action_str}")
-            else:
-                status = "ok" if success == 1 else ("failed" if success == 0 else "unknown")
-                history_lines.append(f"  {action_str}  [{status}]")
-        history_section = "\n".join(history_lines) + "\n"
-        # Insert history before the format instructions (last 4 lines)
-        lines = base.split("\n")
-        # Find the "Reason about" line and insert history before it
-        for i, line in enumerate(lines):
-            if line.startswith("Reason about"):
-                lines.insert(i, "")
-                lines.insert(i, history_section.rstrip())
-                break
-        return "\n".join(lines)
+        if self._action_history:
+            recent = self._action_history[-self._history_k:]
+            history_lines = ["Recent actions (oldest first):"]
+            for action_cls, action_str, success in recent:
+                if issubclass(action_cls, LowLevelAction):
+                    history_lines.append(f"  {action_str}")
+                else:
+                    status = "ok" if success == 1 else ("failed" if success == 0 else "unknown")
+                    history_lines.append(f"  {action_str}  [{status}]")
+            history_section = "\n".join(history_lines) + "\n\n"
+        else:
+            history_section = ""
+        return (
+            super()._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
+            .replace("[HISTORY_SECTION]", history_section)
+        )
 
 
 class SequencePlannerExecutor(SimpleExecutor):
@@ -683,30 +691,25 @@ class SequencePlannerExecutor(SimpleExecutor):
         self.report.termination_reason = "max_steps"
         return 0
 
+    SEQUENCE_PROMPT = """Task: [TASK]
+
+You are playing a GameBoy game. The current screen is shown in the image.
+
+[ERROR_BLOCK]Available environment actions:
+[ACTION_LIST]
+
+Plan a short sequence of actions (1–5) to make progress on the task. Respond in exactly this format:
+Reasoning: <your reasoning>
+Action: <ACTION1, ACTION2, ...>
+[STOP]"""
+
     def _build_sequence_prompt(self, error_message: Optional[str]) -> str:
-        lines: List[str] = []
-        lines.append(f"Task: {self._task}")
-        lines.append("")
-        lines.append("You are playing a GameBoy game. The current screen is shown in the image.")
-        lines.append("")
-
-        if error_message is not None:
-            lines.append(f"[ERROR] {error_message}")
-            lines.append("")
-
-        action_strings = self._get_action_strings()
-        lines.append("Available environment actions:")
-        for action_str in action_strings.values():
-            lines.append(f"  {action_str}")
-        lines.append("")
-        lines.append(
-            "Plan a short sequence of actions (1–5) to make progress on the task. "
-            "Respond in exactly this format:"
+        return (
+            self.SEQUENCE_PROMPT
+            .replace("[TASK]", self._task)
+            .replace("[ERROR_BLOCK]", self._error_block(error_message))
+            .replace("[ACTION_LIST]", self._action_list_block())
         )
-        lines.append("Reasoning: <your reasoning>")
-        lines.append("Action: <ACTION1, ACTION2, ...>")
-        lines.append("[STOP]")
-        return "\n".join(lines)
 
     def _parse_sequence(self, response: str) -> Optional[List[str]]:
         """Parse a comma-separated action sequence from a structured VLM response."""
@@ -739,21 +742,35 @@ class SubgoalDecomposerExecutor(SimpleExecutor):
         self._steps_on_subgoal: int = 0
         super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
 
+    DECOMPOSE_PROMPT = """Task: [TASK]
+
+You are playing a GameBoy game. The current screen is shown in the image.
+
+Break this task into 2-4 clear, ordered subgoals. Each subgoal should be a short action phrase.
+
+Respond in exactly this format:
+Subgoal 1: <first subgoal>
+Subgoal 2: <second subgoal>
+... (up to Subgoal 4)
+[STOP]"""
+
+    STEP_PROMPT = """Task: [TASK]
+[SUBGOAL_LINE]
+You are playing a GameBoy game. The current screen is shown in the image.
+
+[ERROR_BLOCK][TOOL_RESULT_BLOCK]Available environment actions:
+[ACTION_LIST]
+
+[TOOLS_BLOCK]Reason about the best next action, then respond in exactly this format:
+Reasoning: <your reasoning>
+[ACTION_FORMAT]
+[STOP]"""
+
     def _decompose_task(self) -> List[str]:
         """Call the VLM once to decompose the task into ordered subgoals."""
         state = self._get_state()
         frame = state["core"]["current_frame"]
-        prompt = (
-            f"Task: {self._task}\n\n"
-            "You are playing a GameBoy game. The current screen is shown in the image.\n\n"
-            "Break this task into 2-4 clear, ordered subgoals. "
-            "Each subgoal should be a short action phrase.\n\n"
-            "Respond in exactly this format:\n"
-            "Subgoal 1: <first subgoal>\n"
-            "Subgoal 2: <second subgoal>\n"
-            "... (up to Subgoal 4)\n"
-            "[STOP]"
-        )
+        prompt = self.DECOMPOSE_PROMPT.replace("[TASK]", self._task)
         response = self._vlm_call(
             "decompose",
             texts=prompt,
@@ -865,17 +882,15 @@ class SubgoalDecomposerExecutor(SimpleExecutor):
         return 0
 
     def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
-        base = super()._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-        if not self._subgoals:
-            return base
-        current_subgoal = self._subgoals[self._subgoal_idx]
-        subgoal_line = (
-            f"Current subgoal ({self._subgoal_idx + 1}/{len(self._subgoals)}): {current_subgoal}"
+        if self._subgoals:
+            current_subgoal = self._subgoals[self._subgoal_idx]
+            subgoal_line = f"Current subgoal ({self._subgoal_idx + 1}/{len(self._subgoals)}): {current_subgoal}"
+        else:
+            subgoal_line = ""
+        return (
+            super()._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
+            .replace("[SUBGOAL_LINE]", subgoal_line)
         )
-        lines = base.split("\n")
-        # Insert after the task line (line 0)
-        lines.insert(1, subgoal_line)
-        return "\n".join(lines)
 
 
 class ScreenDiffExecutor(SimpleExecutor):
@@ -978,52 +993,41 @@ class ScreenDiffExecutor(SimpleExecutor):
         self.report.termination_reason = "max_steps"
         return 0
 
+    DIFF_PROMPT_SINGLE = """Task: [TASK]
+
+You are playing a GameBoy game. The current screen is shown in the image.
+
+[ERROR_BLOCK][TOOL_RESULT_BLOCK]Available environment actions:
+[ACTION_LIST]
+
+[TOOLS_BLOCK]Reason about the best next action, then respond in exactly this format:
+Reasoning: <your reasoning>
+[ACTION_FORMAT]
+[STOP]"""
+
+    DIFF_PROMPT_PAIR = """Task: [TASK]
+
+You are playing a GameBoy game. Image 1 is the PREVIOUS screen, Image 2 is the CURRENT screen. Note what changed between frames to understand the effect of your last action.
+
+[ERROR_BLOCK][TOOL_RESULT_BLOCK]Available environment actions:
+[ACTION_LIST]
+
+[TOOLS_BLOCK]Reason about the best next action, then respond in exactly this format:
+Reasoning: <your reasoning>
+[ACTION_FORMAT]
+[STOP]"""
+
     def _build_diff_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
-        lines: List[str] = []
-        lines.append(f"Task: {self._task}")
-        lines.append("")
-        if self._prev_frame is not None:
-            lines.append(
-                "You are playing a GameBoy game. "
-                "Image 1 is the PREVIOUS screen, Image 2 is the CURRENT screen. "
-                "Note what changed between frames to understand the effect of your last action."
-            )
-        else:
-            lines.append(
-                "You are playing a GameBoy game. The current screen is shown in the image."
-            )
-        lines.append("")
-
-        if error_message is not None:
-            lines.append(f"[ERROR] {error_message}")
-            lines.append("")
-        if tool_call_message is not None:
-            lines.append(f"Tool result: {tool_call_message}")
-            lines.append("")
-
-        action_strings = self._get_action_strings()
-        lines.append("Available environment actions:")
-        for action_str in action_strings.values():
-            lines.append(f"  {action_str}")
-        lines.append("")
-
-        if not tool_calls_exceeded and self.available_tools:
-            lines.append(
-                f"Available tool calls (do not advance the game, "
-                f"{self._max_tool_calls} total budget):"
-            )
-            for tool_class in self.available_tools:
-                lines.append(f"  {tool_class.verbalize()}")
-            lines.append("")
-
-        lines.append("Reason about the best next action, then respond in exactly this format:")
-        lines.append("Reasoning: <your reasoning>")
-        if not tool_calls_exceeded and self.available_tools:
-            lines.append("Action: <one environment action OR one tool call>")
-        else:
-            lines.append("Action: <one environment action>")
-        lines.append("[STOP]")
-        return "\n".join(lines)
+        template = self.DIFF_PROMPT_PAIR if self._prev_frame is not None else self.DIFF_PROMPT_SINGLE
+        return (
+            template
+            .replace("[TASK]", self._task)
+            .replace("[ERROR_BLOCK]", self._error_block(error_message))
+            .replace("[TOOL_RESULT_BLOCK]", self._tool_result_block(tool_call_message))
+            .replace("[ACTION_LIST]", self._action_list_block())
+            .replace("[TOOLS_BLOCK]", self._tools_block(tool_calls_exceeded))
+            .replace("[ACTION_FORMAT]", self._action_format(tool_calls_exceeded))
+        )
 
 
 class SelfConsistencyExecutor(SimpleExecutor):
@@ -1180,27 +1184,39 @@ class ReflectiveExecutor(SimpleExecutor):
         self._steps_since_reflection += 1
         return record
 
+    REFLECTION_PROMPT = """Task: [TASK]
+
+[PRIOR_PLAN]Recent actions taken: [HISTORY]
+
+The current game screen is shown in the image.
+
+Briefly critique whether the recent actions made progress toward the task. Then state a concise plan for the next few steps (1-2 sentences). End your response with [STOP].
+[STOP]"""
+
+    STEP_PROMPT = """Task: [TASK]
+
+You are playing a GameBoy game. The current screen is shown in the image.
+
+[ERROR_BLOCK][TOOL_RESULT_BLOCK]Available environment actions:
+[ACTION_LIST]
+
+[TOOLS_BLOCK][PLAN_SECTION]Reason about the best next action, then respond in exactly this format:
+Reasoning: <your reasoning>
+[ACTION_FORMAT]
+[STOP]"""
+
     def _reflect(self, frame) -> None:
         history_str = ", ".join(self._reflection_action_log) if self._reflection_action_log else "none"
         self._reflection_action_log = []
         self._steps_since_reflection = 0
-
-        prior = f"Prior plan: {self._plan_summary}\n\n" if self._plan_summary else ""
+        prior_plan = f"Prior plan: {self._plan_summary}\n\n" if self._plan_summary else ""
         prompt = (
-            f"Task: {self._task}\n\n"
-            f"{prior}"
-            f"Recent actions taken: {history_str}\n\n"
-            "The current game screen is shown in the image.\n\n"
-            "Briefly critique whether the recent actions made progress toward the task. "
-            "Then state a concise plan for the next few steps (1-2 sentences).\n"
-            "[STOP]"
+            self.REFLECTION_PROMPT
+            .replace("[TASK]", self._task)
+            .replace("[PRIOR_PLAN]", prior_plan)
+            .replace("[HISTORY]", history_str)
         )
-        result = self._vlm_call(
-            "reflection",
-            texts=prompt,
-            images=[frame],
-            max_new_tokens=200,
-        )
+        result = self._vlm_call("reflection", texts=prompt, images=[frame], max_new_tokens=200)
         self._plan_summary = result.strip()
 
     def _execute(self) -> int:
@@ -1287,17 +1303,11 @@ class ReflectiveExecutor(SimpleExecutor):
         return 0
 
     def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
-        base = super()._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-        if not self._plan_summary:
-            return base
-        plan_section = f"Current plan: {self._plan_summary}"
-        lines = base.split("\n")
-        for i, line in enumerate(lines):
-            if line.startswith("Reason about"):
-                lines.insert(i, "")
-                lines.insert(i, plan_section)
-                break
-        return "\n".join(lines)
+        plan_section = f"Current plan: {self._plan_summary}\n\n" if self._plan_summary else ""
+        return (
+            super()._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
+            .replace("[PLAN_SECTION]", plan_section)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1318,20 +1328,36 @@ class SpatialMapExecutor(SimpleExecutor):
         self._last_action_str: str = ""
         super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
 
+    MAP_UPDATE_PROMPT = """Task: [TASK]
+
+[ACTION_CONTEXT]The current game screen is shown in the image.
+
+Describe what you can see in each direction using short phrases. Respond in exactly this format:
+N: <what is north>
+S: <what is south>
+E: <what is east>
+W: <what is west>
+Here: <describe current location>
+[STOP]"""
+
+    STEP_PROMPT = """Task: [TASK]
+
+You are playing a GameBoy game. The current screen is shown in the image.
+
+[ERROR_BLOCK][TOOL_RESULT_BLOCK]Available environment actions:
+[ACTION_LIST]
+
+[TOOLS_BLOCK][SPATIAL_MAP_SECTION]Reason about the best next action, then respond in exactly this format:
+Reasoning: <your reasoning>
+[ACTION_FORMAT]
+[STOP]"""
+
     def _update_map(self, frame, last_action_str: str) -> None:
         action_context = f"You just took the action: {last_action_str}.\n\n" if last_action_str else ""
         prompt = (
-            f"Task: {self._task}\n\n"
-            f"{action_context}"
-            "The current game screen is shown in the image.\n\n"
-            "Describe what you can see in each direction using short phrases. "
-            "Respond in exactly this format:\n"
-            "N: <what is north>\n"
-            "S: <what is south>\n"
-            "E: <what is east>\n"
-            "W: <what is west>\n"
-            "Here: <describe current location>\n"
-            "[STOP]"
+            self.MAP_UPDATE_PROMPT
+            .replace("[TASK]", self._task)
+            .replace("[ACTION_CONTEXT]", action_context)
         )
         result = self._vlm_call("map_update", texts=prompt, images=[frame], max_new_tokens=100)
         # Extract only the N/S/E/W/Here lines
@@ -1431,17 +1457,11 @@ class SpatialMapExecutor(SimpleExecutor):
         return 0
 
     def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
-        base = super()._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-        if not self._spatial_map:
-            return base
-        map_section = f"Spatial map: {self._spatial_map}"
-        lines = base.split("\n")
-        for i, line in enumerate(lines):
-            if line.startswith("Reason about"):
-                lines.insert(i, "")
-                lines.insert(i, map_section)
-                break
-        return "\n".join(lines)
+        map_section = f"Spatial map: {self._spatial_map}\n\n" if self._spatial_map else ""
+        return (
+            super()._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
+            .replace("[SPATIAL_MAP_SECTION]", map_section)
+        )
 
 
 class ConfidenceGatedExecutor(SimpleExecutor):
@@ -1477,28 +1497,35 @@ class ConfidenceGatedExecutor(SimpleExecutor):
                         return int(ch)
         return None
 
-    def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
-        base = super()._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-        # Replace the format instructions to include Confidence line
-        lines = base.split("\n")
-        for i, line in enumerate(lines):
-            if line.strip() == "Reasoning: <your reasoning>":
-                # Insert Confidence line after Reasoning
-                if i + 1 < len(lines) and lines[i + 1].startswith("Action:"):
-                    lines.insert(i + 1, "Confidence: <1-5 how confident you are this is the right action>")
-                break
-        return "\n".join(lines)
+    STEP_PROMPT = """Task: [TASK]
+
+You are playing a GameBoy game. The current screen is shown in the image.
+
+[ERROR_BLOCK][TOOL_RESULT_BLOCK]Available environment actions:
+[ACTION_LIST]
+
+[TOOLS_BLOCK]Reason about the best next action, then respond in exactly this format:
+Reasoning: <your reasoning>
+Confidence: <1-5 how confident you are this is the right action>
+[ACTION_FORMAT]
+[STOP]"""
+
+    RETHINK_PROMPT = """[FRAME_CONTEXT]
+
+Your previous response had low confidence:
+[ORIGINAL_RESPONSE]
+
+Think more carefully. What are you missing? Reconsider all options, then provide your final answer with higher confidence if possible.
+Reasoning: <your revised reasoning>
+Confidence: <1-5>
+Action: <one environment action>
+[STOP]"""
 
     def _build_rethink_prompt(self, original_response: str, frame_context: str) -> str:
         return (
-            f"{frame_context}\n\n"
-            f"Your previous response had low confidence:\n{original_response}\n\n"
-            "Think more carefully. What are you missing? Reconsider all options, "
-            "then provide your final answer with higher confidence if possible.\n"
-            "Reasoning: <your revised reasoning>\n"
-            "Confidence: <1-5>\n"
-            "Action: <one environment action>\n"
-            "[STOP]"
+            self.RETHINK_PROMPT
+            .replace("[FRAME_CONTEXT]", frame_context)
+            .replace("[ORIGINAL_RESPONSE]", original_response)
         )
 
     def _execute(self) -> int:
@@ -1608,25 +1635,30 @@ class ActionValueEstimatorExecutor(SimpleExecutor):
         [STOP]
     """
 
+    SCORE_PROMPT = """Task: [TASK]
+
+[ERROR_BLOCK]You are playing a GameBoy game. The current screen is shown in the image.
+
+Score each available action on how useful it would be RIGHT NOW for making progress toward the task (1=useless, 5=very useful).
+
+Actions:
+[ACTION_LIST]
+
+Respond with one line per action in exactly this format:
+<action>: <score>
+...
+[STOP]"""
+
     def _score_actions(self, frame, error_message: Optional[str]) -> Optional[str]:
         """Ask VLM to score each available action. Returns best action string or None."""
         action_strings = self._get_action_strings()
         if not action_strings:
             return None
-
-        action_list = "\n".join(f"  {s}" for s in action_strings.values())
-        error_block = f"[ERROR] {error_message}\n\n" if error_message else ""
         prompt = (
-            f"Task: {self._task}\n\n"
-            f"{error_block}"
-            "You are playing a GameBoy game. The current screen is shown in the image.\n\n"
-            "Score each available action on how useful it would be RIGHT NOW "
-            "for making progress toward the task (1=useless, 5=very useful).\n\n"
-            f"Actions:\n{action_list}\n\n"
-            "Respond with one line per action in exactly this format:\n"
-            "<action>: <score>\n"
-            "...\n"
-            "[STOP]"
+            self.SCORE_PROMPT
+            .replace("[TASK]", self._task)
+            .replace("[ERROR_BLOCK]", self._error_block(error_message))
+            .replace("[ACTION_LIST]", "\n".join(f"  {s}" for s in action_strings.values()))
         )
         response = self._vlm_call("score", texts=prompt, images=[frame], max_new_tokens=300)
 
@@ -1727,22 +1759,39 @@ class BeliefStateExecutor(SimpleExecutor):
         self._last_action_str: str = ""
         super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
 
+    BELIEF_UPDATE_PROMPT = """Task: [TASK]
+
+[PRIOR_BELIEF][LAST_ACTION]The current game screen is shown in the image.
+
+Update the belief state as a compact list of facts. Use short key: value pairs, one per line. Include:
+- location: where you appear to be
+- obstacles: what is blocking movement
+- goal_proximity: how close you are to the task goal
+- last_action_result: what the last action achieved
+
+Respond only with the key: value pairs. End your response with [STOP].
+[STOP]"""
+
+    STEP_PROMPT = """Task: [TASK]
+
+You are playing a GameBoy game. The current screen is shown in the image.
+
+[ERROR_BLOCK][TOOL_RESULT_BLOCK]Available environment actions:
+[ACTION_LIST]
+
+[TOOLS_BLOCK][BELIEF_SECTION]Reason about the best next action, then respond in exactly this format:
+Reasoning: <your reasoning>
+[ACTION_FORMAT]
+[STOP]"""
+
     def _update_belief(self, frame, last_action_str: str) -> None:
-        prior = f"Prior belief state:\n{self._belief_state}\n\n" if self._belief_state else ""
-        action_ctx = f"Last action taken: {last_action_str}\n\n" if last_action_str else ""
+        prior_belief = f"Prior belief state:\n{self._belief_state}\n\n" if self._belief_state else ""
+        last_action = f"Last action taken: {last_action_str}\n\n" if last_action_str else ""
         prompt = (
-            f"Task: {self._task}\n\n"
-            f"{prior}"
-            f"{action_ctx}"
-            "The current game screen is shown in the image.\n\n"
-            "Update the belief state as a compact list of facts. "
-            "Use short key: value pairs, one per line. Include:\n"
-            "- location: where you appear to be\n"
-            "- obstacles: what is blocking movement\n"
-            "- goal_proximity: how close you are to the task goal\n"
-            "- last_action_result: what the last action achieved\n\n"
-            "Respond only with the key: value pairs.\n"
-            "[STOP]"
+            self.BELIEF_UPDATE_PROMPT
+            .replace("[TASK]", self._task)
+            .replace("[PRIOR_BELIEF]", prior_belief)
+            .replace("[LAST_ACTION]", last_action)
         )
         result = self._vlm_call("belief_update", texts=prompt, images=[frame], max_new_tokens=120)
         # Keep only key: value lines
@@ -1846,17 +1895,11 @@ class BeliefStateExecutor(SimpleExecutor):
         return 0
 
     def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
-        base = super()._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-        if not self._belief_state:
-            return base
-        belief_section = f"Current belief state:\n{self._belief_state}"
-        lines = base.split("\n")
-        for i, line in enumerate(lines):
-            if line.startswith("Reason about"):
-                lines.insert(i, "")
-                lines.insert(i, belief_section)
-                break
-        return "\n".join(lines)
+        belief_section = f"Current belief state:\n{self._belief_state}\n\n" if self._belief_state else ""
+        return (
+            super()._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
+            .replace("[BELIEF_SECTION]", belief_section)
+        )
 
 
 class AdversarialSamplingExecutor(SimpleExecutor):
@@ -1879,30 +1922,45 @@ class AdversarialSamplingExecutor(SimpleExecutor):
             texts=prompt, images=[frame],
         )
 
+    CHALLENGE_PROMPT = """Task: [TASK]
+
+You are playing a GameBoy game. The current screen is shown in the image.
+
+Another agent proposed the following:
+[PROPOSAL]
+
+Act as devil's advocate. In 2-3 sentences, argue why this action might be WRONG or suboptimal. What could go wrong? What better alternative exists? End your response with [STOP].
+[STOP]"""
+
+    DECIDE_PROMPT = """[ORIGINAL_PROMPT]
+
+--- Proposed action ---
+[PROPOSAL]
+
+--- Devil's advocate argument ---
+[CHALLENGE]
+
+Consider both perspectives. Make your FINAL decision. You may stick with the original or choose differently.
+Reasoning: <final reasoning>
+Action: <one environment action>
+[STOP]"""
+
     def _challenge(self, proposal: str, frame) -> str:
         """Second call: argue against the proposal."""
         prompt = (
-            f"Task: {self._task}\n\n"
-            "You are playing a GameBoy game. The current screen is shown in the image.\n\n"
-            f"Another agent proposed the following:\n{proposal}\n\n"
-            "Act as devil's advocate. In 2-3 sentences, argue why this action "
-            "might be WRONG or suboptimal. What could go wrong? What better "
-            "alternative exists?\n"
-            "[STOP]"
+            self.CHALLENGE_PROMPT
+            .replace("[TASK]", self._task)
+            .replace("[PROPOSAL]", proposal)
         )
         return self._vlm_call("challenge", texts=prompt, images=[frame], max_new_tokens=200)
 
     def _decide(self, proposal: str, challenge: str, original_prompt: str, frame) -> str:
         """Third call: final decision given proposal and challenge."""
         prompt = (
-            f"{original_prompt}\n\n"
-            f"--- Proposed action ---\n{proposal}\n\n"
-            f"--- Devil's advocate argument ---\n{challenge}\n\n"
-            "Consider both perspectives. Make your FINAL decision. "
-            "You may stick with the original or choose differently.\n"
-            "Reasoning: <final reasoning>\n"
-            "Action: <one environment action>\n"
-            "[STOP]"
+            self.DECIDE_PROMPT
+            .replace("[ORIGINAL_PROMPT]", original_prompt)
+            .replace("[PROPOSAL]", proposal)
+            .replace("[CHALLENGE]", challenge)
         )
         return self._vlm_call("decide", texts=prompt, images=[frame], max_new_tokens=400)
 
