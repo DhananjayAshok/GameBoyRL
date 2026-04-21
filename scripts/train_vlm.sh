@@ -11,6 +11,8 @@ ARGS["lora_rank"]="32"
 ARGS["lora_alpha"]="32"
 ARGS["learning_rate"]="2e-4"
 ARGS["weight_decay"]="0.01"
+ARGS["overwrite"]=false
+ARGS["push_to_hub"]=false
 
 REQUIRED_ARGS=("train_file" "model_name" "run_name")
 
@@ -93,6 +95,19 @@ done
 model_name="${ARGS["model_name"]}"
 model_save_name="${model_name#*/}"
 
+# if overwrite is true, t, yes or y, set --restore_from_checkpoint False, else set it to empty string
+if [[ "${ARGS["overwrite"]}" == "true" || "${ARGS["overwrite"]}" == "yes" || "${ARGS["overwrite"]}" == "y" ]]; then
+    overwrite_flag="--resume_from_checkpoint False --overwrite_final True"
+else
+    overwrite_flag=""
+fi
+
+# if push_to_hub is true, t, yes or y, set --push_to_hub True, else set it to empty string
+if [[ "${ARGS["push_to_hub"]}" == "true" || "${ARGS["push_to_hub"]}" == "yes" || "${ARGS["push_to_hub"]}" == "y" ]]; then
+    push_to_hub_flag="--push_to_hub True --hub_model_id ${huggingface_repo_namespace}/${ARGS["run_name"]}-$model_save_name"
+else
+    push_to_hub_flag=""
+fi
 
 
 
@@ -108,7 +123,7 @@ bash scripts/llm-utils.sh python train.py --training_kind sft --modality vlm --m
         --eval_strategy epoch --eval_steps 0.5 \
         --early_stopping_patience 5 --load_best_model_at_end \
         --num_train_epochs ${ARGS["num_train_epochs"]} \
-        --lora_rank ${ARGS["lora_rank"]} \
+        --lora_r ${ARGS["lora_rank"]} \
         --lora_alpha ${ARGS["lora_alpha"]} \
         --learning_rate ${ARGS["learning_rate"]} \
-        --weight_decay ${ARGS["weight_decay"]} \
+        --weight_decay ${ARGS["weight_decay"]} $overwrite_flag $push_to_hub_flag \

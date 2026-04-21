@@ -445,7 +445,7 @@ Reasoning: <your reasoning>
             else:
                 # Parseable format but unrecognised action string
                 error_message = (
-                    f"'{action_str}' is not a recognised action. "
+                    f"You tried to do '{action_str}' but that is not a recognised action. DO NOT use '{action_str}' in your response. "
                     "Choose exactly one from the listed actions."
                 )
                 tool_call_message = None
