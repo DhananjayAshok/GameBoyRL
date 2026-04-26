@@ -57,7 +57,7 @@ def run_task(row, max_resets, controller_variant, executor_class, max_tool_calls
 
             if verbose:
                 print(f"\n  Reset {n_resets} trajectory:")
-                print_trajectory(report)
+                print_trajectory(report, name=emulator_kwargs["session_name"])
 
             environment.close()
 

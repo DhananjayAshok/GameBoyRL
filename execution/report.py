@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Type, Union
+import numpy as np
 
 from gameboy_worlds.interface import HighLevelAction
 
@@ -54,6 +55,10 @@ class EnvironmentStepRecord:
     :meth:`~gameboy_worlds.interface.Environment.step_high_level_action` or
     :meth:`~gameboy_worlds.interface.Environment.step_str`.
 
+    :param frame_before: The screen before the action was executed
+    :type frame_before: np.ndarray
+    :param frame_after: The screen after the action was executed
+    :type frame_after: np.ndarray    
     :param action_class: The :class:`~gameboy_worlds.interface.HighLevelAction`
         subclass that was executed. Stored as the **class**, not an instance.
     :type action_class: Type[HighLevelAction]
@@ -67,7 +72,8 @@ class EnvironmentStepRecord:
         action.
     :type action_success: int
     """
-
+    frame_before: np.ndarray
+    frame_after: np.ndarray
     action_class: Type[HighLevelAction]
     kwargs: Dict[str, Any]
     transition_states: List[Dict[str, Any]]
@@ -85,11 +91,17 @@ class VLMCallRecord:
         ``"score"``, ``"rethink"``, ``"propose"``, ``"challenge"``,
         ``"decide"``).
     :type tag: str
+    :param images: A list of numpy arrays showing the images given for this inference call
+    :type images: List[np.ndarray]
+    :param prompt: The prompt for this call
+    :type prompt: str
     :param response: The raw text returned by the VLM.
     :type response: str
     """
 
     tag: str
+    images: List[np.ndarray]
+    prompt: str
     response: str
 
 

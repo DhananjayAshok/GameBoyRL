@@ -349,7 +349,6 @@ def infer_group_tasks(
     if len(group) > max_trajectories_per_group:
         use_traj_idxes = list(np.random.choice(use_traj_idxes, max_trajectories_per_group, replace=False))
     for traj_idx in tqdm(use_traj_idxes, leave=False, total=len(use_traj_idxes), desc="Trajectories"):
-        print(f"Processing trajectory {traj_idx} of {len(group)} in group...")
         trajectory = group[traj_idx]
         result = infer_task(trajectory, vlm, game, max_new_tokens, lookback, verbose=verbose, describe_pairs=describe_pairs)
         if result is not None:
@@ -395,8 +394,6 @@ def infer(obj, lookback, max_trajectories_per_group, describe_pairs):
     trajectory_output = {}
 
     for group_idx, group in tqdm(enumerate(grouped_trajectories), desc="Processing groups", total=len(grouped_trajectories)):
-        if group_idx != 1:
-            continue
         trajectory_data = infer_group_tasks(
             group, vlm, game, max_new_tokens, lookback, max_trajectories_per_group, verbose=obj["verbose"], describe_pairs=describe_pairs
         )
@@ -444,8 +441,6 @@ def reason(obj, safety_rollback):
     dense_output = {}
     for group_idx_str, traj_data_list in tqdm(trajectory_annotation.items(), desc="Processing groups"):
         group_idx = int(group_idx_str)
-        if group_idx != 1:
-            continue
         group = grouped_trajectories[group_idx]
 
         records = []
@@ -536,7 +531,7 @@ def reason(obj, safety_rollback):
                 
 
         dense_output[group_idx] = records
-        print(f"Group {group_idx}: annotated {len(records)} records.")
+        #print(f"Group {group_idx}: annotated {len(records)} records.")
 
     with open(out_path, "w") as f:
         json.dump(dense_output, f, indent=2)

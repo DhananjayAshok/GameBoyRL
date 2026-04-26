@@ -54,18 +54,20 @@ def plot_transitions(observations, save_name, high_level_actions=None):
 
 
 @click.command()
+@click.option("--name", required=True, help="Name to save the images under (e.g. game name or group name)")
 @click.option("--trajectory_path", required=True, help="Path to grouped_high_reward_trajectories.pkl")
 @click.option("--frac", default=1.0, show_default=True, help="Fraction of observation transitions to sample")
 @click.option("--group_idx", default=None, type=int, help="If specified, only plot this group.")
 @click.option("--traj_idx", default=None, type=int, help="If specified, only plot this trajectory (requires --group_idx).")
-def show(trajectory_path, frac, group_idx, traj_idx):
+@click.option("--max_per_group", default=50, type=int, help="Maximum number of trajectories to plot per group (only applies if --traj_idx is not specified).")
+def show(name, trajectory_path, frac, group_idx, traj_idx, max_per_group):
     """Randomly sample a fraction of observation transitions and save them as images."""
     assert traj_idx is None or group_idx is not None, "--traj_idx requires --group_idx to be specified."
     parameters = load_parameters()
     with open(trajectory_path, "rb") as f:
         grouped_trajectories = pickle.load(f)
 
-    os.makedirs(parameters["tmp_dir"], exist_ok=True)
+    os.makedirs(parameters["tmp_dir"] + f"/trajectories/{name}", exist_ok=True)
 
     if group_idx is not None:
         indexes = [group_idx]
@@ -77,7 +79,7 @@ def show(trajectory_path, frac, group_idx, traj_idx):
     for i, trajectory_group in tqdm(enumerate(grouped_trajectories), desc="Plotting observation transitions", total=len(grouped_trajectories)):
         if i not in indexes:
             continue
-        group_dir = parameters["tmp_dir"] + f"/trajectories/group_{i}"
+        group_dir = parameters["tmp_dir"] + f"/trajectories/{name}/group_{i}"
         os.makedirs(group_dir, exist_ok=True)
         if traj_idx is not None:
             trajectory = trajectory_group[traj_idx]
@@ -87,12 +89,14 @@ def show(trajectory_path, frac, group_idx, traj_idx):
             print(f"Saved {save_path}")
         else:
             for j, trajectory in tqdm(enumerate(trajectory_group), leave=False, total=len(trajectory_group)):
+                if j >= max_per_group:
+                    break
                 observations, _, high_level_actions, _ = trajectory
                 plot_transitions(observations, group_dir + f"/traj_{j}.png", high_level_actions=high_level_actions)
             if group_idx is not None:
                 print(f"Saved {group_dir}/")
     if group_idx is None and traj_idx is None:
-        print(f"Saved {parameters['tmp_dir']}/trajectories/")
+        print(f"Saved {parameters['tmp_dir']}/trajectories/{name}/")
 
 
 if __name__ == "__main__":

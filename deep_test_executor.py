@@ -29,6 +29,9 @@ from typing import Iterator, Union
 
 import click
 from gameboy_worlds import AVAILABLE_GAMES, get_benchmark_tasks, get_test_environment
+import os
+import matplotlib.pyplot as plt
+import shutil
 
 from execution.executor import (
     SimpleExecutor,
@@ -87,7 +90,7 @@ def _step_summary(step: Union[EnvironmentStepRecord, ToolCallRecord]) -> str:
 _ACTION_TAGS = {"action", "score", "decide"}
 
 
-def print_trajectory(report: ExecutorReport) -> None:
+def print_trajectory(report: ExecutorReport, name=None) -> None:
     """Print the full interleaved VLM-call / step trajectory.
 
     Every entry in ``report.vlm_call_log`` is printed with its tag.
@@ -96,6 +99,15 @@ def print_trajectory(report: ExecutorReport) -> None:
     auxiliary calls (``"reflection"``, ``"map_update"``, etc.) are shown
     inline without consuming a step.
     """
+    if name is None:
+        img_save_path = "tmp/vis/"
+    else:
+        img_save_path = f"results/{name}"
+    if os.path.exists(img_save_path):
+        shutil.rmtree(img_save_path)
+    os.makedirs(img_save_path)
+    print(f"Saving images to: {img_save_path}")
+    
     if not report.vlm_call_log:
         print("  (no VLM calls recorded)")
         return
@@ -113,8 +125,16 @@ def print_trajectory(report: ExecutorReport) -> None:
         call_idx += 1
         tag_label = f"[{entry.tag.upper()}]"
         print(f"\n  ┌─ {tag_label} (call {call_idx})" + "─" * max(0, 48 - len(tag_label)))
+        print("")
+        print("  | Prompt:")
+        print(_indent(entry.prompt , "  │   "))
         print("  │ VLM output:")
         print(_indent(entry.response, "  │   "))
+        for i, image in enumerate(entry.images):
+            img_path = os.path.join(img_save_path, f"{call_idx}_{i}.png")
+            plt.imshow(image)
+            plt.savefig(img_path)
+            plt.clf()
 
         if entry.tag in _ACTION_TAGS:
             if parse_fail_counter.get(entry.response, 0) > 0:

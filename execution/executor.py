@@ -266,11 +266,14 @@ class Executor(ABC):
         """
         kwargs.setdefault("max_new_tokens", self._max_new_tokens)
         result = self._vlm.infer(**kwargs)
+        texts = kwargs["texts"]
+        images = kwargs["images"]
+        assert isinstance(texts, str)
         if isinstance(result, list):
-            for r in result:
-                self.report.vlm_call_log.append(VLMCallRecord(tag=tag, response=r))
+            for i, r in enumerate(result):
+                self.report.vlm_call_log.append(VLMCallRecord(tag=tag, prompt=texts, images=images, response=r))
         else:
-            self.report.vlm_call_log.append(VLMCallRecord(tag=tag, response=result))
+            self.report.vlm_call_log.append(VLMCallRecord(tag=tag, prompt=texts, images=images, response=result))
         return result
 
     def _get_action_strings(self, return_all: bool = False) -> Dict[Type[HighLevelAction], str]:
@@ -354,6 +357,8 @@ Reasoning: <your reasoning>
         ``terminated`` / ``truncated`` flags on ``self`` for :meth:`_execute`
         to inspect.
         """
+        before_info = self._env.get_info()
+        frame_before = before_info["core"]["current_frame"]
         obs, reward, terminated, truncated, info = self._env.step_high_level_action(
             action_class, **kwargs
         )
@@ -361,8 +366,11 @@ Reasoning: <your reasoning>
             _, _, transition_states, action_success, _ = info["core"]["previous_action_details"]
         else:
             transition_states, action_success = [], -1
+        frame_after = info["core"]["current_frame"]
 
         record = EnvironmentStepRecord(
+            frame_before=frame_before, 
+            frame_after=frame_after,
             action_class=action_class,
             kwargs=kwargs,
             transition_states=transition_states,

@@ -45,6 +45,8 @@ class InferenceModel(ABC):
         :type images: list[list[Image.Image]]
         :param max_new_tokens: Maximum number of tokens to generate per response.
         :type max_new_tokens: int
+        :param temperature: Sampling temperature. None means model default.
+        :type temperature: Optional[float]
         :return: Post-processed output strings, one per sample.
         :rtype: list[str]
         """
@@ -69,6 +71,8 @@ class InferenceModel(ABC):
         :param images: A list of PIL Images (when ``texts`` is a single string) or a list of lists
             of PIL Images (when ``texts`` is a list). If None, no images are passed.
         :type images: list[Image.Image] or list[list[Image.Image]] or None
+        :param temperature: Sampling temperature. None means model default.
+        :type temperature: Optional[float]
         :return: A single output string if ``texts`` was a string, otherwise a list of output strings.
         :rtype: str or list[str]
         """
@@ -254,6 +258,8 @@ class APIModel(InferenceModel, ABC):
         :type messages: list[dict]
         :param max_new_tokens: Maximum number of tokens to generate.
         :type max_new_tokens: int
+        :param temperature: Sampling temperature. None means model default.
+        :type temperature: Optional[float]
         :return: Response from API
         :rtype: Any
         """
@@ -409,8 +415,19 @@ class OpenAIAPIModel(APIModel):
         kwargs = dict(model=self.model, messages=messages, max_tokens=max_new_tokens)
         if temperature is not None:
             kwargs["temperature"] = temperature
-        response = self.client.chat.completions.create(**kwargs)
-        return response
+        max_tries = 3
+        for attempt in range(max_tries):
+            try:
+                response = self.client.chat.completions.create(**kwargs)
+                return response
+            except Exception as e:
+                log_warn(f"OpenAI API call failed on attempt {attempt+1}/{max_tries} with error: {e}")
+                if attempt < max_tries - 1:
+                    # exponential backoff with time_to_wait between attempts
+                    backoff_time = self.seconds_to_wait * (2 ** attempt)
+                    log_info(f"Waiting for {backoff_time:.2f} seconds before retrying...")
+                    sleep(backoff_time)
+        log_error(f"OpenAI API call failed after {max_tries} attempts. Last error: {e}")
 
     def get_output_texts(self, response: Any) -> str:
         """
@@ -422,8 +439,20 @@ class OpenAIAPIModel(APIModel):
         :rtype: str
         """
         text = ""
+        if response is None:
+            log_warn(f"Received None response from model.")
+            return text
+        if not hasattr(response, "choices"):
+            log_warn(f"Response object has no 'choices' attribute: {response}")
+            return text
+        if response.choices is None:
+            log_warn(f"Response 'choices' attribute is None: {response}")
+            return text
+        if len(response.choices) == 0:
+            log_warn(f"Response 'choices' list is empty: {response}")
+            return text
         message = response.choices[0].message
-        if hasattr(message, "reasoning"):
+        if hasattr(message, "reasoning") and message.reasoning is not None:
             text = "Reasoning: " + message.reasoning
         content = response.choices[0].message.content
         if content is not None:
@@ -541,8 +570,19 @@ class AnthropicModel(APIModel):
         kwargs = dict(model=self.model, messages=messages, max_tokens=max_new_tokens)
         if temperature is not None:
             kwargs["temperature"] = temperature
-        response = self.client.messages.create(**kwargs)
-        return response
+        max_tries = 3
+        for attempt in range(max_tries):
+            try:
+                response = self.client.messages.create(**kwargs)
+                return response
+            except Exception as e:
+                log_warn(f"Anthropic API call failed on attempt {attempt+1}/{max_tries} with error: {e}")
+                if attempt < max_tries - 1:
+                    # exponential backoff with time_to_wait between attempts
+                    backoff_time = self.seconds_to_wait * (2 ** attempt)
+                    log_info(f"Waiting for {backoff_time:.2f} seconds before retrying...")
+                    sleep(backoff_time)
+        log_error(f"Anthropic API call failed after {max_tries} attempts. Last error: {e}")
 
     def get_output_texts(self, response: Any) -> str:
         return response.content[0].text

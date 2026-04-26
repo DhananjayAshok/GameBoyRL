@@ -5,15 +5,10 @@ source scripts/utils.sh
 # Define Defaults for default_rl.sh
 declare -A ARGS
 REQUIRED_ARGS=()
-populate_dict SWEEP_DEFAULTS ARGS
-populate_array SWEEP_ESSENTIALS REQUIRED_ARGS
+populate_dict ITERATIVE_TRAINING_DEFAULTS ARGS
+populate_array ITERATIVE_TRAINING_ESSENTIALS REQUIRED_ARGS
 
-ARGS["n_agents"]=4
-ARGS["sweep"]=false
-ARGS["combination_buffer_sweep"]=true
-ARGS["init_state_group"]="none"
-ARGS["run_name"]="iterative"
-combination_buffer_ocr_alphas=(0.5 1.0)
+combination_buffer_ocr_alphas=(0.75)
 
 
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
