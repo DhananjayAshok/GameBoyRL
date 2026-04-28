@@ -57,7 +57,7 @@ def run_task(row, max_resets, controller_variant, executor_class, max_tool_calls
 
             if verbose:
                 print(f"\n  Reset {n_resets} trajectory:")
-                print_trajectory(report, name=emulator_kwargs["session_name"])
+                print_trajectory(report, name=row["game"] + "/" + emulator_kwargs["session_name"])
 
             environment.close()
 
@@ -132,11 +132,11 @@ def do(
         benchmark_tasks = benchmark_tasks.sample(
             n=random_sample, random_state=42
         ).reset_index(drop=True)
-    os.makedirs("results", exist_ok=True)
+    os.makedirs(f"results/{game}/", exist_ok=True)
     if random_sample is not None:
-        save_path = f"results/benchmark_zero_shot_{game}_{executor}_{model_save_name}_sample{random_sample}.csv"
+        save_path = f"results/{game}/{executor}_{model_save_name}_sample{random_sample}.csv"
     else:
-        save_path = f"results/benchmark_zero_shot_{game}_{executor}_{model_save_name}.csv"
+        save_path = f"results/{game}/{executor}_{model_save_name}.csv"
     if not regenerate and os.path.exists(save_path):
         existing_df = pd.read_csv(save_path)
         results = existing_df.values.tolist()
