@@ -79,7 +79,7 @@ for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
-uv --version || {echo "uv is not installed. Please install uv"; exit 1;}
+uv --version || { echo "uv is not installed. Please install uv"; exit 1; }
 
 # if setup/.venv already exists, skip the env creation and just install the dependencies.
 if [ -d "setup/.venv" ]; then
@@ -94,12 +94,12 @@ else
             * ) echo "Exiting without creating virtual environment."; exit 1;;
         esac
     fi
-    uv venv "${ARGS[env_dir]}" --python 3.12 || {echo "Failed to create virtual environment. Please check the error messages above."; exit 1;}
-    ln -s "${ARGS[env_dir]}" setup/.venv || {echo "Failed to create symbolic link for virtual environment. Please check the error messages above."; exit 1;}
+    uv venv "${ARGS[env_dir]}" --python 3.12 || { echo "Failed to create virtual environment. Please check the error messages above."; exit 1; }
+    ln -s "${ARGS[env_dir]}" setup/.venv || { echo "Failed to create symbolic link for virtual environment. Please check the error messages above."; exit 1; }
 fi
 
 cd setup
-uv sync || {echo "Failed to sync virtual environment. Please check the error messages above."; exit 1;}
-source .venv/bin/activate || {echo "Failed to activate virtual environment. Please check the error messages above."; exit 1;}
+uv sync || { echo "Failed to sync virtual environment. Please check the error messages above."; exit 1; }
+source .venv/bin/activate || { echo "Failed to activate virtual environment. Please check the error messages above."; exit 1; }
 cd ..
-python configs/create_env_file.py || {echo "Failed to create config.env file. Please check the error messages above."; exit 1;}
+python configs/create_env_file.py || { echo "Failed to create config.env file. Please check the error messages above."; exit 1; }
