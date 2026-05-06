@@ -70,6 +70,8 @@ def save(obj):
     for group_idx in tqdm(group_idxes, desc="Processing groups", total=len(group_idxes)):
         all_steps = annotations[group_idx] # list
         for step in tqdm(all_steps, desc="Processing steps", total=len(all_steps), leave=False):
+            if not step['good_action']:
+                continue
             traj_idx = step["traj_idx"]
             observations, actions, high_level_actions, rewards = grouped_trajectories[int(group_idx)][traj_idx]
             step_idx = step["step"]
@@ -86,6 +88,6 @@ def save(obj):
             data.append([group_idx, traj_idx, step_idx, task, input_text, image_path, reasoning, action, output])
     df = pd.DataFrame(data, columns=columns)
     df.to_csv(df_out_path, index=False)
-    log_info(f"Saved dataset to {df_out_path}", parameters=parameters)
+    log_info(f"Saved dataset with {len(data)} rows to {df_out_path}", parameters=parameters)
     
         

@@ -384,16 +384,25 @@ def infer(obj, lookback, max_trajectories_per_group, describe_pairs):
 
     out_dir = os.path.dirname(trajectory_path)
     traj_path = os.path.join(out_dir, f"trajectory_annotation_{model_save_name}.json")
+    checkpoint_path = traj_path.replace(".json", "_checkpoint.json")
+
     if os.path.exists(traj_path) and not obj["overwrite"]:
         log_info(f"Skipping infer — output already exists at {traj_path}. Use --overwrite to rerun.")
         return
 
+    if os.path.exists(checkpoint_path) and not obj["overwrite"]:
+        with open(checkpoint_path, "r") as f:
+            trajectory_output = {int(k): v for k, v in json.load(f).items()}
+        log_info(f"Resuming infer from checkpoint — {len(trajectory_output)} groups already done.")
+    else:
+        trajectory_output = {}
+
     with open(trajectory_path, "rb") as f:
         grouped_trajectories = pickle.load(f)
 
-    trajectory_output = {}
-
     for group_idx, group in tqdm(enumerate(grouped_trajectories), desc="Processing groups", total=len(grouped_trajectories)):
+        if group_idx in trajectory_output:
+            continue
         trajectory_data = infer_group_tasks(
             group, vlm, game, max_new_tokens, lookback, max_trajectories_per_group, verbose=obj["verbose"], describe_pairs=describe_pairs
         )
@@ -401,10 +410,14 @@ def infer(obj, lookback, max_trajectories_per_group, describe_pairs):
             print(f"Warning: skipping group {group_idx} — could not infer any task strings.")
             continue
         trajectory_output[group_idx] = trajectory_data
+        with open(checkpoint_path, "w") as f:
+            json.dump(trajectory_output, f, indent=2)
 
     with open(traj_path, "w") as f:
         json.dump(trajectory_output, f, indent=2)
     print(f"Saved trajectory annotations → {traj_path}")
+    if os.path.exists(checkpoint_path):
+        os.remove(checkpoint_path)
 
 
 @click.command()
@@ -423,9 +436,18 @@ def reason(obj, safety_rollback):
 
     out_dir = os.path.dirname(trajectory_path)
     out_path = os.path.join(out_dir, f"dense_annotation_{model_save_name}.json")
+    checkpoint_path = out_path.replace(".json", "_checkpoint.json")
+
     if os.path.exists(out_path) and not obj["overwrite"]:
         log_info(f"Skipping reason — output already exists at {out_path}. Use --overwrite to rerun.")
         return
+
+    if os.path.exists(checkpoint_path) and not obj["overwrite"]:
+        with open(checkpoint_path, "r") as f:
+            dense_output = {int(k): v for k, v in json.load(f).items()}
+        log_info(f"Resuming reason from checkpoint — {len(dense_output)} groups already done.")
+    else:
+        dense_output = {}
 
     traj_annotation_path = os.path.join(out_dir, f"trajectory_annotation_{model_save_name}.json")
     if not os.path.exists(traj_annotation_path):
@@ -438,9 +460,10 @@ def reason(obj, safety_rollback):
     with open(trajectory_path, "rb") as f:
         grouped_trajectories = pickle.load(f)
 
-    dense_output = {}
     for group_idx_str, traj_data_list in tqdm(trajectory_annotation.items(), desc="Processing groups"):
         group_idx = int(group_idx_str)
+        if group_idx in dense_output:
+            continue
         group = grouped_trajectories[group_idx]
 
         records = []
@@ -531,8 +554,11 @@ def reason(obj, safety_rollback):
                 
 
         dense_output[group_idx] = records
-        #print(f"Group {group_idx}: annotated {len(records)} records.")
+        with open(checkpoint_path, "w") as f:
+            json.dump(dense_output, f, indent=2)
 
     with open(out_path, "w") as f:
         json.dump(dense_output, f, indent=2)
     print(f"Saved dense annotation → {out_path}")
+    if os.path.exists(checkpoint_path):
+        os.remove(checkpoint_path)

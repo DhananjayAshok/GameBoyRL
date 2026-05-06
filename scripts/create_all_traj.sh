@@ -1,18 +1,13 @@
 #!/usr/bin/env bash
 
 source scripts/utils.sh || { echo "Could not source utils"; exit 1; }
+python scripts/create_task_dictionary.py
+source scripts/all_train_states.sh
 
 # Script-specific defaults and required args
 declare -A ARGS
-ARGS["executor"]="simple"
-ARGS["executor_vlm_model"]="Qwen/Qwen3-VL-8B-Instruct"   # use "none" for absent optionals, never ""
-ARGS["executor_vlm_kind"]="huggingface"   # use "none" for absent optionals, never ""
-ARGS["max_steps"]="50"
-ARGS["max_resets"]="1"
-ARGS["random_sample"]="1"
-ARGS["regenerate"]="false"
-
 REQUIRED_ARGS=("game")
+populate_dict CREATE_TRAJ_DEFAULTS ARGS
 
 
 # --- Argument parsing (copy verbatim) ---
@@ -57,18 +52,19 @@ for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
-regenerate_flag=""
-if [[ "${ARGS["regenerate"]}" == "true" ]]; then regenerate_flag="--regenerate"; fi
+# error out if run_name is not set, is default or is iterative
+if [[ -z "${ARGS["run_name"]}" ]] || [[ "${ARGS["run_name"]}" == "default" ]] || [[ "${ARGS["run_name"]}" == "iterative" ]]; then
+    echo "Error: --run_name is required and cannot be 'default' or 'iterative'."
+    usage
+fi
 
-common="python run_benchmark_zeroshot.py --game ${ARGS["game"]} --save_video True --max_resets ${ARGS["max_resets"]} --max_steps ${ARGS["max_steps"]} --executor_vlm_model ${ARGS["executor_vlm_model"]} --executor_vlm_kind ${ARGS["executor_vlm_kind"]} $regenerate_flag"
-
-model_save_name="${ARGS["executor_vlm_model"]#*/}"
-mkdir -p "results/${ARGS["game"]}/"
-
-sample_log_file="${ARGS["executor"]}_${model_save_name}_sample_${ARGS["random_sample"]}.out"
-
-#$common --random_sample ${ARGS["random_sample"]} --verbose #&> "results/${ARGS["game"]}/${sample_log_file}"
-
-log_file=${ARGS["executor"]}_${model_save_name}.out
-
-$common --verbose &> "results/${ARGS["game"]}/${log_file}"
+game="${ARGS["game"]}"
+for key in "${!TRAIN_STATES[@]}"; do
+    if [[ "$key" == "$game,"* ]]; then
+        name="${key#$game,}"
+        ARGS["init_state_group"]="$name"
+        ARGS["init_states"]="${TRAIN_STATES[$key]}"
+        arg_string=$(args_to_flags_subset ARGS CREATE_TRAJ_ARG_KEYS)
+        bash scripts/create_traj.sh $arg_string
+    fi
+done

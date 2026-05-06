@@ -10,7 +10,7 @@ from gameboy_worlds import (
     get_test_environment,
 )
 import click
-from utils import load_parameters
+from utils import load_parameters, log_error
 from execution.registry import AVAILABLE_EXECUTORS
 from deep_test_executor import print_trajectory
 from tqdm import tqdm
@@ -30,6 +30,7 @@ def run_task(row, max_resets, controller_variant, executor_class, max_tool_calls
     task_str = mission.replace(" ", "_").lower()
     emulator_kwargs = emulator_kwargs.copy()
     emulator_kwargs["session_name"] += f"/{task_str}/"
+    error = True
     try:
         while n_resets < max_resets + 1:
             environment = get_test_environment(
@@ -60,16 +61,17 @@ def run_task(row, max_resets, controller_variant, executor_class, max_tool_calls
                 print_trajectory(report, name=row["game"] + "/" + emulator_kwargs["session_name"])
 
             environment.close()
-
+            error = False
             if report.termination_reason == "terminated":
                 success = True
                 break
             n_resets += 1
 
     except Exception as e:
-        traceback.print_exc()
+        error = True
         print(f"Error during execution of task '{mission}': {e}")
-    return success, n_resets - 1, n_steps_total, n_invalid_total, subgoals_reached, subgoals_all
+        traceback.print_exc()
+    return success, n_resets - 1, n_steps_total, n_invalid_total, subgoals_reached, subgoals_all, error
 
 
 @click.command()
@@ -79,7 +81,7 @@ def run_task(row, max_resets, controller_variant, executor_class, max_tool_calls
 @click.option("--executor_vlm_model", default=None, type=str)
 @click.option("--executor_vlm_kind", default=None, type=str)
 @click.option("--save_video", type=bool, default=True)
-@click.option("--max_resets", default=3, type=int)
+@click.option("--max_resets", default=1, type=int)
 @click.option("--max_steps", default=200, type=int)
 @click.option("--max_tool_calls", default=0, type=int)
 @click.option("--override_index", default=None, type=int, required=False)
@@ -154,7 +156,7 @@ def do(
             print(f"Running override index {override_index} on row:")
             for column in row.index:
                 print(f"  {column}: {row[column]}")
-        success, n_resets, n_steps, n_invalid, subgoals_reached, subgoals_all = run_task(
+        success, n_resets, n_steps, n_invalid, subgoals_reached, subgoals_all, error = run_task(
             row=row,
             max_resets=max_resets,
             controller_variant=controller_variant,
@@ -165,6 +167,8 @@ def do(
             verbose=verbose,
             **emulator_kwargs,
         )
+        if error:
+            log_error(f"Error occurred during execution of task '{row['task']}' - exiting loop")
         results.append(
             [
                 row["game"],
