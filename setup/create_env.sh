@@ -103,3 +103,7 @@ uv sync || { echo "Failed to sync virtual environment. Please check the error me
 source .venv/bin/activate || { echo "Failed to activate virtual environment. Please check the error messages above."; exit 1; }
 cd ..
 python configs/create_env_file.py || { echo "Failed to create config.env file. Please check the error messages above."; exit 1; }
+cd GameBoyWorlds
+python configs/create_env_file.py || { echo "Failed to create config.env file. Please check the error messages above."; exit 1; }
+cd ..
+echo "Environment setup complete!"

@@ -100,3 +100,4 @@ fi
 
 cd llm-utils/setup
 uv sync || { echo "Failed to sync virtual environment. Please check the error messages above."; exit 1; }
+echo "Environment setup complete!"
