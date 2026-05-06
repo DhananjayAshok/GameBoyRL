@@ -1,4 +1,4 @@
-from dataset_creation import infer, reason, save
+from dataset_creation import infer, reason, save, load
 import numpy as np
 import click
 from utils import load_parameters
@@ -36,6 +36,7 @@ def main(ctx, model_name, vlm_kind, trajectory_path, game, overwrite, verbose, m
 main.add_command(infer)
 main.add_command(reason)
 main.add_command(save)
+main.add_command(load)
 
 if __name__ == "__main__":
     main()

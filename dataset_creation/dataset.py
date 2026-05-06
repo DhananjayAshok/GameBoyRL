@@ -29,8 +29,9 @@ def get_input(game, task):
 
 
 @click.command()
+@click.option("--push_to_hub", is_flag=True, help="Whether to push the dataset to Hugging Face Hub")
 @click.pass_obj
-def save(obj):
+def save(obj, push_to_hub):
     """Organize trajectory annotations into a single file and image folder for training."""
     parameters = load_parameters()
     trajectory_path = obj["trajectory_path"]
@@ -89,5 +90,16 @@ def save(obj):
     df = pd.DataFrame(data, columns=columns)
     df.to_csv(df_out_path, index=False)
     log_info(f"Saved dataset with {len(data)} rows to {df_out_path}", parameters=parameters)
-    
+    if push_to_hub:
+        # TODO
+        pass
+
+@click.command()
+@click.pass_obj
+def load(obj):
+    """
+    Load the dataset from the expected huggingface hub path 
+    """
+    # TODO
+    pass
         

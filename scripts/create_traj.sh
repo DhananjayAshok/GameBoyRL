@@ -87,7 +87,6 @@ for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
-
 sweeping=false
 if [ "${ARGS["sweep"]}" == "true" ]; then
     sweep_run_name="iterative_sweep"
@@ -113,11 +112,12 @@ else
 
     init_states=${ARGS["init_states"]}
     init_state_group=${ARGS["init_state_group"]}
-    for init_state in ${init_states}; do
+    IFS=',' read -ra init_states_arr <<< "$init_states"
+    for init_state in "${init_states_arr[@]}"; do
         ARGS["init_state"]=$init_state
         argstring=$(args_to_flags_subset ARGS ITERATIVE_TRAINING_ARG_KEYS)    
         bash scripts/iterative_training.sh $argstring
     done
 fi
 
-bash scripts/group_trajectories.sh --game ${ARGS["game"]} --replay_buffer_folder $replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/${ARGS["run_name"]}/${init_state_group}/ --z_min ${ARGS["z_min"]}
+#bash scripts/group_trajectories.sh --game ${ARGS["game"]} --replay_buffer_folder $replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/${ARGS["run_name"]}/${init_state_group}/ --z_min ${ARGS["z_min"]}

@@ -91,6 +91,7 @@ init_state_group="${ARGS["init_state_group"]}"
 run_name="${ARGS["run_name"]}"
 overwrite="${ARGS["overwrite"]}"
 verbose="${ARGS["verbose"]}"
+push_to_hub="${ARGS["push_to_hub"]}"
 
 # if describe_paris is true, t, yes or y then 
 if [[ "$describe_pairs" == "true" || "$describe_pairs" == "yes" || "$describe_pairs" == "y" ]]; then
@@ -111,9 +112,15 @@ else
     verbose_flag=""
 fi
 
+if [[ "$push_to_hub" == "true" || "$push_to_hub" == "yes" || "$push_to_hub" == "y" ]]; then
+    push_to_hub_flag="--push_to_hub"
+else
+    push_to_hub_flag=""
+fi
+
 trajectory_path=$storage_dir/grouped_trajectories/${game}/${run_name}/${init_state_group}/grouped_global_high_reward_trajectories.pkl
 
-common_call=" --trajectory_path $trajectory_path --model_name $model_name --vlm_kind $vlm_kind --game $game --max_new_tokens $max_new_tokens $overwrite_flag $verbose_flag " 
+common_call=" --trajectory_path $trajectory_path --model_name $model_name --vlm_kind $vlm_kind --game $game --max_new_tokens $max_new_tokens $overwrite_flag $verbose_flag" 
 
 echo "Running Sparse Annotation:"
 python create_dataset.py $common_call infer --max_trajectories_per_group "$max_trajectories_per_group" --lookback "$lookback" $describe_pairs_flag 
@@ -122,4 +129,4 @@ echo "Running Reasoning Annotation:"
 python create_dataset.py $common_call reason --safety_rollback "$safety_rollback"
 
 echo "Running Collation:"
-python create_dataset.py $common_call save
+python create_dataset.py $common_call save $push_to_hub_flag

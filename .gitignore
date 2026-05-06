@@ -179,3 +179,4 @@ results/
 save_frames/
 *.out
 configs/config.env
+scripts/all_train_states.sh

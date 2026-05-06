@@ -68,3 +68,7 @@ for key in "${!TRAIN_STATES[@]}"; do
         bash scripts/create_traj.sh $arg_string
     fi
 done
+
+replay_buffer_save_folder=${ARGS["run_name"]}/
+
+bash scripts/group_trajectories.sh --game ${ARGS["game"]} --replay_buffer_folder $replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/${ARGS["run_name"]}/ --z_min ${ARGS["z_min"]}
