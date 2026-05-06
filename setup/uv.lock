@@ -866,11 +866,6 @@ hf-xet = [
     { name = "hf-xet" },
 ]
 
-[package.optional-dependencies]
-hf-xet = [
-    { name = "hf-xet" },
-]
-
 [[package]]
 name = "idna"
 version = "3.13"
