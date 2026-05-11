@@ -76,7 +76,7 @@ done
 
 if [ "$FAILED" = true ]; then usage; fi
 if [[ "${ARGS["model_dir"]}" != "none" ]]; then
-    model_save_path="$storage_dir/models/${ARGS["model_dir"]}/"
+    model_save_path="$storage_dir/models/${ARGS["game"]}/${ARGS["model_dir"]}/"
     rm -rf $model_save_path/* # clear the model save path to ensure we don't have old models lying around.
 else
     echo "Sweep requires you to specify a --model_dir"

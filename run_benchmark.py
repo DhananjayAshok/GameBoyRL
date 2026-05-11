@@ -12,7 +12,6 @@ from gameboy_worlds import (
 import click
 from utils import load_parameters, log_error
 from execution.registry import AVAILABLE_EXECUTORS
-from deep_test_executor import print_trajectory
 from tqdm import tqdm
 import pandas as pd
 import traceback
@@ -31,6 +30,7 @@ def run_task(row, max_resets, controller_variant, executor_class, max_tool_calls
     emulator_kwargs = emulator_kwargs.copy()
     emulator_kwargs["session_name"] += f"/{task_str}/"
     error = True
+    report_str = None
     try:
         while n_resets < max_resets + 1:
             environment = get_test_environment(
@@ -56,9 +56,10 @@ def run_task(row, max_resets, controller_variant, executor_class, max_tool_calls
             n_steps_total += last_state["core"]["steps"]
             n_invalid_total += len(report.invalid_steps)
 
+            report_str = str(report)
             if verbose:
                 print(f"\n  Reset {n_resets} trajectory:")
-                print_trajectory(report, name=row["game"] + "/" + emulator_kwargs["session_name"])
+                print(report_str)
 
             environment.close()
             error = False
@@ -71,7 +72,7 @@ def run_task(row, max_resets, controller_variant, executor_class, max_tool_calls
         error = True
         print(f"Error during execution of task '{mission}': {e}")
         traceback.print_exc()
-    return success, n_resets - 1, n_steps_total, n_invalid_total, subgoals_reached, subgoals_all, error
+    return success, n_resets - 1, n_steps_total, n_invalid_total, subgoals_reached, subgoals_all, error, report_str
 
 
 @click.command()
@@ -125,6 +126,7 @@ def do(
         "n_invalid",
         "subgoals_reached",
         "all_subgoals",
+        "report",
     ]
     if random_sample is not None:
         if not (1 <= random_sample <= len(benchmark_tasks) - 1):
@@ -134,11 +136,12 @@ def do(
         benchmark_tasks = benchmark_tasks.sample(
             n=random_sample, random_state=42
         ).reset_index(drop=True)
-    os.makedirs(f"results/{game}/", exist_ok=True)
+    results = project_parameters["results_dir"]
+    os.makedirs(f"{results}/benchmark/{game}/", exist_ok=True)
     if random_sample is not None:
-        save_path = f"results/{game}/{executor}_{model_save_name}_sample{random_sample}.csv"
+        save_path = f"{results}/benchmark/{game}/{executor}_{model_save_name}_sample{random_sample}.csv"
     else:
-        save_path = f"results/{game}/{executor}_{model_save_name}.csv"
+        save_path = f"{results}/benchmark/{game}/{executor}_{model_save_name}.csv"
     if not regenerate and os.path.exists(save_path):
         existing_df = pd.read_csv(save_path)
         results = existing_df.values.tolist()
@@ -156,7 +159,7 @@ def do(
             print(f"Running override index {override_index} on row:")
             for column in row.index:
                 print(f"  {column}: {row[column]}")
-        success, n_resets, n_steps, n_invalid, subgoals_reached, subgoals_all, error = run_task(
+        success, n_resets, n_steps, n_invalid, subgoals_reached, subgoals_all, error, report_str = run_task(
             row=row,
             max_resets=max_resets,
             controller_variant=controller_variant,
@@ -179,6 +182,7 @@ def do(
                 n_invalid,
                 subgoals_reached,
                 subgoals_all,
+                report_str,
             ]
         )
         df = pd.DataFrame(results, columns=columns)

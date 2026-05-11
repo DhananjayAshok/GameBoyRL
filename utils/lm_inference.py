@@ -19,6 +19,7 @@ from transformers import (
 )
 import torch
 import gc
+import uuid
 
 MIN_QUERIES_PER_MINUTE = 1
 
@@ -173,6 +174,7 @@ class APIModel(InferenceModel, ABC):
         self.max_queries_per_minute = max_queries_per_minute
         self.last_query_time = 0
         self.seconds_to_wait = 60 / self.max_queries_per_minute
+        self.unique_id = str(uuid.uuid4())
         # error out if max_queries_per_minute is less than limit
         if self.max_queries_per_minute < MIN_QUERIES_PER_MINUTE:
             log_error(
@@ -197,19 +199,23 @@ class APIModel(InferenceModel, ABC):
                 encoded_images.append(
                     base64.b64encode(image_file.read()).decode("utf-8")
                 )
+        self.clear_encoded_image_cache(make=False)
         return encoded_images
 
-    def clear_encoded_image_cache(self) -> str:
+    def clear_encoded_image_cache(self, make=True) -> str:
         """
         VLM based API models save to a cache for image processing. Clears this cache.
 
+        :param make: Whether to create the cache directory after clearing. Default True.
+        :type make: bool
         :returns: The path to the cache directory for encoded images.
         :rtype: str
         """
-        cache_dir = os.path.join(self.parameters["tmp_dir"], "api_image_cache")
+        cache_dir = os.path.join(self.parameters["tmp_dir"], "api_image_cache", self.unique_id)
         if os.path.exists(cache_dir):
             shutil.rmtree(cache_dir)
-        os.makedirs(cache_dir)
+        if make:
+            os.makedirs(cache_dir)
         return cache_dir
 
     def wait(self) -> None:
