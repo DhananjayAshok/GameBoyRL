@@ -24,14 +24,8 @@ was found.
 
 from __future__ import annotations
 
-from collections import Counter
-from typing import Iterator, Union
-
 import click
 from gameboy_worlds import AVAILABLE_GAMES, get_benchmark_tasks, get_test_environment
-import os
-import matplotlib.pyplot as plt
-import shutil
 
 from execution.executor import (
     SimpleExecutor,
@@ -47,7 +41,7 @@ from execution.executor import (
     BeliefStateExecutor,
     AdversarialSamplingExecutor,
 )
-from execution.report import EnvironmentStepRecord, ExecutorReport, ToolCallRecord
+from execution.report import EnvironmentStepRecord, ToolCallRecord
 
 MAX_TOOL_CALLS = 0
 
@@ -69,92 +63,6 @@ EXECUTORS = [
     #("BeliefStateExecutor",          BeliefStateExecutor,          {}),
     #("AdversarialSamplingExecutor",  AdversarialSamplingExecutor,  {}),
 ]
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _indent(text: str, prefix: str = "      ") -> str:
-    return "\n".join(prefix + line for line in text.splitlines())
-
-
-def _step_summary(step: Union[EnvironmentStepRecord, ToolCallRecord]) -> str:
-    if isinstance(step, EnvironmentStepRecord):
-        return f"ENV   {step.action_class.__name__}({step.kwargs})"
-    return f"TOOL  {step.executor_action_class.__name__}({step.kwargs})  result={step.result}"
-
-
-# Tags that drive the action-selection loop and therefore correspond 1:1
-# with a step record (or an invalid-step entry when parsing fails).
-_ACTION_TAGS = {"action", "score", "decide"}
-
-
-def print_trajectory(report: ExecutorReport, name=None) -> None:
-    """Print the full interleaved VLM-call / step trajectory.
-
-    Every entry in ``report.vlm_call_log`` is printed with its tag.
-    Calls tagged as action-selection (``"action"``, ``"score"``,
-    ``"decide"``) are paired with the next step record where possible;
-    auxiliary calls (``"reflection"``, ``"map_update"``, etc.) are shown
-    inline without consuming a step.
-    """
-    if name is None:
-        img_save_path = "tmp/vis/"
-    else:
-        img_save_path = f"results/{name}"
-    if os.path.exists(img_save_path):
-        shutil.rmtree(img_save_path)
-    os.makedirs(img_save_path)
-    print(f"Saving images to: {img_save_path}")
-    
-    if not report.vlm_call_log:
-        print("  (no VLM calls recorded)")
-        return
-
-    # Parse failures store the raw response verbatim in invalid_steps.
-    parse_fail_counter: Counter[str] = Counter(
-        s for s in getattr(report, "invalid_steps", [])
-        if not s.startswith("Unrecognised")
-    )
-
-    steps_iter: Iterator = iter(report.steps)
-    call_idx = 0
-
-    for entry in report.vlm_call_log:
-        call_idx += 1
-        tag_label = f"[{entry.tag.upper()}]"
-        print(f"\n  ┌─ {tag_label} (call {call_idx})" + "─" * max(0, 48 - len(tag_label)))
-        print("")
-        print("  | Prompt:")
-        print(_indent(entry.prompt , "  │   "))
-        print("  │ VLM output:")
-        print(_indent(entry.response, "  │   "))
-        for i, image in enumerate(entry.images):
-            img_path = os.path.join(img_save_path, f"{call_idx}_{i}.png")
-            plt.imshow(image)
-            plt.savefig(img_path)
-            plt.clf()
-
-        if entry.tag in _ACTION_TAGS:
-            if parse_fail_counter.get(entry.response, 0) > 0:
-                parse_fail_counter[entry.response] -= 1
-                print("  │ → INVALID  (parse failure)")
-            else:
-                step = next(steps_iter, None)
-                if step is None:
-                    print("  │ → INVALID  (unrecognised action or end of steps)")
-                else:
-                    print(f"  │ → {_step_summary(step)}")
-
-        print("  └" + "─" * 57)
-
-    # Any leftover steps (SequencePlannerExecutor runs N steps per VLM call)
-    remaining = list(steps_iter)
-    if remaining:
-        print(f"\n  (+ {len(remaining)} env steps from planned sequences:)")
-        for j, step in enumerate(remaining):
-            print(f"    [{j}] {_step_summary(step)}")
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +104,7 @@ def deep_test(executor_cls, name, row, max_env_steps, extra_kwargs=None):
     print(f"  Invalid steps:      {invalid_count}")
 
     print("\n  Full trajectory:")
-    print_trajectory(report)
+    print(report)
 
     return (name, report.outcome, report.termination_reason, step_count, invalid_count, None)
 

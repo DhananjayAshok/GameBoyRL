@@ -140,6 +140,7 @@ class Executor(ABC):
         """
         return ExecutorReport(
             task=task,
+            executor_name=self.__class__.__name__,
             init_kwargs=init_kwargs,
             max_steps=max_steps,
             max_tool_calls=max_tool_calls,
@@ -341,6 +342,7 @@ Reasoning: <your reasoning>
     def _make_report(self, task, init_kwargs, max_steps, max_tool_calls) -> SimpleReport:
         return SimpleReport(
             task=task,
+            executor_name=self.__class__.__name__,
             init_kwargs=init_kwargs,
             max_steps=max_steps,
             max_tool_calls=max_tool_calls,
@@ -610,6 +612,7 @@ class SequencePlannerExecutor(SimpleExecutor):
     def _make_report(self, task, init_kwargs, max_steps, max_tool_calls) -> SimpleReport:
         return SimpleReport(
             task=task,
+            executor_name=self.__class__.__name__,
             init_kwargs=init_kwargs,
             max_steps=max_steps,
             max_tool_calls=max_tool_calls,

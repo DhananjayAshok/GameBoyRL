@@ -101,9 +101,9 @@ if [[ -z "$exp_name" ]]; then
 fi
 
 if [[ "${ARGS["model_dir"]}" != "none" ]]; then
-    model_save_path="$storage_dir/models/${ARGS["model_dir"]}/$exp_name/"
+    model_save_path="$storage_dir/models/${ARGS["game"]}/${ARGS["model_dir"]}/$exp_name/"
 else
-    model_save_path="$storage_dir/models/$exp_name/"
+    model_save_path="$storage_dir/models/${ARGS["game"]}/$exp_name/"
 fi
 
 
@@ -146,6 +146,6 @@ fi
 python cleanrl/${ARGS["algorithm"]}_curiosity.py --exp_name $exp_name --seed ${ARGS["seed"]} --gamma ${ARGS["gamma"]} --env-id $train_env_id --total-timesteps ${ARGS["timesteps"]} --track \
     --wandb-project-name $WANDB_PROJECT --model_save_path $model_save_path --save_model \
     --observation_embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} \
-    --curiosity-module ${ARGS["curiosity_module"]} --ocr_alpha ${ARGS["ocr_alpha"]} --reset-curiosity-module $extra_arg_part &> $log_file
+    --curiosity-module ${ARGS["curiosity_module"]} --ocr_alpha ${ARGS["ocr_alpha"]} --reset-curiosity-module $extra_arg_part #&> $log_file
 
 cd ..

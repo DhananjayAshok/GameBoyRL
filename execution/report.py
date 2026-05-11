@@ -8,13 +8,20 @@ Data structures for recording a complete executor run.
 
 from __future__ import annotations
 
+import os
+import re
+import shutil
+from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import Any, Dict, Iterator, List, Optional, Type, Union
+
+import matplotlib.pyplot as plt
 import numpy as np
 
 from gameboy_worlds.interface import HighLevelAction
 
 from execution.executor_action import ExecutorAction
+from utils import load_parameters
 
 
 @dataclass
@@ -144,6 +151,7 @@ class ExecutorReport:
     """
 
     task: str
+    executor_name: str
     init_kwargs: Dict[str, Any]
     max_steps: int
     max_tool_calls: int
@@ -171,6 +179,78 @@ class ExecutorReport:
     - ``"truncated"``  — the environment signalled truncation.
     - ``None``         — execution has not yet completed.
     """
+
+    def __str__(self) -> str:
+        """Return the full interleaved VLM-call / step trajectory as a string and save images to disk."""
+        parameters = load_parameters()
+        task_str = re.sub(r"[^\w]", "_", self.task.lower()).strip("_")
+        img_save_path = os.path.join(parameters["results_dir"], "benchmark", self.executor_name, task_str)
+        if os.path.exists(img_save_path):
+            shutil.rmtree(img_save_path)
+        os.makedirs(img_save_path)
+
+        lines: List[str] = []
+
+        if not self.vlm_call_log:
+            lines.append("  (no VLM calls recorded)")
+            return "\n".join(lines)
+
+        parse_fail_counter: Counter[str] = Counter(
+            s for s in getattr(self, "invalid_steps", [])
+            if not s.startswith("Unrecognised")
+        )
+
+        steps_iter: Iterator = iter(self.steps)
+        call_idx = 0
+
+        for entry in self.vlm_call_log:
+            call_idx += 1
+            tag_label = f"[{entry.tag.upper()}]"
+            lines.append(f"\n  ┌─ {tag_label} (call {call_idx})" + "─" * max(0, 48 - len(tag_label)))
+            lines.append("")
+            lines.append("  | Prompt:")
+            lines.append(_indent(entry.prompt, "  │   "))
+            lines.append("  │ VLM output:")
+            lines.append(_indent(entry.response, "  │   "))
+            for i, image in enumerate(entry.images):
+                img_path = os.path.join(img_save_path, f"{call_idx}_{i}.png")
+                plt.imshow(image)
+                plt.savefig(img_path)
+                plt.clf()
+
+            if entry.tag in _ACTION_TAGS:
+                if parse_fail_counter.get(entry.response, 0) > 0:
+                    parse_fail_counter[entry.response] -= 1
+                    lines.append("  │ → INVALID  (parse failure)")
+                else:
+                    step = next(steps_iter, None)
+                    if step is None:
+                        lines.append("  │ → INVALID  (unrecognised action or end of steps)")
+                    else:
+                        lines.append(f"  │ → {_step_summary(step)}")
+
+            lines.append("  └" + "─" * 57)
+
+        remaining = list(steps_iter)
+        if remaining:
+            lines.append(f"\n  (+ {len(remaining)} env steps from planned sequences:)")
+            for j, step in enumerate(remaining):
+                lines.append(f"    [{j}] {_step_summary(step)}")
+
+        return "\n".join(lines)
+
+
+def _indent(text: str, prefix: str = "      ") -> str:
+    return "\n".join(prefix + line for line in text.splitlines())
+
+
+def _step_summary(step: Union[EnvironmentStepRecord, ToolCallRecord]) -> str:
+    if isinstance(step, EnvironmentStepRecord):
+        return f"ENV   {step.action_class.__name__}({step.kwargs})"
+    return f"TOOL  {step.executor_action_class.__name__}({step.kwargs})  result={step.result}"
+
+
+_ACTION_TAGS = {"action", "score", "decide"}
 
 
 @dataclass
