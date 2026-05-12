@@ -95,9 +95,9 @@ fi
 test_env_id="${test_env_id}-True"
 
 if [[ "${ARGS["model_dir"]}" != "none" ]]; then
-    model_save_path="$storage_dir/models/${ARGS["model_dir"]}/$exp_name/"
+    model_save_path="$storage_dir/models/${ARGS["game"]}/${ARGS["model_dir"]}/$exp_name/"
 else
-    model_save_path="$storage_dir/models/$exp_name/"
+    model_save_path="$storage_dir/models/${ARGS["game"]}/$exp_name/"
 fi
 
 extra_arg_part=""
