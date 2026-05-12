@@ -130,7 +130,7 @@ ARGS["buffer_save_path"]="$true_buffer_save_path"
 
 
 cd cleanrl
-python cleanrl_utils/keep_only_best_models.py $keep_arg_str
+python cleanrl_utils/keep_only_best_models.py $keep_arg_str || exit 1
 cd ..
 
 

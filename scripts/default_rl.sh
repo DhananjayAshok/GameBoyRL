@@ -106,7 +106,7 @@ if [[ "${ARGS["eval_only"]}" == "true" || "${ARGS["eval_only"]}" == "yes" || "${
     echo "Eval only flag is set. Skipping training and going to evaluation."
 else
     arg_string=$(args_to_flags_subset ARGS TRAINING_ARG_KEYS)
-    bash scripts/train.sh $arg_string
+    bash scripts/train.sh $arg_string || exit 1
 fi
 
 # if test_env and test_init_state are empty, set them to train values:
@@ -126,4 +126,4 @@ fi
 
 ARGS["exp_name"]=$exp_name
 arg_string=$(args_to_flags_subset ARGS EVALUATION_ARG_KEYS)
-bash scripts/enjoy.sh $arg_string
+bash scripts/enjoy.sh $arg_string || exit 1

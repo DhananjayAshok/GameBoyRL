@@ -116,23 +116,23 @@ function call_agent(){
     ARGS["buffer_load_path"]=$buffer_load_path
     if [ "$sweeping" = true ]; then
         argstring=$(args_to_flags_subset ARGS SWEEP_ARG_KEYS)
-        bash scripts/sweep.sh $argstring
+        bash scripts/sweep.sh $argstring || exit 1
         if [ "$ocr_alpha_sweep" = true ]; then
             for ocr_alpha in "${combination_buffer_ocr_alphas[@]}"; do
                 ARGS["ocr_alpha"]=$ocr_alpha
                 argstring=$(args_to_flags_subset ARGS SWEEP_ARG_KEYS)
-                bash scripts/sweep.sh $argstring
+                bash scripts/sweep.sh $argstring || exit 1
             done
             ARGS["ocr_alpha"]=0.0 # reset to default after sweep
         fi
     else
-        argstring=$(args_to_flags_subset ARGS TRAINING_ARG_KEYS)    
-        bash scripts/default_rl.sh $argstring
+        argstring=$(args_to_flags_subset ARGS TRAINING_ARG_KEYS)
+        bash scripts/default_rl.sh $argstring || exit 1
         if [ "$ocr_alpha_sweep" = true ]; then
             for ocr_alpha in "${combination_buffer_ocr_alphas[@]}"; do
                 ARGS["ocr_alpha"]=$ocr_alpha
-                argstring=$(args_to_flags_subset ARGS TRAINING_ARG_KEYS)    
-                bash scripts/default_rl.sh $argstring
+                argstring=$(args_to_flags_subset ARGS TRAINING_ARG_KEYS)
+                bash scripts/default_rl.sh $argstring || exit 1
             done
             ARGS["ocr_alpha"]=0.0 # reset to default after sweep
         fi
