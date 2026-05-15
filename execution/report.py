@@ -152,6 +152,7 @@ class ExecutorReport:
 
     task: str
     executor_name: str
+    game: str
     init_kwargs: Dict[str, Any]
     max_steps: int
     max_tool_calls: int
@@ -184,7 +185,7 @@ class ExecutorReport:
         """Return the full interleaved VLM-call / step trajectory as a string and save images to disk."""
         parameters = load_parameters()
         task_str = re.sub(r"[^\w]", "_", self.task.lower()).strip("_")
-        img_save_path = os.path.join(parameters["results_dir"], "benchmark", self.executor_name, task_str)
+        img_save_path = os.path.join(parameters["results_dir"], "benchmark", self.game, self.executor_name, task_str)
         if os.path.exists(img_save_path):
             shutil.rmtree(img_save_path)
         os.makedirs(img_save_path)

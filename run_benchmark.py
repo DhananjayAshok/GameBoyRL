@@ -39,6 +39,7 @@ def run_task(row, max_resets, controller_variant, executor_class, max_tool_calls
             executor = executor_class(
                 env=environment,
                 task=mission,
+                game=row["game"],
                 max_steps=emulator_kwargs["max_steps"],
                 max_tool_calls=max_tool_calls,
                 vlm_model=vlm_model,

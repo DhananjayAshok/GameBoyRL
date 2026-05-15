@@ -100,6 +100,7 @@ class Executor(ABC):
         task: str,
         max_steps: int,
         max_tool_calls: int,
+        game: str = "",
         parameters: Optional[dict] = None,
         vlm_model: Optional[str] = None,
         vlm_kind: Optional[str] = None,
@@ -107,6 +108,7 @@ class Executor(ABC):
     ) -> None:
         self._env = env
         self._task = task
+        self._game = game
         self._max_steps = max_steps
         self._max_tool_calls = max_tool_calls
         self._parameters = load_parameters(parameters)
@@ -116,6 +118,7 @@ class Executor(ABC):
             self._parameters["executor_vlm_kind"] = vlm_kind
         self._vlm = ExecutorVLM(parameters=self._parameters)
         self._max_new_tokens = self._parameters.get("executor_vlm_max_new_tokens", 512)
+        self._last_frame_changed = True
 
         self.report = self._make_report(task, kwargs, max_steps, max_tool_calls)
 
@@ -141,6 +144,7 @@ class Executor(ABC):
         return ExecutorReport(
             task=task,
             executor_name=self.__class__.__name__,
+            game=self._game,
             init_kwargs=init_kwargs,
             max_steps=max_steps,
             max_tool_calls=max_tool_calls,
@@ -343,6 +347,7 @@ Reasoning: <your reasoning>
         return SimpleReport(
             task=task,
             executor_name=self.__class__.__name__,
+            game=self._game,
             init_kwargs=init_kwargs,
             max_steps=max_steps,
             max_tool_calls=max_tool_calls,
@@ -371,7 +376,7 @@ Reasoning: <your reasoning>
         frame_after = info["core"]["current_frame"]
 
         record = EnvironmentStepRecord(
-            frame_before=frame_before, 
+            frame_before=frame_before,
             frame_after=frame_after,
             action_class=action_class,
             kwargs=kwargs,
@@ -381,6 +386,7 @@ Reasoning: <your reasoning>
         self.report.steps.append(record)
         self._last_terminated = terminated
         self._last_truncated = truncated
+        self._last_frame_changed = info["core"].get("frame_changed", True)
         return record
 
     def _execute(self) -> int:
@@ -562,7 +568,7 @@ class HistoryAwareExecutor(SimpleExecutor):
     def _take_action(self, action_class, **kwargs) -> EnvironmentStepRecord:
         record = super()._take_action(action_class, **kwargs)
         action_str = self._get_action_strings(return_all=True).get(action_class, action_class.__name__)
-        self._action_history.append((action_class, action_str, record.action_success))
+        self._action_history.append((action_class, action_str, record.action_success, self._last_frame_changed))
         return record
 
     STEP_PROMPT = """Task: [TASK]
@@ -581,12 +587,14 @@ Reasoning: <your reasoning>
         if self._action_history:
             recent = self._action_history[-self._history_k:]
             history_lines = ["Recent actions (oldest first):"]
-            for action_cls, action_str, success in recent:
+            for action_cls, action_str, success, frame_changed in recent:
                 if issubclass(action_cls, LowLevelAction):
-                    history_lines.append(f"  {action_str}")
+                    tags = "" if frame_changed else " [no change]"
+                    history_lines.append(f"  {action_str}{tags}")
                 else:
                     status = "ok" if success == 1 else ("failed" if success == 0 else "unknown")
-                    history_lines.append(f"  {action_str}  [{status}]")
+                    tags = "" if frame_changed else ", no change"
+                    history_lines.append(f"  {action_str}  [{status}{tags}]")
             history_section = "\n".join(history_lines) + "\n\n"
         else:
             history_section = ""
@@ -613,6 +621,7 @@ class SequencePlannerExecutor(SimpleExecutor):
         return SimpleReport(
             task=task,
             executor_name=self.__class__.__name__,
+            game=self._game,
             init_kwargs=init_kwargs,
             max_steps=max_steps,
             max_tool_calls=max_tool_calls,
@@ -1188,10 +1197,12 @@ class ReflectiveExecutor(SimpleExecutor):
         record = super()._take_action(action_class, **kwargs)
         action_str = self._get_action_strings(return_all=True).get(action_class, action_class.__name__)
         if issubclass(action_class, LowLevelAction):
-            self._reflection_action_log.append(action_str)
+            tags = "" if self._last_frame_changed else " [no change]"
+            self._reflection_action_log.append(f"{action_str}{tags}")
         else:
             status = "ok" if record.action_success == 1 else "failed"
-            self._reflection_action_log.append(f"{action_str} [{status}]")
+            tags = "" if self._last_frame_changed else ", no change"
+            self._reflection_action_log.append(f"{action_str} [{status}{tags}]")
         self._steps_since_reflection += 1
         return record
 
