@@ -125,21 +125,6 @@ Reasoning: <refined reasoning that justifies exactly why the action was taken in
 [STOP]
 """
 
-
-# ---------------------------------------------------------------------------
-# Helper: high-level action class + kwargs → human-readable string
-# ---------------------------------------------------------------------------
-
-
-def high_level_action_to_string(high_level_action_class, kwargs: dict) -> str:
-    action = (
-        str(kwargs["low_level_action"])
-        .replace("LowLevelActions.PRESS_ARROW_", "")
-        .replace("LowLevelActions.PRESS_BUTTON_", "")
-    )
-    return action
-
-
 # ---------------------------------------------------------------------------
 # Parse helper: extract "Key: value" from VLM output, strip [STOP]
 # ---------------------------------------------------------------------------
