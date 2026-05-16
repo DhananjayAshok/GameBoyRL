@@ -567,7 +567,7 @@ class HistoryAwareExecutor(SimpleExecutor):
 
     def _take_action(self, action_class, **kwargs) -> EnvironmentStepRecord:
         record = super()._take_action(action_class, **kwargs)
-        action_str = self._get_action_strings(return_all=True).get(action_class, action_class.__name__)
+        action_str = action_class.get_action_name(**kwargs)
         self._action_history.append((action_class, action_str, record.action_success, self._last_frame_changed))
         return record
 

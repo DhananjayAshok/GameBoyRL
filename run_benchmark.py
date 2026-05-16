@@ -29,6 +29,7 @@ def run_task(row, max_resets, controller_variant, executor_class, max_tool_calls
     task_str = mission.replace(" ", "_").lower()
     emulator_kwargs = emulator_kwargs.copy()
     emulator_kwargs["session_name"] += f"/{task_str}/"
+    emulator_kwargs["wait_ticks"] = 20
     error = True
     report_str = None
     try:
