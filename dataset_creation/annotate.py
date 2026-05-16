@@ -24,7 +24,12 @@ SAVE_FRAMES_DIR = "save_frames"
 
 def save_frames(frames, save_name, high_level_actions=None):
     os.makedirs(SAVE_FRAMES_DIR, exist_ok=True)
-    plot_transitions(frames, os.path.join(SAVE_FRAMES_DIR, f"{save_name}.png"), high_level_actions=high_level_actions)
+    plot_transitions(
+        frames,
+        os.path.join(SAVE_FRAMES_DIR, f"{save_name}.png"),
+        high_level_actions=high_level_actions,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Module-level prompt constants ([GAME] is replaced at call time)
@@ -125,15 +130,20 @@ Reasoning: <refined reasoning that justifies exactly why the action was taken in
 # Helper: high-level action class + kwargs → human-readable string
 # ---------------------------------------------------------------------------
 
+
 def high_level_action_to_string(high_level_action_class, kwargs: dict) -> str:
-    action = str(kwargs["low_level_action"]).replace("LowLevelActions.PRESS_ARROW_", "").replace("LowLevelActions.PRESS_BUTTON_", "")
+    action = (
+        str(kwargs["low_level_action"])
+        .replace("LowLevelActions.PRESS_ARROW_", "")
+        .replace("LowLevelActions.PRESS_BUTTON_", "")
+    )
     return action
-    
 
 
 # ---------------------------------------------------------------------------
 # Parse helper: extract "Key: value" from VLM output, strip [STOP]
 # ---------------------------------------------------------------------------
+
 
 def _parse_key(text: str, key: str) -> str | None:
     """Return the value after 'key:' on the matching line, stripping [stop]. Case-insensitive.
@@ -152,11 +162,11 @@ def _parse_key(text: str, key: str) -> str | None:
             return None
     elif n_keys == 1:
         return text.split(f"{key}:")[1].splitlines()[0].strip().replace("[stop]", "")
-    else: # see if maybe only one of them starts with key, and then return that
+    else:  # see if maybe only one of them starts with key, and then return that
         for line in text.splitlines():
             stripped = line.strip()
             if stripped.startswith(key + ":"):
-                value = stripped[len(key) + 1:].strip()
+                value = stripped[len(key) + 1 :].strip()
                 value = value.replace("[stop]", "").strip()
                 return value if value else None
 
@@ -173,9 +183,12 @@ def _parse_bullet_list(text: str) -> list[str]:
     return results
 
 
-def _parse_infer_block(text: str, window_offset: int = 0, n_obs: int = None) -> dict | None:
+def _parse_infer_block(
+    text: str, window_offset: int = 0, n_obs: int = None
+) -> dict | None:
     """Parse a single Task/Start/End block from INFER output.
-    Returns a dict with keys: task, start, end as absolute obs array indices, or None if no Task found or task is NO TASK."""
+    Returns a dict with keys: task, start, end as absolute obs array indices, or None if no Task found or task is NO TASK.
+    """
     text = text.lower()
     stop_idx = text.find("[stop]")
     if stop_idx != -1:
@@ -213,13 +226,21 @@ def got_bigger(subject, refined_subject, multiplier=1.5):
         return True
     else:
         return False
-    
+
 
 # ---------------------------------------------------------------------------
 # Core functions
 # ---------------------------------------------------------------------------
 
-def describe_pairwise(window, action_window, vlm: VLM, game: str, max_new_tokens: int, verbose: bool = False) -> str:
+
+def describe_pairwise(
+    window,
+    action_window,
+    vlm: VLM,
+    game: str,
+    max_new_tokens: int,
+    verbose: bool = False,
+) -> str:
     """Run pairwise DESCRIBE over consecutive frame pairs and build a DESC_AND_CHANGES block."""
     k = len(window)
     frame_descs = {}
@@ -232,7 +253,11 @@ def describe_pairwise(window, action_window, vlm: VLM, game: str, max_new_tokens
             max_new_tokens=max_new_tokens,
         ).lower()
         if verbose:
-            save_frames([window[i], window[i + 1]], f"describe_pair_{i}", high_level_actions=[action_window[i]])
+            save_frames(
+                [window[i], window[i + 1]],
+                f"describe_pair_{i}",
+                high_level_actions=[action_window[i]],
+            )
             print(f"DESCRIBE output (pair {i}→{i+1}):\n{describe_output}\n---")
         frame_descs[i] = _parse_key(describe_output, "Initial Frame Description") or ""
         diffs[i] = _parse_key(describe_output, "Differences") or ""
@@ -243,11 +268,23 @@ def describe_pairwise(window, action_window, vlm: VLM, game: str, max_new_tokens
             desc_lines.append(f"Frame {i}: {frame_descs[i]}")
         desc_lines.append(f"Changes {i}→{i+1}: {diffs[i]}")
     if desc_lines:
-        return "Here is a description of the changes that occured in between each frame:\n" + "\n".join(desc_lines), frame_descs
+        return (
+            "Here is a description of the changes that occured in between each frame:\n"
+            + "\n".join(desc_lines),
+            frame_descs,
+        )
     return "", frame_descs
 
 
-def infer_task(trajectory, vlm: VLM, game: str, max_new_tokens: int, lookback: int = 5, verbose: bool = False, describe_pairs: bool = False) -> dict | None:
+def infer_task(
+    trajectory,
+    vlm: VLM,
+    game: str,
+    max_new_tokens: int,
+    lookback: int = 5,
+    verbose: bool = False,
+    describe_pairs: bool = False,
+) -> dict | None:
     """
     Three-stage pipeline: DESCRIBE (pairwise over last `lookback` frames) → INFER → REFINE.
     Returns a dict with keys: tasks (list of {task, start, end}), frame_descriptions, task_description.
@@ -257,22 +294,23 @@ def infer_task(trajectory, vlm: VLM, game: str, max_new_tokens: int, lookback: i
     observations, actions, high_level_actions, rewards = trajectory
     n = len(observations)
     k = min(lookback, n)
-    window = observations[n - k:]  # k frames, window indices 0..k-1
-    action_window = high_level_actions[n - k:] # k-1 actions, action_window[i] is the action causing window[i]→window[i+1]
+    window = observations[n - k :]  # k frames, window indices 0..k-1
+    action_window = high_level_actions[
+        n - k :
+    ]  # k-1 actions, action_window[i] is the action causing window[i]→window[i+1]
 
     frame_descs = {}
 
     if describe_pairs:
-        desc_and_changes, frame_descs = describe_pairwise(window, action_window, vlm, game, max_new_tokens, verbose=verbose)
+        desc_and_changes, frame_descs = describe_pairwise(
+            window, action_window, vlm, game, max_new_tokens, verbose=verbose
+        )
     else:
         desc_and_changes = ""
-        
 
     # --- Stage 2: INFER (all k frames as images) ---
-    infer_prompt = (
-        INFER_PROMPT
-        .replace("[GAME]", game)
-        .replace("[DESC_AND_CHANGES]", desc_and_changes)
+    infer_prompt = INFER_PROMPT.replace("[GAME]", game).replace(
+        "[DESC_AND_CHANGES]", desc_and_changes
     )
     if verbose:
         save_frames(list(window), "infer_window", high_level_actions=action_window)
@@ -292,7 +330,9 @@ def infer_task(trajectory, vlm: VLM, game: str, max_new_tokens: int, lookback: i
 
     parsed_block = _parse_infer_block(infer_output, window_offset=n - k, n_obs=n)
     if parsed_block is None:
-        print(f"Warning: infer_task failed to parse Task block from INFER stage. Output was:\n{infer_output}")
+        print(
+            f"Warning: infer_task failed to parse Task block from INFER stage. Output was:\n{infer_output}"
+        )
         return None
     task_description = _parse_key(infer_output, "Visual Description")
 
@@ -306,23 +346,32 @@ def infer_task(trajectory, vlm: VLM, game: str, max_new_tokens: int, lookback: i
         print(f"REFINE output:\n{refine_output}\n---")
     refined_task = _parse_key(refine_output, "Task")
     if refined_task is None:
-        refined_task = refine_output.lower().split("[stop]")[0].strip()  # fallback: take everything before [stop]    
+        refined_task = (
+            refine_output.lower().split("[stop]")[0].strip()
+        )  # fallback: take everything before [stop]
     task = parsed_block["task"]
     if got_bigger(task, refined_task):
-       refined_task = task
-    
+        refined_task = task
 
     if verbose:
-        print(f"Final inferred task: {refined_task}, start: {parsed_block['start']}, end: {parsed_block['end']}")
+        print(
+            f"Final inferred task: {refined_task}, start: {parsed_block['start']}, end: {parsed_block['end']}"
+        )
         # save_frames of both start and end
-        start_idx = parsed_block['start'] if parsed_block['start'] is not None else None
-        end_idx = parsed_block['end'] if parsed_block['end'] is not None else None
+        start_idx = parsed_block["start"] if parsed_block["start"] is not None else None
+        end_idx = parsed_block["end"] if parsed_block["end"] is not None else None
         if start_idx is not None and end_idx is not None:
             save_frames([observations[start_idx], observations[end_idx]], "task_frames")
-        print("Exiting after one inference for verbose demonstration. Set VERBOSE = False to run full inference.")
+        print(
+            "Exiting after one inference for verbose demonstration. Set VERBOSE = False to run full inference."
+        )
         breakpoint()
     return {
-        "task": {"task": refined_task, "start": parsed_block["start"], "end": parsed_block["end"]},
+        "task": {
+            "task": refined_task,
+            "start": parsed_block["start"],
+            "end": parsed_block["end"],
+        },
         "task_description": task_description,
         "frame_descriptions": frame_descs if frame_descs else None,
         "used_lookback": k,
@@ -347,18 +396,34 @@ def infer_group_tasks(
     trajectory_data = []
     use_traj_idxes = list(range(len(group)))
     if len(group) > max_trajectories_per_group:
-        use_traj_idxes = list(np.random.choice(use_traj_idxes, max_trajectories_per_group, replace=False))
-    for traj_idx in tqdm(use_traj_idxes, leave=False, total=len(use_traj_idxes), desc="Trajectories"):
+        use_traj_idxes = list(
+            np.random.choice(use_traj_idxes, max_trajectories_per_group, replace=False)
+        )
+    for traj_idx in tqdm(
+        use_traj_idxes, leave=False, total=len(use_traj_idxes), desc="Trajectories"
+    ):
         trajectory = group[traj_idx]
-        result = infer_task(trajectory, vlm, game, max_new_tokens, lookback, verbose=verbose, describe_pairs=describe_pairs)
+        result = infer_task(
+            trajectory,
+            vlm,
+            game,
+            max_new_tokens,
+            lookback,
+            verbose=verbose,
+            describe_pairs=describe_pairs,
+        )
         if result is not None:
-            trajectory_data.append({
-                "traj_idx": int(traj_idx),  # np.random.choice returns np.int64, not JSON serializable
-                "used_lookback": result["used_lookback"],
-                "task": result["task"],
-                "task_description": result["task_description"],
-                "frame_descriptions": result["frame_descriptions"],
-            })
+            trajectory_data.append(
+                {
+                    "traj_idx": int(
+                        traj_idx
+                    ),  # np.random.choice returns np.int64, not JSON serializable
+                    "used_lookback": result["used_lookback"],
+                    "task": result["task"],
+                    "task_description": result["task_description"],
+                    "frame_descriptions": result["frame_descriptions"],
+                }
+            )
     return trajectory_data
 
 
@@ -368,9 +433,24 @@ def infer_group_tasks(
 
 
 @click.command()
-@click.option("--lookback", default=8, show_default=True, help="Number of frames from the end of each trajectory to analyse")
-@click.option("--max_trajectories_per_group", default=20, show_default=True, help="Max trajectories to sample per group")
-@click.option("--describe_pairs", is_flag=True, default=False, help="Run pairwise DESCRIBE stage before INFER.")
+@click.option(
+    "--lookback",
+    default=8,
+    show_default=True,
+    help="Number of frames from the end of each trajectory to analyse",
+)
+@click.option(
+    "--max_trajectories_per_group",
+    default=20,
+    show_default=True,
+    help="Max trajectories to sample per group",
+)
+@click.option(
+    "--describe_pairs",
+    is_flag=True,
+    default=False,
+    help="Run pairwise DESCRIBE stage before INFER.",
+)
 @click.pass_obj
 def infer(obj, lookback, max_trajectories_per_group, describe_pairs):
     """Infer task strings for each trajectory group."""
@@ -387,27 +467,44 @@ def infer(obj, lookback, max_trajectories_per_group, describe_pairs):
     checkpoint_path = traj_path.replace(".json", "_checkpoint.json")
 
     if os.path.exists(traj_path) and not obj["overwrite"]:
-        log_info(f"Skipping infer — output already exists at {traj_path}. Use --overwrite to rerun.")
+        log_info(
+            f"Skipping infer — output already exists at {traj_path}. Use --overwrite to rerun."
+        )
         return
 
     if os.path.exists(checkpoint_path) and not obj["overwrite"]:
         with open(checkpoint_path, "r") as f:
             trajectory_output = {int(k): v for k, v in json.load(f).items()}
-        log_info(f"Resuming infer from checkpoint — {len(trajectory_output)} groups already done.")
+        log_info(
+            f"Resuming infer from checkpoint — {len(trajectory_output)} groups already done."
+        )
     else:
         trajectory_output = {}
 
     with open(trajectory_path, "rb") as f:
         grouped_trajectories = pickle.load(f)
 
-    for group_idx, group in tqdm(enumerate(grouped_trajectories), desc="Processing groups", total=len(grouped_trajectories)):
+    for group_idx, group in tqdm(
+        enumerate(grouped_trajectories),
+        desc="Processing groups",
+        total=len(grouped_trajectories),
+    ):
         if group_idx in trajectory_output:
             continue
         trajectory_data = infer_group_tasks(
-            group, vlm, game, max_new_tokens, lookback, max_trajectories_per_group, verbose=obj["verbose"], describe_pairs=describe_pairs
+            group,
+            vlm,
+            game,
+            max_new_tokens,
+            lookback,
+            max_trajectories_per_group,
+            verbose=obj["verbose"],
+            describe_pairs=describe_pairs,
         )
         if not trajectory_data:
-            print(f"Warning: skipping group {group_idx} — could not infer any task strings.")
+            print(
+                f"Warning: skipping group {group_idx} — could not infer any task strings."
+            )
             continue
         trajectory_output[group_idx] = trajectory_data
         with open(checkpoint_path, "w") as f:
@@ -421,7 +518,12 @@ def infer(obj, lookback, max_trajectories_per_group, describe_pairs):
 
 
 @click.command()
-@click.option("--safety_rollback", default=2, show_default=True, help="Extra steps before task start to include")
+@click.option(
+    "--safety_rollback",
+    default=2,
+    show_default=True,
+    help="Extra steps before task start to include",
+)
 @click.pass_obj
 def reason(obj, safety_rollback):
     """Dense step-wise reasoning annotation for each task in each trajectory."""
@@ -439,17 +541,23 @@ def reason(obj, safety_rollback):
     checkpoint_path = out_path.replace(".json", "_checkpoint.json")
 
     if os.path.exists(out_path) and not obj["overwrite"]:
-        log_info(f"Skipping reason — output already exists at {out_path}. Use --overwrite to rerun.")
+        log_info(
+            f"Skipping reason — output already exists at {out_path}. Use --overwrite to rerun."
+        )
         return
 
     if os.path.exists(checkpoint_path) and not obj["overwrite"]:
         with open(checkpoint_path, "r") as f:
             dense_output = {int(k): v for k, v in json.load(f).items()}
-        log_info(f"Resuming reason from checkpoint — {len(dense_output)} groups already done.")
+        log_info(
+            f"Resuming reason from checkpoint — {len(dense_output)} groups already done."
+        )
     else:
         dense_output = {}
 
-    traj_annotation_path = os.path.join(out_dir, f"trajectory_annotation_{model_save_name}.json")
+    traj_annotation_path = os.path.join(
+        out_dir, f"trajectory_annotation_{model_save_name}.json"
+    )
     if not os.path.exists(traj_annotation_path):
         raise FileNotFoundError(
             f"Trajectory annotation not found at {traj_annotation_path}. Run `infer` first."
@@ -460,7 +568,9 @@ def reason(obj, safety_rollback):
     with open(trajectory_path, "rb") as f:
         grouped_trajectories = pickle.load(f)
 
-    for group_idx_str, traj_data_list in tqdm(trajectory_annotation.items(), desc="Processing groups"):
+    for group_idx_str, traj_data_list in tqdm(
+        trajectory_annotation.items(), desc="Processing groups"
+    ):
         group_idx = int(group_idx_str)
         if group_idx in dense_output:
             continue
@@ -488,19 +598,32 @@ def reason(obj, safety_rollback):
                 frame_t = observations[abs_step]
                 frame_t1 = observations[abs_step + 1]
 
-                action_entry = high_level_actions[abs_step] if abs_step < len(high_level_actions) else (type(None), {})
+                action_entry = (
+                    high_level_actions[abs_step]
+                    if abs_step < len(high_level_actions)
+                    else (type(None), {})
+                )
                 action_class, action_kwargs = action_entry
-                action_str = high_level_action_to_string(action_class, action_kwargs)
+                action_str = (
+                    action_class.get_action_str(**action_kwargs)
+                    if action_class is not None
+                    else "NO ACTION"
+                )
 
                 reason_prompt = (
-                    REASON_PROMPT
-                    .replace("[GAME]", game)
+                    REASON_PROMPT.replace("[GAME]", game)
                     .replace("[ACTION]", action_str)
                     .replace("[TASK]", task_name)
                 )
                 if verbose:
-                    save_frames([frame_t, frame_t1], f"reason_g{group_idx}_t{traj_idx}_s{abs_step}", high_level_actions=[action_entry])
-                    print(f"REASON prompt (group {group_idx} traj {traj_idx} step {abs_step}):\n{reason_prompt}\n---")
+                    save_frames(
+                        [frame_t, frame_t1],
+                        f"reason_g{group_idx}_t{traj_idx}_s{abs_step}",
+                        high_level_actions=[action_entry],
+                    )
+                    print(
+                        f"REASON prompt (group {group_idx} traj {traj_idx} step {abs_step}):\n{reason_prompt}\n---"
+                    )
                 reason_output = vlm.infer(
                     texts=reason_prompt,
                     images=[frame_t, frame_t1],
@@ -509,15 +632,18 @@ def reason(obj, safety_rollback):
                 if verbose:
                     print(f"REASON output:\n{reason_output}\n---")
                 verdict_str = _parse_key(reason_output, "Verdict")
-                good_action = verdict_str is not None and verdict_str.strip().startswith("yes")
+                good_action = (
+                    verdict_str is not None and verdict_str.strip().startswith("yes")
+                )
                 reasoning = _parse_key(reason_output, "Reasoning")
 
                 if reasoning is None:
-                    print(f"Warning: failed to parse Reasoning for group {group_idx} traj {traj_idx} step {abs_step}.")
+                    print(
+                        f"Warning: failed to parse Reasoning for group {group_idx} traj {traj_idx} step {abs_step}."
+                    )
                 elif good_action:
                     refine_prompt = (
-                        REASON_REFINE_PROMPT
-                        .replace("[GAME]", game)
+                        REASON_REFINE_PROMPT.replace("[GAME]", game)
                         .replace("[TASK]", task_name)
                         .replace("[ACTION]", action_str)
                         .replace("[CANDIDATE_REASONING]", reasoning)
@@ -532,26 +658,33 @@ def reason(obj, safety_rollback):
                         print(f"REASON_REFINE output:\n{refine_output}\n---")
                     refined_reasoning = _parse_key(refine_output, "Reasoning")
                     if refined_reasoning is None:
-                        refined_reasoning = refine_output.lower().split("[stop]")[0].strip()
+                        refined_reasoning = (
+                            refine_output.lower().split("[stop]")[0].strip()
+                        )
                     if got_bigger(reasoning, refined_reasoning, multiplier=3.0):
                         pass
                     else:
                         reasoning = refined_reasoning
 
                 if verbose:
-                    print(f"Final reasoning (good_action={good_action}) for group {group_idx} traj {traj_idx} step {abs_step}:\n{reasoning}\n===")
-                records.append({
-                    "traj_idx": traj_idx,
-                    "task_name": task_name,
-                    "step": abs_step,
-                    "action_str": action_str,
-                    "reasoning": reasoning,
-                    "good_action": good_action,
-                })
+                    print(
+                        f"Final reasoning (good_action={good_action}) for group {group_idx} traj {traj_idx} step {abs_step}:\n{reasoning}\n==="
+                    )
+                records.append(
+                    {
+                        "traj_idx": traj_idx,
+                        "task_name": task_name,
+                        "step": abs_step,
+                        "action_str": action_str,
+                        "reasoning": reasoning,
+                        "good_action": good_action,
+                    }
+                )
             if verbose:
-                print("Exiting after one reasoning for verbose demonstration. Set VERBOSE = False to run full annotation.")
+                print(
+                    "Exiting after one reasoning for verbose demonstration. Set VERBOSE = False to run full annotation."
+                )
                 breakpoint()
-                
 
         dense_output[group_idx] = records
         with open(checkpoint_path, "w") as f:
