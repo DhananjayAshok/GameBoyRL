@@ -590,7 +590,7 @@ def reason(obj, safety_rollback):
                 )
                 action_class, action_kwargs = action_entry
                 action_str = (
-                    action_class.get_action_str(**action_kwargs)
+                    action_class.get_action_name(**action_kwargs)
                     if action_class is not None
                     else "NO ACTION"
                 )
