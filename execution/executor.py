@@ -77,6 +77,13 @@ class Executor(ABC):
     :param parameters: Optional parameter overrides forwarded to
         :func:`~utils.parameter_handling.load_parameters`.
     :type parameters: Optional[dict]
+    :param allow_self_termination: When ``True``, the VLM may output
+        :attr:`DONE_TOKEN` (task complete, outcome 3) or
+        :attr:`GIVE_UP_TOKEN` (task unachievable, outcome 4) as its action to
+        end execution early.  The termination reason is recorded as
+        ``"agent_done"`` or ``"agent_give_up"`` respectively.  Defaults to
+        ``False``.
+    :type allow_self_termination: bool
     :param kwargs: Additional subclass-specific keyword arguments.  These are
         recorded verbatim in :attr:`report.init_kwargs` but are otherwise
         ignored by the base class.
@@ -94,6 +101,9 @@ class Executor(ABC):
 
     available_tools: list = []
 
+    DONE_TOKEN = "DONE"
+    GIVE_UP_TOKEN = "GIVE_UP"
+
     def __init__(
         self,
         env: Environment,
@@ -104,6 +114,7 @@ class Executor(ABC):
         parameters: Optional[dict] = None,
         vlm_model: Optional[str] = None,
         vlm_kind: Optional[str] = None,
+        allow_self_termination: bool = False,
         **kwargs: Any,
     ) -> None:
         self._env = env
@@ -111,6 +122,7 @@ class Executor(ABC):
         self._game = game
         self._max_steps = max_steps
         self._max_tool_calls = max_tool_calls
+        self._allow_self_termination = allow_self_termination
         self._parameters = load_parameters(parameters)
         if vlm_model is not None:
             self._parameters["executor_vlm_model"] = vlm_model
@@ -294,6 +306,32 @@ class Executor(ABC):
         """
         return self._env.get_action_strings(return_all=return_all)
 
+    def _check_self_termination(self, action_str: str) -> Optional[int]:
+        """
+        If self-termination is enabled and *action_str* is a termination token,
+        record the reason and return the outcome code; otherwise return ``None``.
+
+        Call this immediately after parsing *action_str* in ``_execute``, before
+        attempting tool or environment dispatch::
+
+            outcome = self._check_self_termination(action_str)
+            if outcome is not None:
+                return outcome
+
+        :return: ``3`` for ``DONE``, ``4`` for ``GIVE_UP``, ``None`` otherwise.
+        :rtype: Optional[int]
+        """
+        if not self._allow_self_termination:
+            return None
+        action_lower = action_str.lower()
+        if action_lower == self.DONE_TOKEN.lower():
+            self.report.termination_reason = "agent_done"
+            return 3
+        if action_lower == self.GIVE_UP_TOKEN.lower():
+            self.report.termination_reason = "agent_give_up"
+            return 4
+        return None
+
 
 class SimpleExecutor(Executor):
     """
@@ -318,12 +356,17 @@ class SimpleExecutor(Executor):
          environment step.
        - **Valid env action**: steps the environment, increments the env-step
          counter.
+       - **Self-termination token** (when *allow_self_termination* is enabled):
+         ``DONE`` signals task completion; ``GIVE_UP`` signals the task is
+         impossible.  Both end execution immediately.
        - **Unparseable or unrecognised**: logs to :attr:`~execution.report.SimpleReport.invalid_steps`,
          passes an error message into the next prompt, and counts as an
          environment step to prevent infinite loops.
 
     Terminates early when the environment signals ``terminated`` or
-    ``truncated``, recording the reason in
+    ``truncated``, or when self-termination tokens are used (see
+    :attr:`~execution.executor.Executor.allow_self_termination` on the base class),
+    recording the reason in
     :attr:`~execution.report.ExecutorReport.termination_reason`.
 
     .. warning:: **Subclass initialisation order**
@@ -382,6 +425,7 @@ Reasoning: <your reasoning>
             kwargs=kwargs,
             transition_states=transition_states,
             action_success=action_success,
+            reward=reward,
         )
         self.report.steps.append(record)
         self._last_terminated = terminated
@@ -431,6 +475,11 @@ Reasoning: <your reasoning>
                     self.report.termination_reason = "max_invalid"
                     return -1
                 continue
+
+            # ---- self-termination tokens (when enabled) -------------------
+            outcome = self._check_self_termination(action_str)
+            if outcome is not None:
+                return outcome
 
             # ---- try tool call (if budget not exhausted) ------------------
             if not tool_calls_exceeded:
@@ -490,7 +539,11 @@ Reasoning: <your reasoning>
         return f"Tool result: {tool_call_message}\n\n" if tool_call_message is not None else ""
 
     def _action_list_block(self) -> str:
-        return "\n".join(f"  {s}" for s in self._get_action_strings().values())
+        lines = [f"  {s}" for s in self._get_action_strings().values()]
+        if self._allow_self_termination:
+            lines.append(f"  {self.DONE_TOKEN}  (use when the task is complete)")
+            lines.append(f"  {self.GIVE_UP_TOKEN}  (use when the task is impossible or you cannot proceed)")
+        return "\n".join(lines)
 
     def _tools_block(self, tool_calls_exceeded: bool) -> str:
         if tool_calls_exceeded or not self.available_tools:
@@ -668,6 +721,9 @@ class SequencePlannerExecutor(SimpleExecutor):
 
             # Execute next action in sequence
             action_str = pending_sequence.pop(0)
+            outcome = self._check_self_termination(action_str)
+            if outcome is not None:
+                return outcome
             action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
             if action_class is None:
                 error_message = (
@@ -854,6 +910,10 @@ Reasoning: <your reasoning>
                     return -1
                 continue
 
+            outcome = self._check_self_termination(action_str)
+            if outcome is not None:
+                return outcome
+
             if not tool_calls_exceeded:
                 tool_result = self._try_parse_tool_call(action_str)
                 if tool_result is not None:
@@ -971,6 +1031,10 @@ class ScreenDiffExecutor(SimpleExecutor):
                     self.report.termination_reason = "max_invalid"
                     return -1
                 continue
+
+            outcome = self._check_self_termination(action_str)
+            if outcome is not None:
+                return outcome
 
             if not tool_calls_exceeded:
                 tool_result = self._try_parse_tool_call(action_str)
@@ -1113,6 +1177,10 @@ class SelfConsistencyExecutor(SimpleExecutor):
                     self.report.termination_reason = "max_invalid"
                     return -1
                 continue
+
+            outcome = self._check_self_termination(action_str)
+            if outcome is not None:
+                return outcome
 
             if not tool_calls_exceeded:
                 tool_result = self._try_parse_tool_call(action_str)
@@ -1284,6 +1352,10 @@ Reasoning: <your reasoning>
                     return -1
                 continue
 
+            outcome = self._check_self_termination(action_str)
+            if outcome is not None:
+                return outcome
+
             if not tool_calls_exceeded:
                 tool_result = self._try_parse_tool_call(action_str)
                 if tool_result is not None:
@@ -1438,6 +1510,10 @@ Reasoning: <your reasoning>
                     self.report.termination_reason = "max_invalid"
                     return -1
                 continue
+
+            outcome = self._check_self_termination(action_str)
+            if outcome is not None:
+                return outcome
 
             if not tool_calls_exceeded:
                 tool_result = self._try_parse_tool_call(action_str)
@@ -1596,6 +1672,10 @@ Action: <one environment action>
                     return -1
                 continue
 
+            outcome = self._check_self_termination(action_str)
+            if outcome is not None:
+                return outcome
+
             if not tool_calls_exceeded:
                 tool_result = self._try_parse_tool_call(action_str)
                 if tool_result is not None:
@@ -1676,11 +1756,15 @@ Respond with one line per action in exactly this format:
         action_strings = self._get_action_strings()
         if not action_strings:
             return None
+        action_lines = list(action_strings.values())
+        if self._allow_self_termination:
+            action_lines.append(f"{self.DONE_TOKEN}  (signal that the task is complete)")
+            action_lines.append(f"{self.GIVE_UP_TOKEN}  (signal that the task is impossible or you cannot proceed)")
         prompt = (
             self.SCORE_PROMPT
             .replace("[TASK]", self._task)
             .replace("[ERROR_BLOCK]", self._error_block(error_message))
-            .replace("[ACTION_LIST]", "\n".join(f"  {s}" for s in action_strings.values()))
+            .replace("[ACTION_LIST]", "\n".join(f"  {s}" for s in action_lines))
         )
         response = self._vlm_call("score", texts=prompt, images=[frame], max_new_tokens=300)
 
@@ -1732,6 +1816,10 @@ Respond with one line per action in exactly this format:
                     self.report.termination_reason = "max_invalid"
                     return -1
                 continue
+
+            outcome = self._check_self_termination(action_str)
+            if outcome is not None:
+                return outcome
 
             action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
             if action_class is not None:
@@ -1873,6 +1961,10 @@ Reasoning: <your reasoning>
                     self.report.termination_reason = "max_invalid"
                     return -1
                 continue
+
+            outcome = self._check_self_termination(action_str)
+            if outcome is not None:
+                return outcome
 
             if not tool_calls_exceeded:
                 tool_result = self._try_parse_tool_call(action_str)
@@ -2025,6 +2117,10 @@ Action: <one environment action>
                     self.report.termination_reason = "max_invalid"
                     return -1
                 continue
+
+            outcome = self._check_self_termination(action_str)
+            if outcome is not None:
+                return outcome
 
             if not tool_calls_exceeded:
                 tool_result = self._try_parse_tool_call(action_str)

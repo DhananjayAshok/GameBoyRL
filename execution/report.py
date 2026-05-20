@@ -78,6 +78,8 @@ class EnvironmentStepRecord:
     :param action_success: Integer success code returned by the high-level
         action.
     :type action_success: int
+    :param reward: Reward returned by the environment for this step.
+    :type reward: float
     """
     frame_before: np.ndarray
     frame_after: np.ndarray
@@ -85,6 +87,7 @@ class EnvironmentStepRecord:
     kwargs: Dict[str, Any]
     transition_states: List[Dict[str, Any]]
     action_success: int
+    reward: float = 0.0
 
 
 @dataclass
