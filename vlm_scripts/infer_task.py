@@ -100,28 +100,15 @@ Respond in exactly this format (one per line):
 ...
 [STOP]"""
 
-REASON_PROMPT = """You are observing two consecutive screenshots from a game of [GAME].
+DISTILL_PROMPT = """You are given several candidate descriptions of a task performed in a game of [GAME], all inferred from similar game states:
 
-Image 1 is the frame BEFORE the action. Image 2 is the frame AFTER the action.
-The action taken was: [ACTION]
-The overall task being pursued is: [TASK]
+[CANDIDATE_LIST]
 
-Did this action enable or lead to progress towards the task in this context? Describe the screen in a task-oriented manner and then either justify why the player took this action or why the action was not relevant to the task. Be specific and grounded in the images. Do not hallucinate or guess details that are not clearly visible.
+Generate a single, unifying task string that captures the core commonality between all of these candidates, while omitting any extraneous detail or noise. Use imperative tone.
 
 Respond in exactly this format:
-Verdict: <YES or NO, indicating whether the action was relevant for task progress>
-Reasoning: <very brief explanation either explaining how the action helped progress towards the task, or why it was not relevant to the task, based on the images. Make sure to explicitly refer to visual evidence>
-[STOP]"""
-
-REASON_REFINE_PROMPT = """You are given a candidate reasoning for why a particular action was taken in a game of [GAME]: 
-Task: [TASK]
-Action taken: [ACTION]
-Candidate: [CANDIDATE_REASONING]
-
-Refine this by writing it in the first person perspective of the player in the present tense, and making it more imperitive in nature. So use words such as "the screen shows X ..., it makes most sense to do Y, hence I should press Z ... or something like that.
-
-Answer in exactly this format:
-Reasoning: <refined reasoning that justifies exactly why the action was taken in context of the task in first person future planning language>
+Reasoning: <one single, short sentence describing your thinking. Reference the commonalities between the candidates that led you to infer this distilled task.>
+Task: <single distilled imperative task string>
 [STOP]
 """
 
@@ -369,16 +356,16 @@ def infer_group_tasks(
     game: str,
     max_new_tokens: int,
     lookback: int = 5,
-    max_trajectories_per_group: int = 2,
+    max_trajectories_per_group: int = 3,
     verbose: bool = False,
     describe_pairs: bool = False,
-) -> list[dict]:
+) -> tuple[str, list] | None:
     """
-    Run infer_task on all trajectories in the group.
-
-    Returns trajectory_data_list: per-trajectory dicts with traj_idx, tasks, frame_descriptions.
+    Run infer_task on a small sample of trajectories in the group, then distill to a single task string.
+    Returns (distilled_task, used_trajectories), or None if no tasks could be inferred.
     """
-    trajectory_data = []
+    all_tasks = []
+    used_trajectories = []
     use_traj_idxes = list(range(len(group)))
     if len(group) > max_trajectories_per_group:
         use_traj_idxes = list(
@@ -398,18 +385,23 @@ def infer_group_tasks(
             describe_pairs=describe_pairs,
         )
         if result is not None:
-            trajectory_data.append(
-                {
-                    "traj_idx": int(
-                        traj_idx
-                    ),  # np.random.choice returns np.int64, not JSON serializable
-                    "used_lookback": result["used_lookback"],
-                    "task": result["task"],
-                    "task_description": result["task_description"],
-                    "frame_descriptions": result["frame_descriptions"],
-                }
-            )
-    return trajectory_data
+            all_tasks.append(result["task"]["task"])
+            used_trajectories.append(trajectory)
+
+    if not all_tasks:
+        return None
+
+    distill_prompt = DISTILL_PROMPT.replace("[GAME]", game).replace(
+        "[CANDIDATE_LIST]", "\n".join(f"- {t}" for t in all_tasks)
+    )
+    distill_output = vlm.infer(
+        texts=distill_prompt,
+        max_new_tokens=max_new_tokens,
+    ).lower()
+    distilled_task = _parse_key(distill_output, "Task")
+    if distilled_task is None:
+        distilled_task = all_tasks[0]
+    return distilled_task, used_trajectories
 
 
 # ---------------------------------------------------------------------------
@@ -417,7 +409,12 @@ def infer_group_tasks(
 # ---------------------------------------------------------------------------
 
 
-@click.command()
+@click.command(name="infer_task")
+@click.option(
+    "--trajectory_path",
+    required=True,
+    help="Path to grouped_high_reward_trajectories.pkl",
+)
 @click.option(
     "--lookback",
     default=8,
@@ -426,7 +423,7 @@ def infer_group_tasks(
 )
 @click.option(
     "--max_trajectories_per_group",
-    default=20,
+    default=3,
     show_default=True,
     help="Max trajectories to sample per group",
 )
@@ -437,11 +434,12 @@ def infer_group_tasks(
     help="Run pairwise DESCRIBE stage before INFER.",
 )
 @click.pass_obj
-def infer(obj, lookback, max_trajectories_per_group, describe_pairs):
+def infer_task_cmd(
+    obj, trajectory_path, lookback, max_trajectories_per_group, describe_pairs
+):
     """Infer task strings for each trajectory group."""
     max_new_tokens = obj["max_new_tokens"]
     vlm_kind = obj["vlm_kind"]
-    trajectory_path = obj["trajectory_path"]
     game = obj["game"]
     model_name = obj["model_name"]
     vlm = VLM(model_name, vlm_kind)
@@ -457,14 +455,22 @@ def infer(obj, lookback, max_trajectories_per_group, describe_pairs):
         )
         return
 
+    pkl_path = traj_path.replace(".json", ".pkl")
+    pkl_checkpoint_path = checkpoint_path.replace(".json", ".pkl")
+
     if os.path.exists(checkpoint_path) and not obj["overwrite"]:
         with open(checkpoint_path, "r") as f:
             trajectory_output = {int(k): v for k, v in json.load(f).items()}
+        trajectory_data_output = {}
+        if os.path.exists(pkl_checkpoint_path):
+            with open(pkl_checkpoint_path, "rb") as f:
+                trajectory_data_output = pickle.load(f)
         log_info(
             f"Resuming infer from checkpoint — {len(trajectory_output)} groups already done."
         )
     else:
         trajectory_output = {}
+        trajectory_data_output = {}
 
     with open(trajectory_path, "rb") as f:
         grouped_trajectories = pickle.load(f)
@@ -476,7 +482,7 @@ def infer(obj, lookback, max_trajectories_per_group, describe_pairs):
     ):
         if group_idx in trajectory_output:
             continue
-        trajectory_data = infer_group_tasks(
+        result = infer_group_tasks(
             group,
             vlm,
             game,
@@ -486,197 +492,26 @@ def infer(obj, lookback, max_trajectories_per_group, describe_pairs):
             verbose=obj["verbose"],
             describe_pairs=describe_pairs,
         )
-        if not trajectory_data:
+        if result is None:
             print(
                 f"Warning: skipping group {group_idx} — could not infer any task strings."
             )
             continue
-        trajectory_output[group_idx] = trajectory_data
+        distilled_task, used_trajectories = result
+        trajectory_output[group_idx] = distilled_task
+        trajectory_data_output[group_idx] = used_trajectories
         with open(checkpoint_path, "w") as f:
             json.dump(trajectory_output, f, indent=2)
+        with open(pkl_checkpoint_path, "wb") as f:
+            pickle.dump(trajectory_data_output, f)
 
     with open(traj_path, "w") as f:
         json.dump(trajectory_output, f, indent=2)
+    with open(pkl_path, "wb") as f:
+        pickle.dump(trajectory_data_output, f)
     print(f"Saved trajectory annotations → {traj_path}")
+    print(f"Saved trajectories → {pkl_path}")
     if os.path.exists(checkpoint_path):
         os.remove(checkpoint_path)
-
-
-@click.command()
-@click.option(
-    "--safety_rollback",
-    default=2,
-    show_default=True,
-    help="Extra steps before task start to include",
-)
-@click.pass_obj
-def reason(obj, safety_rollback):
-    """Dense step-wise reasoning annotation for each task in each trajectory."""
-    max_new_tokens = obj["max_new_tokens"]
-    vlm_kind = obj["vlm_kind"]
-    trajectory_path = obj["trajectory_path"]
-    game = obj["game"]
-    model_name = obj["model_name"]
-    vlm = VLM(model_name, vlm_kind)
-    model_save_name = model_name.split("/")[-1]
-    verbose = obj["verbose"]
-
-    out_dir = os.path.dirname(trajectory_path)
-    out_path = os.path.join(out_dir, f"dense_annotation_{model_save_name}.json")
-    checkpoint_path = out_path.replace(".json", "_checkpoint.json")
-
-    if os.path.exists(out_path) and not obj["overwrite"]:
-        log_info(
-            f"Skipping reason — output already exists at {out_path}. Use --overwrite to rerun."
-        )
-        return
-
-    if os.path.exists(checkpoint_path) and not obj["overwrite"]:
-        with open(checkpoint_path, "r") as f:
-            dense_output = {int(k): v for k, v in json.load(f).items()}
-        log_info(
-            f"Resuming reason from checkpoint — {len(dense_output)} groups already done."
-        )
-    else:
-        dense_output = {}
-
-    traj_annotation_path = os.path.join(
-        out_dir, f"trajectory_annotation_{model_save_name}.json"
-    )
-    if not os.path.exists(traj_annotation_path):
-        raise FileNotFoundError(
-            f"Trajectory annotation not found at {traj_annotation_path}. Run `infer` first."
-        )
-    with open(traj_annotation_path, "r") as f:
-        trajectory_annotation = json.load(f)
-
-    with open(trajectory_path, "rb") as f:
-        grouped_trajectories = pickle.load(f)
-
-    for group_idx_str, traj_data_list in tqdm(
-        trajectory_annotation.items(), desc="Processing groups"
-    ):
-        group_idx = int(group_idx_str)
-        if group_idx in dense_output:
-            continue
-        group = grouped_trajectories[group_idx]
-
-        records = []
-        for traj_data in traj_data_list:
-            traj_idx = traj_data["traj_idx"]
-            observations, actions, high_level_actions, rewards = group[traj_idx]
-            n = len(observations)
-
-            task_entry = traj_data["task"]
-            task_name = task_entry["task"]
-            task_start = task_entry["start"]
-            task_end = task_entry["end"]
-
-            if task_start is None or task_end is None:
-                continue
-
-            step_start = max(0, task_start - safety_rollback)
-            for abs_step in range(step_start, task_end + 1):
-                if abs_step + 1 >= n:
-                    continue
-
-                frame_t = observations[abs_step]
-                frame_t1 = observations[abs_step + 1]
-
-                action_entry = (
-                    high_level_actions[abs_step]
-                    if abs_step < len(high_level_actions)
-                    else (type(None), {})
-                )
-                action_class, action_kwargs = action_entry
-                action_str = (
-                    action_class.get_action_name(**action_kwargs)
-                    if action_class is not None
-                    else "NO ACTION"
-                )
-
-                reason_prompt = (
-                    REASON_PROMPT.replace("[GAME]", game)
-                    .replace("[ACTION]", action_str)
-                    .replace("[TASK]", task_name)
-                )
-                if verbose:
-                    save_frames(
-                        [frame_t, frame_t1],
-                        f"reason_g{group_idx}_t{traj_idx}_s{abs_step}",
-                        high_level_actions=[action_entry],
-                    )
-                    print(
-                        f"REASON prompt (group {group_idx} traj {traj_idx} step {abs_step}):\n{reason_prompt}\n---"
-                    )
-                reason_output = vlm.infer(
-                    texts=reason_prompt,
-                    images=[frame_t, frame_t1],
-                    max_new_tokens=max_new_tokens,
-                ).lower()
-                if verbose:
-                    print(f"REASON output:\n{reason_output}\n---")
-                verdict_str = _parse_key(reason_output, "Verdict")
-                good_action = (
-                    verdict_str is not None and verdict_str.strip().startswith("yes")
-                )
-                reasoning = _parse_key(reason_output, "Reasoning")
-
-                if reasoning is None:
-                    print(
-                        f"Warning: failed to parse Reasoning for group {group_idx} traj {traj_idx} step {abs_step}."
-                    )
-                elif good_action:
-                    refine_prompt = (
-                        REASON_REFINE_PROMPT.replace("[GAME]", game)
-                        .replace("[TASK]", task_name)
-                        .replace("[ACTION]", action_str)
-                        .replace("[CANDIDATE_REASONING]", reasoning)
-                    )
-                    if verbose:
-                        print(f"REASON_REFINE prompt:\n{refine_prompt}\n---")
-                    refine_output = vlm.infer(
-                        texts=refine_prompt,
-                        max_new_tokens=max_new_tokens,
-                    ).lower()
-                    if verbose:
-                        print(f"REASON_REFINE output:\n{refine_output}\n---")
-                    refined_reasoning = _parse_key(refine_output, "Reasoning")
-                    if refined_reasoning is None:
-                        refined_reasoning = (
-                            refine_output.lower().split("[stop]")[0].strip()
-                        )
-                    if got_bigger(reasoning, refined_reasoning, multiplier=3.0):
-                        pass
-                    else:
-                        reasoning = refined_reasoning
-
-                if verbose:
-                    print(
-                        f"Final reasoning (good_action={good_action}) for group {group_idx} traj {traj_idx} step {abs_step}:\n{reasoning}\n==="
-                    )
-                records.append(
-                    {
-                        "traj_idx": traj_idx,
-                        "task_name": task_name,
-                        "step": abs_step,
-                        "action_str": action_str,
-                        "reasoning": reasoning,
-                        "good_action": good_action,
-                    }
-                )
-            if verbose:
-                print(
-                    "Exiting after one reasoning for verbose demonstration. Set VERBOSE = False to run full annotation."
-                )
-                breakpoint()
-
-        dense_output[group_idx] = records
-        with open(checkpoint_path, "w") as f:
-            json.dump(dense_output, f, indent=2)
-
-    with open(out_path, "w") as f:
-        json.dump(dense_output, f, indent=2)
-    print(f"Saved dense annotation → {out_path}")
-    if os.path.exists(checkpoint_path):
-        os.remove(checkpoint_path)
+    if os.path.exists(pkl_checkpoint_path):
+        os.remove(pkl_checkpoint_path)

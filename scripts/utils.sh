@@ -89,17 +89,15 @@ function populate_dict_subset(){
 
 
 ################################################################################
-ESSENTIAL_ARGS=() # should be game later. 
+ESSENTIAL_ARGS=("game") # should be game later. 
 declare -A ALL_DEFAULTS=( # make this empty later
-    ["game"]="pokemon_red"
 )
 
-ENV_ESSENTIALS=() # should be init_state later.
+ENV_ESSENTIALS=("init_state")
 declare -A ENV_DEFAULTS=(
     ["env"]="default"
     ["controller"]="low_level"
-    ["max_steps"]=30   
-    ["init_state"]="default" # move this to essentials later
+    ["max_steps"]=30
 )
 
 
@@ -154,7 +152,7 @@ EVALUATION_ESSENTIALS+=("algorithm" "exp_name")
 EVALUATION_ARG_KEYS=("${EVALUATION_ESSENTIALS[@]}" "${!EVALUATION_DEFAULTS[@]}")
 
 declare -A WORLD_MODEL_DEFAULTS
-WORLD_MODEL_ESSENTIALS=("latest_replay_buffer_folder")
+WORLD_MODEL_ESSENTIALS=("latest_replay_buffer_folder" "game")
 populate_dict ALL_DEFAULTS WORLD_MODEL_DEFAULTS
 populate_array ESSENTIAL_ARGS WORLD_MODEL_ESSENTIALS
 SAME_AS_TRAINING=("observation_embedder" "embedder_load_path" "buffer_save_path" "buffer_load_path" "controller")
@@ -186,7 +184,7 @@ ITERATIVE_TRAINING_DEFAULTS["run_name"]="iterative"
 ITERATIVE_TRAINING_ARG_KEYS=("${ITERATIVE_TRAINING_ESSENTIALS[@]}" "${!ITERATIVE_TRAINING_DEFAULTS[@]}")
 
 
-CREATE_TRAJ_ESSENTIALS=("init_state_group" "init_states")
+CREATE_TRAJ_ESSENTIALS=()
 declare -A CREATE_TRAJ_DEFAULTS
 populate_array ESSENTIAL_ARGS CREATE_TRAJ_ESSENTIALS
 populate_dict ALL_DEFAULTS CREATE_TRAJ_DEFAULTS
@@ -203,7 +201,7 @@ populate_dict ALL_DEFAULTS CREATE_DATASET_DEFAULTS
 CREATE_DATASET_DEFAULTS["overwrite"]=false
 CREATE_DATASET_DEFAULTS["verbose"]=false
 CREATE_DATASET_DEFAULTS["max_new_tokens"]=1000
-CREATE_DATASET_DEFAULTS["max_trajectories_per_group"]=20
+CREATE_DATASET_DEFAULTS["max_trajectories_per_group"]=3
 CREATE_DATASET_DEFAULTS["lookback"]=8
 CREATE_DATASET_DEFAULTS["describe_pairs"]=false
 CREATE_DATASET_DEFAULTS["push_to_hub"]=false

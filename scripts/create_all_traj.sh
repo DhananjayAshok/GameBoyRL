@@ -1,3 +1,6 @@
+# DELTA TODO: 2: Change this to not loop over init state groups but just use init state name as init state group names. Do not gather trajectories here.  
+# This becomes the curiosity exploration only vertical for task discovery. 
+
 #!/usr/bin/env bash
 
 source scripts/utils.sh || { echo "Could not source utils"; exit 1; }
@@ -6,7 +9,8 @@ source scripts/all_train_states.sh
 
 # Script-specific defaults and required args
 declare -A ARGS
-REQUIRED_ARGS=("game")
+REQUIRED_ARGS=()
+populate_array CREATE_TRAJ_ESSENTIALS REQUIRED_ARGS
 populate_dict CREATE_TRAJ_DEFAULTS ARGS
 
 
@@ -59,16 +63,9 @@ if [[ -z "${ARGS["run_name"]}" ]] || [[ "${ARGS["run_name"]}" == "default" ]] ||
 fi
 
 game="${ARGS["game"]}"
-for key in "${!TRAIN_STATES[@]}"; do
-    if [[ "$key" == "$game,"* ]]; then
-        name="${key#$game,}"
-        ARGS["init_state_group"]="$name"
-        ARGS["init_states"]="${TRAIN_STATES[$key]}"
-        arg_string=$(args_to_flags_subset ARGS CREATE_TRAJ_ARG_KEYS)
-        bash scripts/create_traj.sh $arg_string
-    fi
+IFS=',' read -ra init_states_arr <<< "${TRAIN_STATES[$game]}"
+for init_state in "${init_states_arr[@]}"; do
+    ARGS["init_state"]=$init_state
+    arg_string=$(args_to_flags_subset ARGS CREATE_TRAJ_ARG_KEYS)
+    bash scripts/create_traj.sh $arg_string
 done
-
-replay_buffer_save_folder=${ARGS["run_name"]}/
-
-bash scripts/group_trajectories.sh --game ${ARGS["game"]} --replay_buffer_folder $replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/${ARGS["run_name"]}/ --z_min ${ARGS["z_min"]}

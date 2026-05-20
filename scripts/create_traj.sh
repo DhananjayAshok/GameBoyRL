@@ -1,6 +1,4 @@
-#init_states="default train_0 train_1 train_2 train_3 train_4"
-#init_state_group="default" # args
-
+# DELTA TODO 3: Already uncommented the group trajectories below. Make sure the run_name and pathing works. 
 
 #!/usr/bin/env bash
 
@@ -94,6 +92,11 @@ if [ "${ARGS["sweep"]}" == "true" ]; then
 else
     sweep_run_name="iterative_agent"
 fi
+
+if [[ -z "${ARGS["init_state_group"]}" || "${ARGS["init_state_group"]}" == "none" ]]; then
+    ARGS["init_state_group"]="${ARGS["init_state"]}"
+fi
+
 init_state_group=${ARGS["init_state_group"]}
 replay_buffer_save_folder=${ARGS["run_name"]}/${init_state_group}/$sweep_run_name/
 echo "Setting replay_buffer_save_folder to $replay_buffer_save_folder for iterative training"
@@ -109,15 +112,8 @@ else
     run_name=${ARGS["run_name"]}
     echo "Run name: $run_name | Setting model_dir to run_name for iterative training"
     ARGS["model_dir"]="${run_name}"
-
-    init_states=${ARGS["init_states"]}
-    init_state_group=${ARGS["init_state_group"]}
-    IFS=',' read -ra init_states_arr <<< "$init_states"
-    for init_state in "${init_states_arr[@]}"; do
-        ARGS["init_state"]=$init_state
-        argstring=$(args_to_flags_subset ARGS ITERATIVE_TRAINING_ARG_KEYS)    
-        bash scripts/iterative_training.sh $argstring
-    done
+    argstring=$(args_to_flags_subset ARGS ITERATIVE_TRAINING_ARG_KEYS)
+    bash scripts/iterative_training.sh $argstring
 fi
 
-#bash scripts/group_trajectories.sh --game ${ARGS["game"]} --replay_buffer_folder $replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/${ARGS["run_name"]}/${init_state_group}/ --z_min ${ARGS["z_min"]}
+bash scripts/group_trajectories.sh --game ${ARGS["game"]} --replay_buffer_folder $replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/${ARGS["run_name"]}/${init_state_group}/ --z_min ${ARGS["z_min"]}
