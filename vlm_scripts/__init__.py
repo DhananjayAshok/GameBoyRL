@@ -1,1 +1,3 @@
 from vlm_scripts.infer_task import infer_task_cmd as infer_task
+from vlm_scripts.propose_tasks_zeroshot import propose_tasks_zeroshot
+from vlm_scripts.infer_guidance import infer_guidance_cmd as infer_guidance

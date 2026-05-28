@@ -83,7 +83,7 @@ def show(name, trajectory_path, frac, group_idx, traj_idx, max_per_group):
         os.makedirs(group_dir, exist_ok=True)
         if traj_idx is not None:
             trajectory = trajectory_group[traj_idx]
-            observations, _, high_level_actions, _ = trajectory
+            observations, _, high_level_actions, _, init_state = trajectory
             save_path = group_dir + f"/traj_{traj_idx}.png"
             plot_transitions(observations, save_path, high_level_actions=high_level_actions)
             print(f"Saved {save_path}")
@@ -91,7 +91,7 @@ def show(name, trajectory_path, frac, group_idx, traj_idx, max_per_group):
             for j, trajectory in tqdm(enumerate(trajectory_group), leave=False, total=len(trajectory_group)):
                 if j >= max_per_group:
                     break
-                observations, _, high_level_actions, _ = trajectory
+                observations, _, high_level_actions, _, init_state = trajectory
                 plot_transitions(observations, group_dir + f"/traj_{j}.png", high_level_actions=high_level_actions)
             if group_idx is not None:
                 print(f"Saved {group_dir}/")

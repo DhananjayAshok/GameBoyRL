@@ -121,7 +121,7 @@ def sparse(obj):
             continue
 
         for traj_idx, trajectory in enumerate(group):
-            observations, actions, high_level_actions, rewards = trajectory
+            observations, actions, high_level_actions, rewards, init_state = trajectory
 
             # TODO: check obs shape — expected (num_frames, H, W, C) but may differ
             breakpoint()  # TODO: check obs shape before indexing

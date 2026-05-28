@@ -115,10 +115,12 @@ class Executor(ABC):
         vlm_model: Optional[str] = None,
         vlm_kind: Optional[str] = None,
         allow_self_termination: bool = False,
+        hint: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
         self._env = env
         self._task = task
+        self._hint = hint
         self._game = game
         self._max_steps = max_steps
         self._max_tool_calls = max_tool_calls
@@ -248,6 +250,9 @@ class Executor(ABC):
         self.report.steps.append(record)
         return record
 
+    def _hint_block(self) -> str:
+        return f"\nHint: {self._hint}" if self._hint is not None else ""
+
     def _get_state(self) -> dict:
         """
         Return the current environment state.
@@ -374,7 +379,7 @@ class SimpleExecutor(Executor):
         Per :class:`Executor` contract, call ``super().__init__()`` **last**.
     """
 
-    STEP_PROMPT = """Task: [TASK]
+    STEP_PROMPT = """Task: [TASK][HINT_BLOCK]
 
 You are playing a GameBoy game. The current screen is shown in the image.
 
@@ -569,6 +574,7 @@ Reasoning: <your reasoning>
         return (
             self.STEP_PROMPT
             .replace("[TASK]", self._task)
+            .replace("[HINT_BLOCK]", self._hint_block())
             .replace("[ERROR_BLOCK]", self._error_block(error_message))
             .replace("[TOOL_RESULT_BLOCK]", self._tool_result_block(tool_call_message))
             .replace("[ACTION_LIST]", self._action_list_block())
@@ -624,7 +630,7 @@ class HistoryAwareExecutor(SimpleExecutor):
         self._action_history.append((action_class, action_str, record.action_success, self._last_frame_changed))
         return record
 
-    STEP_PROMPT = """Task: [TASK]
+    STEP_PROMPT = """Task: [TASK][HINT_BLOCK]
 
 You are playing a GameBoy game. The current screen is shown in the image.
 
@@ -767,7 +773,7 @@ class SequencePlannerExecutor(SimpleExecutor):
         self.report.termination_reason = "max_steps"
         return 0
 
-    SEQUENCE_PROMPT = """Task: [TASK]
+    SEQUENCE_PROMPT = """Task: [TASK][HINT_BLOCK]
 
 You are playing a GameBoy game. The current screen is shown in the image.
 
@@ -783,6 +789,7 @@ Action: <ACTION1, ACTION2, ...>
         return (
             self.SEQUENCE_PROMPT
             .replace("[TASK]", self._task)
+            .replace("[HINT_BLOCK]", self._hint_block())
             .replace("[ERROR_BLOCK]", self._error_block(error_message))
             .replace("[ACTION_LIST]", self._action_list_block())
         )
@@ -818,7 +825,7 @@ class SubgoalDecomposerExecutor(SimpleExecutor):
         self._steps_on_subgoal: int = 0
         super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
 
-    DECOMPOSE_PROMPT = """Task: [TASK]
+    DECOMPOSE_PROMPT = """Task: [TASK][HINT_BLOCK]
 
 You are playing a GameBoy game. The current screen is shown in the image.
 
@@ -830,7 +837,7 @@ Subgoal 2: <second subgoal>
 ... (up to Subgoal 4)
 [STOP]"""
 
-    STEP_PROMPT = """Task: [TASK]
+    STEP_PROMPT = """Task: [TASK][HINT_BLOCK]
 [SUBGOAL_LINE]
 You are playing a GameBoy game. The current screen is shown in the image.
 
@@ -846,7 +853,7 @@ Reasoning: <your reasoning>
         """Call the VLM once to decompose the task into ordered subgoals."""
         state = self._get_state()
         frame = state["core"]["current_frame"]
-        prompt = self.DECOMPOSE_PROMPT.replace("[TASK]", self._task)
+        prompt = self.DECOMPOSE_PROMPT.replace("[TASK]", self._task).replace("[HINT_BLOCK]", self._hint_block())
         response = self._vlm_call(
             "decompose",
             texts=prompt,
@@ -1077,7 +1084,7 @@ class ScreenDiffExecutor(SimpleExecutor):
         self.report.termination_reason = "max_steps"
         return 0
 
-    DIFF_PROMPT_SINGLE = """Task: [TASK]
+    DIFF_PROMPT_SINGLE = """Task: [TASK][HINT_BLOCK]
 
 You are playing a GameBoy game. The current screen is shown in the image.
 
@@ -1089,7 +1096,7 @@ Reasoning: <your reasoning>
 [ACTION_FORMAT]
 [STOP]"""
 
-    DIFF_PROMPT_PAIR = """Task: [TASK]
+    DIFF_PROMPT_PAIR = """Task: [TASK][HINT_BLOCK]
 
 You are playing a GameBoy game. Image 1 is the PREVIOUS screen, Image 2 is the CURRENT screen. Note what changed between frames to understand the effect of your last action.
 
@@ -1106,6 +1113,7 @@ Reasoning: <your reasoning>
         return (
             template
             .replace("[TASK]", self._task)
+            .replace("[HINT_BLOCK]", self._hint_block())
             .replace("[ERROR_BLOCK]", self._error_block(error_message))
             .replace("[TOOL_RESULT_BLOCK]", self._tool_result_block(tool_call_message))
             .replace("[ACTION_LIST]", self._action_list_block())
@@ -1274,7 +1282,7 @@ class ReflectiveExecutor(SimpleExecutor):
         self._steps_since_reflection += 1
         return record
 
-    REFLECTION_PROMPT = """Task: [TASK]
+    REFLECTION_PROMPT = """Task: [TASK][HINT_BLOCK]
 
 [PRIOR_PLAN]Recent actions taken: [HISTORY]
 
@@ -1283,7 +1291,7 @@ The current game screen is shown in the image.
 Briefly critique whether the recent actions made progress toward the task. Then state a concise plan for the next few steps (1-2 sentences). End your response with [STOP].
 [STOP]"""
 
-    STEP_PROMPT = """Task: [TASK]
+    STEP_PROMPT = """Task: [TASK][HINT_BLOCK]
 
 You are playing a GameBoy game. The current screen is shown in the image.
 
@@ -1303,6 +1311,7 @@ Reasoning: <your reasoning>
         prompt = (
             self.REFLECTION_PROMPT
             .replace("[TASK]", self._task)
+            .replace("[HINT_BLOCK]", self._hint_block())
             .replace("[PRIOR_PLAN]", prior_plan)
             .replace("[HISTORY]", history_str)
         )
@@ -1422,7 +1431,7 @@ class SpatialMapExecutor(SimpleExecutor):
         self._last_action_str: str = ""
         super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
 
-    MAP_UPDATE_PROMPT = """Task: [TASK]
+    MAP_UPDATE_PROMPT = """Task: [TASK][HINT_BLOCK]
 
 [ACTION_CONTEXT]The current game screen is shown in the image.
 
@@ -1434,7 +1443,7 @@ W: <what is west>
 Here: <describe current location>
 [STOP]"""
 
-    STEP_PROMPT = """Task: [TASK]
+    STEP_PROMPT = """Task: [TASK][HINT_BLOCK]
 
 You are playing a GameBoy game. The current screen is shown in the image.
 
@@ -1451,6 +1460,7 @@ Reasoning: <your reasoning>
         prompt = (
             self.MAP_UPDATE_PROMPT
             .replace("[TASK]", self._task)
+            .replace("[HINT_BLOCK]", self._hint_block())
             .replace("[ACTION_CONTEXT]", action_context)
         )
         result = self._vlm_call("map_update", texts=prompt, images=[frame], max_new_tokens=100)
@@ -1595,7 +1605,7 @@ class ConfidenceGatedExecutor(SimpleExecutor):
                         return int(ch)
         return None
 
-    STEP_PROMPT = """Task: [TASK]
+    STEP_PROMPT = """Task: [TASK][HINT_BLOCK]
 
 You are playing a GameBoy game. The current screen is shown in the image.
 
@@ -1737,7 +1747,7 @@ class ActionValueEstimatorExecutor(SimpleExecutor):
         [STOP]
     """
 
-    SCORE_PROMPT = """Task: [TASK]
+    SCORE_PROMPT = """Task: [TASK][HINT_BLOCK]
 
 [ERROR_BLOCK]You are playing a GameBoy game. The current screen is shown in the image.
 
@@ -1763,6 +1773,7 @@ Respond with one line per action in exactly this format:
         prompt = (
             self.SCORE_PROMPT
             .replace("[TASK]", self._task)
+            .replace("[HINT_BLOCK]", self._hint_block())
             .replace("[ERROR_BLOCK]", self._error_block(error_message))
             .replace("[ACTION_LIST]", "\n".join(f"  {s}" for s in action_lines))
         )
@@ -1869,7 +1880,7 @@ class BeliefStateExecutor(SimpleExecutor):
         self._last_action_str: str = ""
         super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
 
-    BELIEF_UPDATE_PROMPT = """Task: [TASK]
+    BELIEF_UPDATE_PROMPT = """Task: [TASK][HINT_BLOCK]
 
 [PRIOR_BELIEF][LAST_ACTION]The current game screen is shown in the image.
 
@@ -1882,7 +1893,7 @@ Update the belief state as a compact list of facts. Use short key: value pairs, 
 Respond only with the key: value pairs. End your response with [STOP].
 [STOP]"""
 
-    STEP_PROMPT = """Task: [TASK]
+    STEP_PROMPT = """Task: [TASK][HINT_BLOCK]
 
 You are playing a GameBoy game. The current screen is shown in the image.
 
@@ -1900,6 +1911,7 @@ Reasoning: <your reasoning>
         prompt = (
             self.BELIEF_UPDATE_PROMPT
             .replace("[TASK]", self._task)
+            .replace("[HINT_BLOCK]", self._hint_block())
             .replace("[PRIOR_BELIEF]", prior_belief)
             .replace("[LAST_ACTION]", last_action)
         )
@@ -2036,7 +2048,7 @@ class AdversarialSamplingExecutor(SimpleExecutor):
             texts=prompt, images=[frame],
         )
 
-    CHALLENGE_PROMPT = """Task: [TASK]
+    CHALLENGE_PROMPT = """Task: [TASK][HINT_BLOCK]
 
 You are playing a GameBoy game. The current screen is shown in the image.
 
@@ -2064,6 +2076,7 @@ Action: <one environment action>
         prompt = (
             self.CHALLENGE_PROMPT
             .replace("[TASK]", self._task)
+            .replace("[HINT_BLOCK]", self._hint_block())
             .replace("[PROPOSAL]", proposal)
         )
         return self._vlm_call("challenge", texts=prompt, images=[frame], max_new_tokens=200)

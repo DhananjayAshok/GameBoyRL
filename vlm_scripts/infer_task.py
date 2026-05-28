@@ -1,11 +1,24 @@
-# trajectories are saved in parameters["storage_dir"]/grouped_trajectories/$game/<path>/grouped_high_reward_trajectories.pkl
-# it is a dictionary with numeric keys and values that are lists of trajectories
-# each trajectory is a list (observations, actions, high_level_actions, rewards)
-# observations is a stack of frames (numpy array) with shape (num_frames, 144, 160, 1)
-# actions is a list of integers with shape (num_frames-1,)
-# high_level_actions is a list of integers with shape (num_frames-1,)
-# rewards is a list of floats with shape (num_frames-1,)
-# the grouping is done by similarity of the final frames of the trajectories
+"""
+Input: grouped_high_reward_trajectories.pkl
+    Path: parameters["storage_dir"]/grouped_trajectories/$game/<path>/grouped_high_reward_trajectories.pkl
+    Format: dict[int, list[trajectory]]
+        - keys are group indices (grouped by similarity of final frames)
+        - each trajectory is a tuple (observations, actions, high_level_actions, rewards)
+            - observations: np.ndarray of shape (num_frames, 144, 160, 1)
+            - actions: list[int] of length (num_frames - 1)
+            - high_level_actions: list[int] of length (num_frames - 1)
+            - rewards: list[float] of length (num_frames - 1)
+
+Output: trajectory_annotation.json  +  trajectory_annotation.pkl
+    Path: parameters["storage_dir"]/proposed_tasks/$game/$model_name/curiosity/$run_name/
+    trajectory_annotation.json — dict[int, str]
+        - keys are group indices
+        - values are distilled imperative task strings (e.g. "Walk into the building")
+    trajectory_annotation.pkl — dict[int, list[trajectory]]
+        - keys are group indices
+        - values are the subset of trajectories from that group that were actually used
+          during inference (up to max_trajectories_per_group); same trajectory format as input
+"""
 
 import json
 import os
@@ -263,7 +276,7 @@ def infer_task(
     start/end are absolute obs array indices.
     Returns None if parsing fails or VLM returns NO TASK.
     """
-    observations, actions, high_level_actions, rewards = trajectory
+    observations, actions, high_level_actions, rewards, init_state = trajectory
     n = len(observations)
     k = min(lookback, n)
     window = observations[n - k :]  # k frames, window indices 0..k-1
@@ -416,6 +429,11 @@ def infer_group_tasks(
     help="Path to grouped_high_reward_trajectories.pkl",
 )
 @click.option(
+    "--run_name",
+    default="all",
+    help="Name under which to save",
+)
+@click.option(
     "--lookback",
     default=8,
     show_default=True,
@@ -435,18 +453,23 @@ def infer_group_tasks(
 )
 @click.pass_obj
 def infer_task_cmd(
-    obj, trajectory_path, lookback, max_trajectories_per_group, describe_pairs
+    obj, trajectory_path, run_name, lookback, max_trajectories_per_group, describe_pairs
 ):
     """Infer task strings for each trajectory group."""
     max_new_tokens = obj["max_new_tokens"]
     vlm_kind = obj["vlm_kind"]
     game = obj["game"]
+    parameters = obj["parameters"]
     model_name = obj["model_name"]
     vlm = VLM(model_name, vlm_kind)
     model_save_name = model_name.split("/")[-1]
 
-    out_dir = os.path.dirname(trajectory_path)
-    traj_path = os.path.join(out_dir, f"trajectory_annotation_{model_save_name}.json")
+    out_dir = (
+        parameters["storage_dir"]
+        + f"proposed_tasks/{game}/{model_save_name}/curiosity/{run_name}/"
+    )
+    os.makedirs(out_dir, exist_ok=True)
+    traj_path = os.path.join(out_dir, f"trajectory_annotation.json")
     checkpoint_path = traj_path.replace(".json", "_checkpoint.json")
 
     if os.path.exists(traj_path) and not obj["overwrite"]:
