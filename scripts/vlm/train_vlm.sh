@@ -116,7 +116,7 @@ fi
 
 
 
-bash scripts/core/llm-utils.sh python train.py --training_kind sft --modality vlm --model_name ${ARGS["model_name"]} \
+bash scripts/core/llm-utils.sh python train.py || exit 1 --training_kind sft --modality vlm --model_name ${ARGS["model_name"]} \
         --output_dir $storage_dir/models/${ARGS["run_name"]}/$model_save_name \
         --train_file ${ARGS["train_file"]}  \
         --run_name vlm-sft-${ARGS["run_name"]}-$model_save_name \

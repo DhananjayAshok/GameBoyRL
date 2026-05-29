@@ -2,7 +2,7 @@
 # Runs the full benchmark suite on a game with a specified executor and VLM model,
 # recording video for each task attempt and logging all results to
 # results/benchmark/<game>/. The --regenerate flag forces task regeneration before
-# benchmarking. This script lives at scripts/ root level, not in a subdirectory.
+# benchmarking.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 

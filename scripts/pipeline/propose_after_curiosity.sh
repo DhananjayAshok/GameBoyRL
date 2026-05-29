@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
-# Batch version of propose_zeroshot.sh: iterates over every init_state registered
-# for a game in TRAIN_STATES and calls propose_zeroshot.sh for each one.
-# Regenerates the state dictionary from GameBoyWorlds before running.
+# Zero-shot proposal augmented with curiosity prior for a single init_state,
+# followed by attempt. Checks that infer_tasks has been run, then delegates
+# to propose_and_attempt with extra=curiosity.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
-python scripts/python/create_task_dictionary.py
-source scripts/core/all_train_states.sh
 
 declare -A ARGS
-REQUIRED_ARGS=("game" "model_name" "vlm_kind")
+REQUIRED_ARGS=()
 
-populate_dict PROPOSE_ZEROSHOT_DEFAULTS ARGS
+populate_array PROPOSE_AND_ATTEMPT_ESSENTIALS REQUIRED_ARGS
+populate_dict PROPOSE_AND_ATTEMPT_DEFAULTS ARGS
+unset ARGS["extra"]
 
+# --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
 USAGE_STR="Usage: $0"
 for req in "${REQUIRED_ARGS[@]}"; do
@@ -19,6 +20,9 @@ for req in "${REQUIRED_ARGS[@]}"; do
 done
 for opt in "${!ARGS[@]}"; do
     if [[ ! " ${REQUIRED_ARGS[*]} " =~ " ${opt} " ]]; then
+        if [[ -z "${ARGS[$opt]}" ]]; then
+            echo "DEFAULT VALUE OF KEY \"$opt\" CANNOT BE BLANK"; exit 1
+        fi
         USAGE_STR+=" [--$opt <value> (default: ${ARGS[$opt]})]"
     fi
 done
@@ -43,16 +47,25 @@ for req in "${REQUIRED_ARGS[@]}"; do
     if [[ -z "${ARGS[$req]}" ]]; then echo "Error: --$req is required."; FAILED=true; fi
 done
 if [ "$FAILED" = true ]; then usage; fi
+# --- End argument parsing ---
 
 echo "Script: $0 Active variables:"
 for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
-game="${ARGS["game"]}"
-IFS=',' read -ra init_states_arr <<< "${TRAIN_STATES[$game]}"
-for init_state in "${init_states_arr[@]}"; do
-    ARGS["init_state"]=$init_state
-    arg_string=$(args_to_flags_subset ARGS PROPOSE_ZEROSHOT_ARG_KEYS)
-    bash scripts/vlm/propose_zeroshot.sh $arg_string || exit 1
-done
+model_save_name="${ARGS["model_name"]##*/}"
+curiosity_dir="$storage_dir/proposed_tasks/${ARGS["game"]}/${model_save_name}/curiosity/${ARGS["run_name"]}"
+
+if [[ ! -f "$curiosity_dir/trajectory_annotation.json" ]]; then
+    echo "Error: trajectory_annotation.json not found at $curiosity_dir. Run infer_tasks first."
+    exit 1
+fi
+if [[ ! -f "$curiosity_dir/trajectory_annotation.pkl" ]]; then
+    echo "Error: trajectory_annotation.pkl not found at $curiosity_dir. Run infer_tasks first."
+    exit 1
+fi
+
+ARGS["extra"]="curiosity"
+flags=$(args_to_flags_subset ARGS PROPOSE_AND_ATTEMPT_ARG_KEYS)
+bash scripts/pipeline/propose_and_attempt.sh $flags || exit 1

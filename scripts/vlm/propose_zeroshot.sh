@@ -101,4 +101,4 @@ fi
 
 python vlm.py --game $game --model_name $model_name --vlm_kind $vlm_kind \
     --max_new_tokens $max_new_tokens $overwrite_flag $verbose_flag \
-    propose_tasks_zeroshot --init_state $init_state $extra_flag
+    propose_tasks_zeroshot --init_state $init_state --run_name "${ARGS["run_name"]}" $extra_flag
