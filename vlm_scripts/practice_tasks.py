@@ -202,6 +202,7 @@ def practice_tasks_cmd(
         env = get_environment(
             game=game,
             controller_variant=controller_variant,
+            environment_variant="default",
             init_state=init_state,
             max_steps=max_steps,
             headless=True,
