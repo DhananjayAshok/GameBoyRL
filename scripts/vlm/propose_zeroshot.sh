@@ -1,27 +1,26 @@
 #!/usr/bin/env bash
+# Calls the VLM to propose candidate tasks for a single game/init_state without
+# any prior trajectory data (zero-shot). Results are saved to the project's task
+# store and can be augmented with extra examples via --extra and --extra_k. Use
+# propose_all_zeroshot.sh to run across all init_states for a game.
 
-source scripts/utils.sh
+source scripts/core/utils.sh
 
-# Define Defaults
 declare -A ARGS
 REQUIRED_ARGS=()
-populate_dict ALL_DEFAULTS ARGS
-populate_array ESSENTIAL_ARGS REQUIRED_ARGS
 
-ARGS["subfolder"]="none"
+populate_dict PROPOSE_ZEROSHOT_DEFAULTS ARGS
+populate_array PROPOSE_ZEROSHOT_ESSENTIALS REQUIRED_ARGS
 
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
 
 USAGE_STR="Usage: $0"
 
-# Add Required to string
 for req in "${REQUIRED_ARGS[@]}"; do
     USAGE_STR+=" --$req <value>"
 done
 
-# Add Optionals to string
 for opt in "${!ARGS[@]}"; do
-    # Only list if NOT in required (to avoid double listing)
     if [[ ! " ${REQUIRED_ARGS[*]} " =~ " ${opt} " ]]; then
         USAGE_STR+=" [--$opt <value> (default: ${ARGS[$opt]})]"
     fi
@@ -32,11 +31,9 @@ function usage() {
     exit 1
 }
 
-# 3. Parser
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --*)
-            # Extract the name (remove the leading --)
             FLAG=${1#--}
             VALID=false
             for allowed in "${ALLOWED_FLAGS[@]}"; do
@@ -48,7 +45,7 @@ while [[ $# -gt 0 ]]; do
             if [ "$VALID" = false ]; then
                 echo "Error: Unknown flag --$FLAG"
                 usage
-            fi            
+            fi
             ARGS["$FLAG"]="$2"
             shift 2
             ;;
@@ -62,7 +59,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# 4. Strict Validation
 for req in "${REQUIRED_ARGS[@]}"; do
     if [[ -z "${ARGS[$req]}" ]]; then
         echo "Error: Argument --$req is required."
@@ -72,30 +68,37 @@ done
 
 if [ "$FAILED" = true ]; then usage; fi
 
-# Print active variables
 echo "Script: $0 Active variables:"
 for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
+game="${ARGS["game"]}"
+model_name="${ARGS["model_name"]}"
+vlm_kind="${ARGS["vlm_kind"]}"
+init_state="${ARGS["init_state"]}"
+max_new_tokens="${ARGS["max_new_tokens"]}"
+extra="${ARGS["extra"]}"
+extra_k="${ARGS["extra_k"]}"
 
-cd cleanrl
-
-# Logic here:
-
-subfolder=""
-if [[ "${ARGS["subfolder"]}" != "none" ]]; then
-    subfolder="${ARGS["subfolder"]}"
+if [[ "${ARGS["overwrite"]}" == "true" || "${ARGS["overwrite"]}" == "yes" || "${ARGS["overwrite"]}" == "y" ]]; then
+    overwrite_flag="--overwrite"
+else
+    overwrite_flag=""
 fi
 
-replay_buffer_folder=$storage_dir/replay_buffers/${ARGS["game"]}/${subfolder}/
-save_path=$storage_dir/observation_embedders/${ARGS["game"]}/global/
+if [[ "${ARGS["verbose"]}" == "true" || "${ARGS["verbose"]}" == "yes" || "${ARGS["verbose"]}" == "y" ]]; then
+    verbose_flag="--verbose"
+else
+    verbose_flag=""
+fi
 
+if [[ "$extra" == "none" ]]; then
+    extra_flag=""
+else
+    extra_flag="--extra $extra --extra_k $extra_k"
+fi
 
-echo "Training Observation Embedder Model:"
-
-python cleanrl_utils/train_observation_encoder.py --seed 1 --replay_buffer_folder $replay_buffer_folder \
-    --track --wandb-project-name $WANDB_PROJECT \
-    --save_path $save_path
-
-cd ..
+python vlm.py --game $game --model_name $model_name --vlm_kind $vlm_kind \
+    --max_new_tokens $max_new_tokens $overwrite_flag $verbose_flag \
+    propose_tasks_zeroshot --init_state $init_state $extra_flag

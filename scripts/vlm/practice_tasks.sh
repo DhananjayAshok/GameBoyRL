@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
+# Runs the VLM agent through guided practice sessions using pre-inferred guidance
+# (--guidance_path from infer_guidance.sh). The agent is given n_attempts tries,
+# starting from n_random_actions random steps to vary the starting state. Use
+# --score_mode to produce scored trajectories for VLM fine-tuning data generation.
 
-source scripts/utils.sh || { echo "Could not source utils"; exit 1; }
+source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 
 declare -A ARGS
 REQUIRED_ARGS=()

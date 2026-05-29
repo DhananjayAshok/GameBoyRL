@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
+# Fine-tunes a VLM using LoRA via the llm-utils training CLI (train.py --modality vlm)
+# on a provided dataset file. Saves the LoRA adapter to storage under the run name.
+# Supports optional push to HuggingFace Hub via --push_to_hub. Uses early stopping
+# and best-model checkpointing with a fixed 85/15 train/validation split.
 
-source scripts/utils.sh || { echo "Could not source utils"; exit 1; }
+source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 
-# Define defaults and required args. 
+# Define defaults and required args.
 # These should be specific to this script and not shared across scripts (that is handled below).
 declare -A ARGS
 ARGS["batch_size"]="4"
@@ -112,7 +116,7 @@ fi
 
 
 
-bash scripts/llm-utils.sh python train.py --training_kind sft --modality vlm --model_name ${ARGS["model_name"]} \
+bash scripts/core/llm-utils.sh python train.py --training_kind sft --modality vlm --model_name ${ARGS["model_name"]} \
         --output_dir $storage_dir/models/${ARGS["run_name"]}/$model_save_name \
         --train_file ${ARGS["train_file"]}  \
         --run_name vlm-sft-${ARGS["run_name"]}-$model_save_name \

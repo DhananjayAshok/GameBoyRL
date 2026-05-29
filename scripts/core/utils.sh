@@ -1,3 +1,11 @@
+# Core shared library sourced by every other script in this project.
+# Loads the project config and virtual environment, then defines all default argument
+# dictionaries (training, evaluation, VLM, sweep, iterative training, etc.) and the
+# utility functions (args_to_flags, populate_dict, etc.) used for argument parsing
+# and forwarding across the script hierarchy. Also defines the TRAINING_ARG_KEYS,
+# EVALUATION_ARG_KEYS, and related arrays that callers use to subset flags when
+# invoking sub-scripts.
+
 source configs/config.env || { echo "configs/config.env not found"; exit 1; }
 source setup/.venv/bin/activate || { echo "Virtual environment not found."; exit 1; }
 PROJECT_ROOT=$(pwd)
@@ -34,7 +42,7 @@ function get_string_from_args() {
     local string_kind="$1"
     shift
     local flags=$(args_to_flags "$1")
-    python $PROJECT_ROOT/scripts/get_strings.py "$string_kind" $flags
+    python $PROJECT_ROOT/scripts/python/get_strings.py "$string_kind" $flags
 }
 
 

@@ -1,22 +1,31 @@
 #!/usr/bin/env bash
+# Post-processes a collected replay buffer by clustering trajectories based on
+# observation similarity (z-score gating via --z_min). Writes grouped trajectory
+# files to --save_path for downstream VLM task inference. Called at the end of
+# create_traj.sh and can be run standalone to re-cluster without retraining.
 
-source scripts/utils.sh
+source scripts/core/utils.sh
 
 declare -A ARGS
-REQUIRED_ARGS=()
+REQUIRED_ARGS=("game" "replay_buffer_folder" "save_path")
 
-populate_dict PROPOSE_ZEROSHOT_DEFAULTS ARGS
-populate_array PROPOSE_ZEROSHOT_ESSENTIALS REQUIRED_ARGS
+ARGS["observation_embedder"]=random_patch
+ARGS["z_min"]=2.0
+ARGS["z_kind"]="global"
+
 
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
 
 USAGE_STR="Usage: $0"
 
+# Add Required to string
 for req in "${REQUIRED_ARGS[@]}"; do
     USAGE_STR+=" --$req <value>"
 done
 
+# Add Optionals to string
 for opt in "${!ARGS[@]}"; do
+    # Only list if NOT in required (to avoid double listing)
     if [[ ! " ${REQUIRED_ARGS[*]} " =~ " ${opt} " ]]; then
         USAGE_STR+=" [--$opt <value> (default: ${ARGS[$opt]})]"
     fi
@@ -27,9 +36,11 @@ function usage() {
     exit 1
 }
 
+# 3. Parser
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --*)
+            # Extract the name (remove the leading --)
             FLAG=${1#--}
             VALID=false
             for allowed in "${ALLOWED_FLAGS[@]}"; do
@@ -41,7 +52,7 @@ while [[ $# -gt 0 ]]; do
             if [ "$VALID" = false ]; then
                 echo "Error: Unknown flag --$FLAG"
                 usage
-            fi
+            fi            
             ARGS["$FLAG"]="$2"
             shift 2
             ;;
@@ -55,6 +66,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# 4. Strict Validation
 for req in "${REQUIRED_ARGS[@]}"; do
     if [[ -z "${ARGS[$req]}" ]]; then
         echo "Error: Argument --$req is required."
@@ -64,37 +76,19 @@ done
 
 if [ "$FAILED" = true ]; then usage; fi
 
+# Print active variables
 echo "Script: $0 Active variables:"
 for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
-game="${ARGS["game"]}"
-model_name="${ARGS["model_name"]}"
-vlm_kind="${ARGS["vlm_kind"]}"
-init_state="${ARGS["init_state"]}"
-max_new_tokens="${ARGS["max_new_tokens"]}"
-extra="${ARGS["extra"]}"
-extra_k="${ARGS["extra_k"]}"
-
-if [[ "${ARGS["overwrite"]}" == "true" || "${ARGS["overwrite"]}" == "yes" || "${ARGS["overwrite"]}" == "y" ]]; then
-    overwrite_flag="--overwrite"
-else
-    overwrite_flag=""
+# error out if replay_buffer_folder is none
+if [[ "${ARGS["replay_buffer_folder"]}" == "none" ]]; then
+    echo "Error: Argument --replay_buffer_folder cannot be none."
+    exit 1
 fi
 
-if [[ "${ARGS["verbose"]}" == "true" || "${ARGS["verbose"]}" == "yes" || "${ARGS["verbose"]}" == "y" ]]; then
-    verbose_flag="--verbose"
-else
-    verbose_flag=""
-fi
-
-if [[ "$extra" == "none" ]]; then
-    extra_flag=""
-else
-    extra_flag="--extra $extra --extra_k $extra_k"
-fi
-
-python vlm.py --game $game --model_name $model_name --vlm_kind $vlm_kind \
-    --max_new_tokens $max_new_tokens $overwrite_flag $verbose_flag \
-    propose_tasks_zeroshot --init_state $init_state $extra_flag
+replay_buffer_save_folder="${ARGS["replay_buffer_folder"]}"
+cd cleanrl
+python cleanrl_utils/group_trajectories.py --replay_buffer_folder $storage_dir/replay_buffers/${ARGS["game"]}/$replay_buffer_save_folder --save_path ${ARGS["save_path"]} --z_min ${ARGS["z_min"]} --z_kind ${ARGS["z_kind"]}
+cd ..

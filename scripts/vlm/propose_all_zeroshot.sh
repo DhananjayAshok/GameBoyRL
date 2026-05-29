@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
+# Batch version of propose_zeroshot.sh: iterates over every init_state registered
+# for a game in TRAIN_STATES and calls propose_zeroshot.sh for each one.
+# Regenerates the state dictionary from GameBoyWorlds before running.
 
-source scripts/utils.sh || { echo "Could not source utils"; exit 1; }
-python scripts/create_task_dictionary.py
-source scripts/all_train_states.sh
+source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
+python scripts/python/create_task_dictionary.py
+source scripts/core/all_train_states.sh
 
 declare -A ARGS
 REQUIRED_ARGS=("game" "model_name" "vlm_kind")
@@ -51,5 +54,5 @@ IFS=',' read -ra init_states_arr <<< "${TRAIN_STATES[$game]}"
 for init_state in "${init_states_arr[@]}"; do
     ARGS["init_state"]=$init_state
     arg_string=$(args_to_flags_subset ARGS PROPOSE_ZEROSHOT_ARG_KEYS)
-    bash scripts/propose_zeroshot.sh $arg_string
+    bash scripts/vlm/propose_zeroshot.sh $arg_string
 done

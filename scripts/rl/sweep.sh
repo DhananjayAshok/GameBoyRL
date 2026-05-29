@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
+# Hyperparameter sweep over seeds, gammas, and algorithms using default_rl.sh.
+# After the first pass, prunes to the best-k models by test reward (via
+# keep_only_best_models.py), then re-runs only the winners to collect replay
+# buffers for downstream use. Called by iterative_training.sh when --sweep true.
 
 # first get the GameBoyWorlds $storage_dir variable to handle video deletion
 source GameBoyWorlds/configs/config.env || { echo "GameBoyWorlds/configs/config.env not found"; exit 1; }
 gameboy_worlds_storage_dir="$storage_dir"
 
-source scripts/utils.sh
+source scripts/core/utils.sh
 
 # Define Defaults for default_rl.sh
 declare -A ARGS
@@ -121,7 +125,7 @@ for seed in "${SEEDS[@]}"; do
             ARGS["gamma"]=$gamma
             ARGS["algorithm"]=$algorithm
             argstring=$(args_to_flags_subset ARGS TRAINING_ARG_KEYS)
-            bash scripts/default_rl.sh $argstring
+            bash scripts/core_rl/default_rl.sh $argstring
         done
     done
 done
@@ -141,7 +145,7 @@ for seed in "${SEEDS[@]}"; do
             ARGS["gamma"]=$gamma
             ARGS["algorithm"]=$algorithm
             argstring=$(args_to_flags_subset ARGS TRAINING_ARG_KEYS)
-            bash scripts/default_rl.sh $argstring --eval_only true
+            bash scripts/core_rl/default_rl.sh $argstring --eval_only true
         done
     done
 done

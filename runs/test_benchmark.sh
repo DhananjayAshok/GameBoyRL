@@ -1,4 +1,4 @@
-source scripts/utils.sh
+source scripts/core/utils.sh
 max_steps=2
 games=("pokemon_red" "sword_of_hope_1" "sword_of_hope_2" "deja_vu_1" "deja_vu_2" "legend_of_zelda_links_awakening" "legend_of_zelda_the_oracle_of_seasons" "harvest_moon_1" "harvest_moon_2" "harvest_moon_3" "bomberman_pocket" "bomberman_quest" "bomberman_max")
 

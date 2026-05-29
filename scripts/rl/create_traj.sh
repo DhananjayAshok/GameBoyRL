@@ -1,8 +1,13 @@
-# DELTA TODO 3: Already uncommented the group trajectories below. Make sure the run_name and pathing works. 
+# DELTA TODO 3: Already uncommented the group trajectories below. Make sure the run_name and pathing works.
 
 #!/usr/bin/env bash
+# End-to-end trajectory creation for a single init_state: runs iterative RL agents
+# to collect a replay buffer, then calls group_trajectories.sh to cluster the
+# resulting observations into groups. The clustered trajectories are the input to
+# the VLM task-discovery pipeline (infer_tasks.sh). Use create_all_traj.sh to run
+# this across all init_states for a game.
 
-source scripts/utils.sh
+source scripts/core/utils.sh
 
 declare -A ARGS
 REQUIRED_ARGS=()
@@ -113,7 +118,7 @@ else
     echo "Run name: $run_name | Setting model_dir to run_name for iterative training"
     ARGS["model_dir"]="${run_name}"
     argstring=$(args_to_flags_subset ARGS ITERATIVE_TRAINING_ARG_KEYS)
-    bash scripts/iterative_training.sh $argstring
+    bash scripts/rl/iterative_training.sh $argstring
 fi
 
-bash scripts/group_trajectories.sh --game ${ARGS["game"]} --replay_buffer_folder $replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/${ARGS["run_name"]}/${init_state_group}/ --z_min ${ARGS["z_min"]}
+bash scripts/rl/group_trajectories.sh --game ${ARGS["game"]} --replay_buffer_folder $replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/${ARGS["run_name"]}/${init_state_group}/ --z_min ${ARGS["z_min"]}

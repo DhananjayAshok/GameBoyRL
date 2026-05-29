@@ -1,0 +1,50 @@
+# AUTO-GENERATED — do not edit by hand.
+# Maps (game, init_state_group) keys to comma-separated init_state names for all
+# supported games. Sourced by create_all_traj.sh and propose_all_zeroshot.sh to
+# iterate over every training init_state for a given game.
+# Regenerate by running: python scripts/python/create_task_dictionary.py
+
+declare -A TRAIN_STATES
+
+TRAIN_STATES["harvest_moon_1,at_home"]="at_home"
+TRAIN_STATES["harvest_moon_1,shopping_area"]="shopping_area"
+TRAIN_STATES["harvest_moon_1,on_farm"]="outside_barns,outside_storage,near_storage_shed"
+TRAIN_STATES["harvest_moon_1,inside_storage"]="inside_storage"
+TRAIN_STATES["harvest_moon_1,inside_chicken_coop"]="fill_chicken_fodder"
+TRAIN_STATES["harvest_moon_1,farming"]="water_turnips"
+TRAIN_STATES["harvest_moon_1,lost_bird_mission"]="lost_bird"
+TRAIN_STATES["harvest_moon_1,earthquake_event"]="earthquake"
+TRAIN_STATES["harvest_moon_1,harvest_spirit"]="picked_apple"
+TRAIN_STATES["harvest_moon_1,picnic"]="picnic"
+TRAIN_STATES["harvest_moon_2,on_farm"]="wandering,outside_barns,outside_home"
+TRAIN_STATES["harvest_moon_2,at_home"]="at_home"
+TRAIN_STATES["harvest_moon_2,shopping_area"]="shopping_area,shopping_area_left,shopping_area_low"
+TRAIN_STATES["harvest_moon_2,inside_shops"]="inside_animal_shop,inside_flower_shop,inside_restaurant"
+TRAIN_STATES["harvest_moon_3,at_home"]="at_home"
+TRAIN_STATES["harvest_moon_3,island_exploration"]="island_map"
+TRAIN_STATES["harvest_moon_3,in_village"]="in_village"
+TRAIN_STATES["harvest_moon_3,on_farm"]="outside_barns,outside_home,outside_storage"
+TRAIN_STATES["harvest_moon_3,inside_cow_barn"]="inside_cow_barn"
+TRAIN_STATES["harvest_moon_3,mainland_exploration"]="mainland_map,mainland_port"
+TRAIN_STATES["harvest_moon_3,shopping_mall"]="shopping_mall,shopping_mall_upstairs"
+TRAIN_STATES["pokemon_red,trainer_brock_starting"]="trainer_brock"
+TRAIN_STATES["pokemon_red,trainer_bug_catcher"]="trainer_bug_catcher_starting_charmander"
+TRAIN_STATES["pokemon_red,trainer_lass"]="trainer_lass_starting_charmander"
+TRAIN_STATES["pokemon_red,trainer_youngster"]="trainer_youngster_starting_charmander"
+TRAIN_STATES["pokemon_red,location_bills_house"]="location_bills_house_complete,location_bills_house_complete_1,location_bills_house_complete_2"
+TRAIN_STATES["pokemon_red,location_mt_moon"]="location_mt_moon_complete,location_mt_moon_starting_charmander,location_mt_moon_complete_1,location_mt_moon_complete_2,location_mt_moon_complete_3,location_mt_moon_complete_4"
+TRAIN_STATES["pokemon_red,location_pallet_town"]="location_pallet_town_complete,location_pallet_town_complete_1,location_pallet_town_complete_2,location_pallet_town_complete_3"
+TRAIN_STATES["pokemon_red,location_pewter_city"]="location_pewter_city_complete,location_pewter_city_starting_charmander,location_pewter_city_complete_1,location_pewter_city_complete_2,location_pewter_city_complete_3"
+TRAIN_STATES["pokemon_red,location_route_11"]="location_route_11_complete,location_route_11_complete_1,location_route_11_complete_2,location_route_11_complete_3"
+TRAIN_STATES["pokemon_red,location_viridian_forest"]="location_viridian_forest_complete,location_viridian_forest_starting_charmander,location_viridian_forest_starting_charmander_1,location_viridian_forest_starting_charmander_2,location_viridian_forest_starting_charmander_3"
+TRAIN_STATES["pokemon_red,location_pewter_pokemart"]="location_pewter_pokemart_starting_charmander,location_pewter_pokemart_starting_charmander_1,location_pewter_pokemart_starting_charmander_2,location_pewter_pokemart_starting_charmander_3"
+TRAIN_STATES["bomberman_quest,quest_read_sign"]="entrance_next_to_sign,next_to_box_sign,next_to_cave_sign,next_to_danger_sign,next_to_green_cave_entrance_sign,next_to_green_cave_sign,next_to_house_sign,next_to_peace_town_sign"
+TRAIN_STATES["bomberman_quest,quest_talk_to_npc"]="in_library,in_room_next_to_bomb_workshop_man,in_room_next_to_girl,next_to_guide_bottom,next_to_guide_right,next_to_old_man,starter"
+TRAIN_STATES["bomberman_pocket,pocket_defeat_enemy"]="area_1_next_to_enemy,area_2_next_to_enemy,area_3_next_to_enemy,stage_4_next_to_enemy,next_to_strong_enemy,next_to_shell,ocean_area_1_next_to_enemy,ocean_area_1_next_to_strong_enemy,ocean_area_2_next_to_enemy,ocean_area_3_next_to_enemy"
+TRAIN_STATES["bomberman_pocket,pocket_take_exit"]="area_1_next_to_exit,area_2_next_to_exit,area_3_next_to_exit,ocean_area_1_next_to_exit,ocean_area_2_next_to_exit,ocean_area_3_next_to_exit"
+TRAIN_STATES["bomberman_pocket,pocket_pickup_bomb_up"]="next_to_bomb_up,area_2_next_to_bomb_up,area_3_next_to_bomb_up,ocean_area_2_next_to_bomb_up,ocean_area_3_next_to_bomb_up,ocean_area_4_next_to_bomb_up"
+TRAIN_STATES["bomberman_max,max_defeat_enemy"]="stage_1_next_to_enemy,stage_2_next_to_enemy,stage_3_next_to_enemy,stage_5_next_to_enemy,stage_10_next_to_enemy,stage_12_next_to_enemy,stage_14_next_to_enemy,stage_14_next_to_strong_enemy,stage_22_next_to_enemy,next_to_skull,stage_16_next_to_skull,next_to_flower"
+TRAIN_STATES["bomberman_max,max_go_to_exit"]="stage_1_next_to_exit,stage_2_next_to_exit,stage_5_next_to_exit,stage_10_next_to_exit,stage_14_next_to_exit,stage_14_next_to_exit_2,stage_2_next_to_red_exit"
+TRAIN_STATES["bomberman_max,max_pickup_item"]="next_to_bomb_up,stage_2_next_to_bomb_up,next_to_fire,stage_2_next_to_fire_up"
+
+export TRAIN_STATES

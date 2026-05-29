@@ -1,11 +1,14 @@
-# DELTA TODO: 2: Change this to not loop over init state groups but just use init state name as init state group names. Do not gather trajectories here.  
-# This becomes the curiosity exploration only vertical for task discovery. 
+# DELTA TODO: 2: Change this to not loop over init state groups but just use init state name as init state group names. Do not gather trajectories here.
+# This becomes the curiosity exploration only vertical for task discovery.
 
 #!/usr/bin/env bash
+# Batch wrapper that runs create_traj.sh for every init_state registered for a
+# game in TRAIN_STATES. Regenerates the state dictionary from GameBoyWorlds before
+# iterating, so it always reflects the current set of available training states.
 
-source scripts/utils.sh || { echo "Could not source utils"; exit 1; }
-python scripts/create_task_dictionary.py
-source scripts/all_train_states.sh
+source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
+python scripts/python/create_task_dictionary.py
+source scripts/core/all_train_states.sh
 
 # Script-specific defaults and required args
 declare -A ARGS
@@ -67,5 +70,5 @@ IFS=',' read -ra init_states_arr <<< "${TRAIN_STATES[$game]}"
 for init_state in "${init_states_arr[@]}"; do
     ARGS["init_state"]=$init_state
     arg_string=$(args_to_flags_subset ARGS CREATE_TRAJ_ARG_KEYS)
-    bash scripts/create_traj.sh $arg_string
+    bash scripts/rl/create_traj.sh $arg_string
 done

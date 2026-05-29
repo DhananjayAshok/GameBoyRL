@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
+# Runs a single RL training job using the specified curiosity module (default:
+# combinationbuffer PPO). Constructs the experiment name and env_id from args,
+# resolves all storage paths (models, replay buffers, curiosity buffers), and
+# launches the cleanrl Python training loop. Skips the run if a model checkpoint
+# already exists, unless --overwrite_model true is passed.
 
-source scripts/utils.sh
+source scripts/core/utils.sh
 
 # Define Defaults
 declare -A ARGS

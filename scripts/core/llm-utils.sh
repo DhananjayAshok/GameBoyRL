@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Thin wrapper that runs an arbitrary command inside the llm-utils subdirectory
+# using its own Python virtual environment, then switches back to the project
+# environment when done. Used by train_vlm.sh to invoke the llm-utils training CLI
+# (train.py) without polluting the main project environment.
 
 # Capture the full command the user wants to run
 if [ $# -eq 0 ]; then
@@ -10,7 +14,7 @@ fi
 to_run_command="$@"
 
 currdir="$PWD"
-source scripts/utils.sh || { echo "Could not source utils.sh"; exit 1; }
+source scripts/core/utils.sh || { echo "Could not source utils.sh"; exit 1; }
 python configs/create_env_file.py || { echo "Could not create env file"; exit 1; }
 
 # Enter llm-utils and activate its environment

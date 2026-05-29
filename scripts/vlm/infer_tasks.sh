@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
+# Uses the VLM to infer task labels from a directory of grouped trajectories
+# produced by group_trajectories.sh. Populates the task store for a given run,
+# feeding into attempt_tasks.sh. Supports sampling multiple trajectories per group
+# and optionally describing observation pairs to improve task quality.
 
-source scripts/utils.sh || { echo "Could not source utils"; exit 1; }
+source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 
 declare -A ARGS
 REQUIRED_ARGS=()
 
-populate_array INFER_GUIDANCE_ESSENTIALS REQUIRED_ARGS
-populate_dict INFER_GUIDANCE_DEFAULTS ARGS
+populate_array INFER_TASKS_ESSENTIALS REQUIRED_ARGS
+populate_dict INFER_TASKS_DEFAULTS ARGS
 
 # --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -62,12 +66,21 @@ else
     verbose_flag=""
 fi
 
+if [[ "${ARGS["describe_pairs"]}" == "true" || "${ARGS["describe_pairs"]}" == "yes" || "${ARGS["describe_pairs"]}" == "y" ]]; then
+    describe_pairs_flag="--describe_pairs"
+else
+    describe_pairs_flag=""
+fi
+
 python vlm.py \
     --game "${ARGS["game"]}" \
     --model_name "${ARGS["model_name"]}" \
     --vlm_kind "${ARGS["vlm_kind"]}" \
     --max_new_tokens "${ARGS["max_new_tokens"]}" \
     $overwrite_flag $verbose_flag \
-    infer_guidance \
+    infer_tasks \
     --trajectory_path "${ARGS["trajectory_path"]}" \
-    --max_obs_at_once "${ARGS["max_obs_at_once"]}"
+    --run_name "${ARGS["run_name"]}" \
+    --lookback "${ARGS["lookback"]}" \
+    --max_trajectories_per_group "${ARGS["max_trajectories_per_group"]}" \
+    $describe_pairs_flag
