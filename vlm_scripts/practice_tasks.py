@@ -136,6 +136,12 @@ def _episode_seed(base_seed: int, group_idx: str, attempt: int) -> int:
     show_default=True,
     help="Controller variant passed to get_environment.",
 )
+@click.option(
+    "--checker_max_new_tokens",
+    default=1000,
+    show_default=True,
+    help="Token budget for each checker VLM call.",
+)
 @click.pass_obj
 def practice_tasks_cmd(
     obj,
@@ -148,6 +154,7 @@ def practice_tasks_cmd(
     lookback,
     executor_name,
     controller_variant,
+    checker_max_new_tokens,
 ):
     """Run repeated supervised practice attempts on inferred tasks."""
     parameters = obj["parameters"]
@@ -155,6 +162,7 @@ def practice_tasks_cmd(
     model_name = obj["model_name"]
     vlm_kind = obj["vlm_kind"]
     overwrite = obj["overwrite"]
+    verbose = obj["verbose"]
     base_seed = parameters["random_seed"]
 
     executor_class = AVAILABLE_EXECUTORS[executor_name]
@@ -186,6 +194,11 @@ def practice_tasks_cmd(
         goal_condition = record.get("goal_condition", "") or None
         guidance_str = _format_guidance(record.get("guidance", {}))
 
+        if verbose:
+            print(f"Group [{group_idx}] task: {task_str}")
+            if guidance_str:
+                print(f"  Guidance: {guidance_str}")
+
         env = get_environment(
             game=game,
             controller_variant=controller_variant,
@@ -212,17 +225,22 @@ def practice_tasks_cmd(
                 max_steps=max_steps,
                 max_tool_calls=max_tool_calls,
                 evaluation_lookback=lookback,
+                allow_self_termination=False,
                 score_mode=score_mode,
                 guidance=guidance_str or None,
                 goal_condition=goal_condition,
                 checker_vlm_model=model_name,
                 checker_vlm_kind=vlm_kind,
+                checker_max_new_tokens=checker_max_new_tokens,
                 parameters=parameters,
                 vlm_model=model_name,
                 vlm_kind=vlm_kind,
             )
 
             result = supervisor.evaluate()
+
+            if verbose:
+                print(f"  Attempt {attempt}: {'success' if result.get('success') else 'failure'} | score={result.get('score', float('nan')):.3f}")
 
             pkl_name = f"{group_idx}_{attempt}.pkl"
             with open(os.path.join(out_dir, pkl_name), "wb") as f:

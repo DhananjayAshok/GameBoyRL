@@ -5,7 +5,7 @@ source scripts/utils.sh || { echo "Could not source utils"; exit 1; }
 # Define defaults and required args. 
 # These should be specific to this script and not shared across scripts (that is handled below).
 declare -A ARGS
-ARGS["batch_size"]="16"
+ARGS["batch_size"]="4"
 ARGS["num_train_epochs"]="50"
 ARGS["lora_rank"]="32"
 ARGS["lora_alpha"]="32"
