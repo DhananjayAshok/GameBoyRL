@@ -3,11 +3,11 @@
 # to accomplish the inferred task, then saves the enriched data to a sibling JSON.
 #
 # Input files (derived from trajectory_path, same as infer_task_cmd):
-#   trajectory_annotation.json  -> {group_idx: task_string}
-#   trajectory_annotation.pkl   -> {group_idx: [trajectory, ...]}
+#   <trajectory_path>.json  -> {group_idx: task_string}
+#   <trajectory_path>.pkl   -> {group_idx: [trajectory, ...]}
 #
 # Output file:
-#   trajectory_guidance.json    -> {group_idx: {task, init_state, guidance, goal_condition}}
+#   <trajectory_path>_guidance.json    -> {group_idx: {task, init_state, guidance, goal_condition}}
 
 import json
 import os
@@ -18,28 +18,45 @@ from tqdm import tqdm
 
 from utils import log_info, log_warn, log_error
 from utils.vlm import VLM
-from vlm_scripts.infer_task import _parse_key, save_frames
+from vlm_scripts.infer_tasks import _parse_key, save_frames
 
 # ---------------------------------------------------------------------------
 # Prompts
 # ---------------------------------------------------------------------------
 
-GUIDANCE_PROMPT = """You are an expert player of [GAME]. You are given a sequence of screenshots from a game trajectory, along with the task that was accomplished:
+SLICE_GUIDANCE_PROMPT = """You are an expert player of [GAME]. You are given frames [START_IDX]-[END_IDX] (out of [TOTAL] total frames) from a game trajectory, along with the task being accomplished:
 
 Task: "[TASK]"
 
-Your job is to produce gold-standard step-by-step guidance that a new player could follow to accomplish this task from the starting frame. Base your guidance strictly on what you can observe in the frames — do not invent details not visible.
+Describe what the player does in this section of the trajectory. Base your guidance strictly on what you can observe — do not invent details not visible.
 
 Guidelines:
 - Write each step as a short, clear imperative instruction (e.g. "Press A to speak to the NPC", "Walk left towards the door").
-- Order steps chronologically from start to finish.
+- Order steps chronologically within this section.
 - Be specific about directions, button presses and targets when clearly visible.
-- Omit steps that are not necessary for the core task.
-- If the exact button labels are intuitive, describe the action instead (e.g. "Move into the door (as opposed to interacting with it)").
+- If the exact button labels are intuitive, describe the action instead.
 
 Respond in exactly this format:
-Summary: <one sentence describing the overall approach to complete the task. This should discuss how the frames change from left to right, leading towards task completion>
-Goal condition: <a visual description of the frame at which the task is achieved. Focus specifically on what is visually present or changed in that frame that confirms the task is complete>
+Summary: <one sentence describing what happens in frames [START_IDX]-[END_IDX]>
+Goal condition: <a visual description of the final frame in this section>
+Steps:
+- <step 1>
+- <step 2>
+...
+[STOP]"""
+
+CONSOLIDATE_GUIDANCE_PROMPT = """You are consolidating partial guidance from multiple sections of a trajectory in a game of [GAME].
+
+Task: "[TASK]"
+
+Here are the descriptions of each section, in chronological order:
+[SECTION_DESCRIPTIONS]
+
+Combine these into a single, complete, coherent set of step-by-step guidance that a new player could follow from start to finish to accomplish the task.
+
+Respond in exactly this format:
+Summary: <one sentence describing the overall approach to complete the task>
+Goal condition: <a visual description of the state that confirms task completion>
 Steps:
 - <step 1>
 - <step 2>
@@ -87,34 +104,68 @@ def infer_guidance_for_trajectory(
     vlm: VLM,
     game: str,
     max_new_tokens: int,
-    lookback: int = 8,
+    max_obs_at_once: int = 8,
     verbose: bool = False,
 ) -> dict | None:
-    """Given a trajectory and its task label, generate step-by-step gold guidance."""
+    """Chunk the full trajectory into non-overlapping slices, get structured guidance
+    for each, then consolidate into a single guidance with a text-only VLM call."""
     observations, actions, high_level_actions, rewards, init_state = trajectory
-    n = len(observations)
-    k = min(lookback, n)
-    window = list(observations[n - k :])
-    action_window = high_level_actions[n - k :]
+    total = len(observations)
 
-    guidance_prompt = GUIDANCE_PROMPT.replace("[GAME]", game).replace("[TASK]", task)
+    slice_descriptions = []
+    for start in range(0, total, max_obs_at_once):
+        end = min(start + max_obs_at_once, total)
+        frames = list(observations[start:end])
 
-    if verbose:
-        save_frames(window, "guidance_window", high_level_actions=action_window)
-        print(f"GUIDANCE prompt:\n{guidance_prompt}\n---")
+        prompt = (
+            SLICE_GUIDANCE_PROMPT
+            .replace("[GAME]", game)
+            .replace("[TASK]", task)
+            .replace("[START_IDX]", str(start))
+            .replace("[END_IDX]", str(end - 1))
+            .replace("[TOTAL]", str(total))
+        )
 
-    output = vlm.infer(
-        texts=guidance_prompt,
-        images=window,
-        max_new_tokens=max_new_tokens,
+        if verbose:
+            print(f"SLICE prompt (frames {start}-{end - 1} / {total}):\n{prompt}\n---")
+
+        output = vlm.infer(texts=prompt, images=frames, max_new_tokens=max_new_tokens)
+
+        if verbose:
+            print(f"SLICE output:\n{output}\n---")
+
+        parsed = _parse_guidance(output)
+        if parsed is None:
+            print(f"Warning: failed to parse guidance for frames {start}-{end - 1}, skipping slice.")
+            continue
+
+        slice_descriptions.append(
+            f"Frames {start}-{end - 1} / {total}:\n"
+            f"Summary: {parsed['summary']}\n"
+            f"Steps:\n" + "\n".join(f"- {s}" for s in parsed["steps"])
+        )
+
+    if not slice_descriptions:
+        return None
+
+    consolidate_prompt = (
+        CONSOLIDATE_GUIDANCE_PROMPT
+        .replace("[GAME]", game)
+        .replace("[TASK]", task)
+        .replace("[SECTION_DESCRIPTIONS]", "\n\n".join(slice_descriptions))
     )
 
     if verbose:
-        print(f"GUIDANCE output:\n{output}\n---")
+        print(f"CONSOLIDATE prompt:\n{consolidate_prompt}\n---")
+
+    output = vlm.infer(texts=consolidate_prompt, max_new_tokens=max_new_tokens)
+
+    if verbose:
+        print(f"CONSOLIDATE output:\n{output}\n---")
 
     parsed = _parse_guidance(output)
     if parsed is None:
-        print(f"Warning: failed to parse guidance output:\n{output}")
+        print(f"Warning: failed to parse consolidated guidance output:\n{output}")
         return None
     return parsed
 
@@ -131,13 +182,13 @@ def infer_guidance_for_trajectory(
     help="Path to trajectory annotation, as saved by infer_task.py",
 )
 @click.option(
-    "--lookback",
+    "--max_obs_at_once",
     default=8,
     show_default=True,
-    help="Number of frames from the end of each trajectory to analyse.",
+    help="Max frames per slice when chunking the trajectory.",
 )
 @click.pass_obj
-def infer_guidance_cmd(obj, trajectory_path, lookback):
+def infer_guidance_cmd(obj, trajectory_path, max_obs_at_once):
     """Generate gold step-by-step guidance for each inferred task group."""
     max_new_tokens = obj["max_new_tokens"]
     vlm_kind = obj["vlm_kind"]
@@ -157,10 +208,7 @@ def infer_guidance_cmd(obj, trajectory_path, lookback):
             parameters,
         )
 
-    if not os.path.exists(trajectory_path):
-        log_error(f"trajectory_path '{trajectory_path}' does not exist.", parameters)
-
-    annotation_json = os.path.join(trajectory_path, f"trajectory_annotation.json")
+    annotation_json = trajectory_path + ".json"
     annotation_pkl = annotation_json.replace(".json", ".pkl")
 
     if not os.path.exists(annotation_json):
@@ -172,7 +220,7 @@ def infer_guidance_cmd(obj, trajectory_path, lookback):
             f"trajectory_annotation.pkl not found at {annotation_pkl}.", parameters
         )
 
-    out_json = os.path.join(trajectory_path, f"trajectory_guidance.json")
+    out_json = trajectory_path + "_guidance.json"
     checkpoint_path = out_json.replace(".json", "_checkpoint.json")
 
     if os.path.exists(out_json) and not overwrite:
@@ -182,13 +230,13 @@ def infer_guidance_cmd(obj, trajectory_path, lookback):
         return
 
     with open(annotation_json, "r") as f:
-        task_map = {int(k): v for k, v in json.load(f).items()}
+        task_map = json.load(f)
     with open(annotation_pkl, "rb") as f:
         traj_map = pickle.load(f)
 
     if os.path.exists(checkpoint_path) and not overwrite:
         with open(checkpoint_path, "r") as f:
-            guidance_output = {int(k): v for k, v in json.load(f).items()}
+            guidance_output = json.load(f)
         log_info(
             f"Resuming infer_guidance from checkpoint — {len(guidance_output)} groups already done."
         )
@@ -205,8 +253,9 @@ def infer_guidance_cmd(obj, trajectory_path, lookback):
             print(f"Warning: no trajectories for group {group_idx}, skipping.")
             continue
 
-        # Use the first available trajectory as the representative example
-        trajectory = trajectories[0]
+        # Use the first available trajectory as the representative example.
+        # infer_tasks.py stores a list of trajectories; attempt_tasks.py stores a single tuple.
+        trajectory = trajectories[0] if isinstance(trajectories, list) else trajectories
         _, _, _, _, init_state = trajectory
         guidance = infer_guidance_for_trajectory(
             trajectory,
@@ -214,7 +263,7 @@ def infer_guidance_cmd(obj, trajectory_path, lookback):
             vlm,
             game,
             max_new_tokens,
-            lookback=lookback,
+            max_obs_at_once=max_obs_at_once,
             verbose=verbose,
         )
         if guidance is None:

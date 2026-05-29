@@ -19,6 +19,7 @@ Output: JSONL file, one JSON object per line, one line per init_state
 import json
 import os
 import click
+import numpy as np
 import pandas as pd
 
 from utils import load_parameters, log_info, log_warn, log_error
@@ -59,6 +60,7 @@ def get_first_frame_and_actions(
 ):
     env = get_environment(
         game=game,
+        environment_variant="default",
         controller_variant=controller_variant,
         init_state=init_state,
         max_steps=2,
@@ -133,12 +135,18 @@ def _parse_task_list(text: str) -> list[str]:
 @click.option("--init_state", required=True, help="Name of the init state to load")
 @click.option(
     "--extra",
-    type=click.choice([None, "zeroshot", "curiosity"], case_sensitive=False),
+    type=click.Choice([None, "zeroshot", "curiosity"], case_sensitive=False),
     default=None,
     help="How to look for prior tasks. None: no prior tasks. 'zeroshot': use all other init states zeroshot tasks. 'curiosity': use all other init states curiosity based exploration tasks.",
 )
+@click.option(
+    "--extra_k",
+    default=20,
+    type=int,
+    help="Maximum number of extra tasks to sample when --extra is set.",
+)
 @click.pass_obj
-def propose_tasks_zeroshot(obj, init_state, extra):
+def propose_tasks_zeroshot(obj, init_state, extra, extra_k):
     """Zero-shot VLM task proposal from a single initial frame."""
     parameters = obj["parameters"]
     game = obj["game"]
@@ -157,7 +165,6 @@ def propose_tasks_zeroshot(obj, init_state, extra):
     elif extra == "curiosity":
         outpath = outdir + "zeroshot/zeroshot_tasks_prior_curiosity"
     out_path = outpath + ".jsonl"
-
     if os.path.exists(out_path):
         df = pd.read_json(out_path, lines=True)
         if init_state in df["init_state"]:
@@ -179,9 +186,11 @@ def propose_tasks_zeroshot(obj, init_state, extra):
     vlm = VLM(model_name, vlm_kind)
 
     first_frame, action_space_str = get_first_frame_and_actions(
-        init_state, game, parameters
+        init_state, game
     )
     prior_tasks = get_extra_context(outdir, init_state, extra, parameters)
+    if prior_tasks and len(prior_tasks) > extra_k:
+        prior_tasks = list(np.random.choice(prior_tasks, size=extra_k, replace=False))
 
     extra_context_str = ""
     if prior_tasks:
@@ -211,8 +220,7 @@ def propose_tasks_zeroshot(obj, init_state, extra):
             f"Warning: no tasks parsed from VLM output for init_state '{init_state}'."
         )
 
-    result = {"init_state": init_state, "tasks": tasks}
-    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-    with open(out_path, "w") as f:
-        json.dump(result, f, indent=2)
-    print(f"Saved {len(tasks)} tasks → {out_path}")
+    new_row = {"init_state": init_state, "tasks": tasks}
+    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+    df.to_json(out_path, orient="records", lines=True)
+    log_info(f"Saved proposed tasks for init_state '{init_state}' to {out_path}.")

@@ -141,11 +141,8 @@ class SimpleCheckerSupervisor(Supervisor):
     :param score_mode: ``True`` → return a 1-10 score; ``False`` → return binary success.
     :param guidance: Optional step-by-step solution description shown to the judge.
     :param checker_vlm_model: Model name for the checker VLM.
-        Falls back to ``parameters["checker_vlm_model"]``, then
-        ``parameters["executor_vlm_model"]``.
     :param checker_vlm_kind: VLM kind for the checker (``"openai"``, ``"anthropic"``, …).
-        Falls back to ``parameters["checker_vlm_kind"]``, then
-        ``parameters["executor_vlm_kind"]``.
+    :param checker_max_new_tokens: Token budget for each checker VLM call (default 1000).
     :param parameters: Optional parameter overrides.
     :param executor_kwargs: Extra keyword arguments forwarded to the executor constructor.
     """
@@ -197,8 +194,9 @@ Score: <integer from 1 to 10>
         goal_condition: Optional[str] = None,
         hint: Optional[str] = None,
         allow_self_termination: bool = False,
-        checker_vlm_model: Optional[str] = None,
-        checker_vlm_kind: Optional[str] = None,
+        checker_vlm_model: str = None,
+        checker_vlm_kind: str = None,
+        checker_max_new_tokens: int = 1000,
         parameters: Optional[dict] = None,
         **executor_kwargs: Any,
     ) -> None:
@@ -212,18 +210,8 @@ Score: <integer from 1 to 10>
             executor_kwargs["hint"] = hint
         executor_kwargs["allow_self_termination"] = allow_self_termination
         super().__init__(executor_class, env, game, max_steps, max_tool_calls, parameters, **executor_kwargs)
-        model = (
-            checker_vlm_model
-            or self._parameters.get("checker_vlm_model")
-            or self._parameters.get("executor_vlm_model")
-        )
-        kind = (
-            checker_vlm_kind
-            or self._parameters.get("checker_vlm_kind")
-            or self._parameters.get("executor_vlm_kind", "api")
-        )
-        self._checker_vlm = VLM(model, kind)
-        self._checker_max_new_tokens = self._parameters.get("checker_vlm_max_new_tokens", 512)
+        self._checker_vlm = VLM(checker_vlm_model, checker_vlm_kind)
+        self._checker_max_new_tokens = checker_max_new_tokens
 
     def evaluate(self) -> dict:
         """Run the executor on the stored task and return the checker result."""
@@ -443,9 +431,9 @@ Distilled:
         max_tool_calls: int,
         vlm_model: str,
         vlm_kind: str,
-        max_new_tokens: int,
         max_branching_factor: int,
         max_depth: int,
+        max_new_tokens: int = 1000,
         evaluation_lookback: int = 8,
         parameters: Optional[dict] = None,
         **executor_kwargs: Any,

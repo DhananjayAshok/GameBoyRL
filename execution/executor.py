@@ -546,8 +546,7 @@ Reasoning: <your reasoning>
     def _action_list_block(self) -> str:
         lines = [f"  {s}" for s in self._get_action_strings().values()]
         if self._allow_self_termination:
-            lines.append(f"  {self.DONE_TOKEN}  (use when the task is complete)")
-            lines.append(f"  {self.GIVE_UP_TOKEN}  (use when the task is impossible or you cannot proceed)")
+            lines.append(f"Available Special Actions: {self.DONE_TOKEN}  (use when the task is complete), {self.GIVE_UP_TOKEN} (use when the task is impossible or you cannot proceed)")
         return "\n".join(lines)
 
     def _tools_block(self, tool_calls_exceeded: bool) -> str:

@@ -1,4 +1,4 @@
-from vlm_scripts import infer_task, propose_tasks_zeroshot, infer_guidance
+from vlm_scripts import infer_tasks, propose_tasks_zeroshot, infer_guidance, attempt_tasks
 import numpy as np
 import click
 from utils import load_parameters
@@ -45,9 +45,10 @@ def main(ctx, model_name, vlm_kind, game, overwrite, verbose, max_new_tokens):
     )
 
 
-main.add_command(infer_task, name="infer_task")
+main.add_command(infer_tasks, name="infer_tasks")
 main.add_command(propose_tasks_zeroshot, name="propose_tasks_zeroshot")
 main.add_command(infer_guidance, name="infer_guidance")
+main.add_command(attempt_tasks, name="attempt_tasks")
 
 if __name__ == "__main__":
     main()

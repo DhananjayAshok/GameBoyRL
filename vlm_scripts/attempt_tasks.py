@@ -32,16 +32,19 @@ CLI options
 
 Output
 ------
-Directory: same path as tasks_path, minus extension.
-  e.g. ".../zeroshot_tasks.jsonl" -> ".../zeroshot_tasks/"
+Directory: same path as tasks_path, minus extension and _attempts.
+  e.g. ".../zeroshot_tasks.jsonl" -> ".../zeroshot_tasks_attempts/"
 
 Inside that directory:
-  results.csv
+  all_trajectories.csv
     Columns: group_idx, init_state, task_string, success, n_tries
     One row per (init_state x task) attempted.
-    n_tries = 1 (placeholder for future retry logic).
 
-  trajectories.pkl
+  success_trajectories.json
+    dict[str, str] — group_idx -> task_string for only those that succeeded, matching the structure of infer_task.py
+
+
+  success_trajectories.pkl
     dict[str, tuple] — group_idx -> (observations, actions, high_level_actions, rewards, init_state)
     observations: np.ndarray of shape (n_steps+1, H, W, C) — frame_before of step 0 + all frame_afters
     actions:            list[Type[HighLevelAction]] — one per step (executor produces high-level only)
@@ -79,12 +82,15 @@ CRITIQUE_PROMPT = """You are analysing a failed attempt to complete a task in a 
 
 Task: "[TASK]"
 
+Action sequence taken:
+[ACTION_SEQUENCE]
+
 [PRIOR_HINT_BLOCK]The images show the frames of the attempted trajectory, from left to right.
 
-Analyse what went wrong and provide a concise hint for how to better approach the task on the next attempt.
+Analyse what went wrong, referencing specific actions in the sequence where relevant. Provide a concise hint for how to better approach the task on the next attempt.
 
 Respond in exactly this format:
-Critique: <what went wrong in this attempt>
+Critique: <what went wrong, referencing specific actions by number>
 Hint: <one or two sentence hint for a better approach>
 [STOP]"""
 
@@ -110,6 +116,10 @@ def _derive_hint(
     frames = [s.frame_after for s in env_steps]
     if not frames:
         return previous_hint
+    action_lines = []
+    for i, step in enumerate(env_steps):
+        action_lines.append(f"  {i + 1}. {step.action_class.get_action_name(**step.kwargs)}")
+    action_sequence_str = "\n".join(action_lines) if action_lines else "  (no actions taken)"
     prior_block = (
         f'Previous hint (refine or build on this):\n"{previous_hint}"\n\n'
         if previous_hint else ""
@@ -118,6 +128,7 @@ def _derive_hint(
         CRITIQUE_PROMPT
         .replace("[GAME]", game)
         .replace("[TASK]", task)
+        .replace("[ACTION_SEQUENCE]", action_sequence_str)
         .replace("[PRIOR_HINT_BLOCK]", prior_block)
     )
     output = vlm.infer(texts=prompt, images=frames, max_new_tokens=max_new_tokens)
@@ -181,13 +192,19 @@ def _reconstruct_trajectory(env_steps: list, init_state: str) -> tuple:
 )
 @click.option(
     "--max_attempts",
-    default=1,
+    default=5,
     show_default=True,
     help="Maximum number of attempts per task. On each failure a hint is derived and passed to the next attempt.",
 )
+@click.option(
+    "--checker_max_new_tokens",
+    default=1000,
+    show_default=True,
+    help="Token budget for each checker VLM call.",
+)
 @click.pass_obj
 def attempt_tasks_cmd(
-    obj, tasks_path, executor_name, max_steps, max_tool_calls, lookback, controller_variant, max_attempts
+    obj, tasks_path, executor_name, max_steps, max_tool_calls, lookback, controller_variant, max_attempts, checker_max_new_tokens
 ):
     """Attempt each proposed task with a VLM executor and check for success."""
     parameters = obj["parameters"]
@@ -195,6 +212,7 @@ def attempt_tasks_cmd(
     model_name = obj["model_name"]
     vlm_kind = obj["vlm_kind"]
     overwrite = obj["overwrite"]
+    verbose = obj["verbose"]
 
     executor_class = AVAILABLE_EXECUTORS[executor_name]
     max_new_tokens = obj["max_new_tokens"]
@@ -203,11 +221,12 @@ def attempt_tasks_cmd(
     if not os.path.exists(tasks_path):
         log_error(f"tasks_path '{tasks_path}' does not exist.", parameters)
 
-    out_dir = os.path.splitext(tasks_path)[0]
+    out_dir = os.path.splitext(tasks_path)[0] + "_attempts/"
     os.makedirs(out_dir, exist_ok=True)
 
-    csv_path = os.path.join(out_dir, "results.csv")
-    pkl_path = os.path.join(out_dir, "trajectories.pkl")
+    csv_path = os.path.join(out_dir, "all_trajectories.csv")
+    json_path = os.path.join(out_dir, "success_trajectories.json")
+    pkl_path = os.path.join(out_dir, "success_trajectories.pkl")
     checkpoint_json = os.path.join(out_dir, "checkpoint.json")
     checkpoint_pkl = os.path.join(out_dir, "checkpoint.pkl")
 
@@ -238,6 +257,7 @@ def attempt_tasks_cmd(
         env = get_environment(
             game=game,
             controller_variant=controller_variant,
+            environment_variant="default",
             init_state=init_state,
             max_steps=max_steps,
             headless=True,
@@ -255,8 +275,14 @@ def attempt_tasks_cmd(
             result = None
             trajectory = None
 
+            if verbose:
+                print(f"Task [{group_idx}]: {task_str}")
+
             for attempt in range(max_attempts):
                 env.reset()
+
+                if verbose:
+                    print(f"  Attempt {attempt + 1}/{max_attempts}" + (f" | hint: {hint}" if hint else ""))
 
                 supervisor = SimpleCheckerSupervisor(
                     task=task_str,
@@ -266,20 +292,24 @@ def attempt_tasks_cmd(
                     max_steps=max_steps,
                     max_tool_calls=max_tool_calls,
                     evaluation_lookback=lookback,
+                    allow_self_termination=True,
                     score_mode=False,
                     checker_vlm_model=model_name,
                     checker_vlm_kind=vlm_kind,
+                    checker_max_new_tokens=checker_max_new_tokens,
                     parameters=parameters,
                     vlm_model=model_name,
                     vlm_kind=vlm_kind,
                     hint=hint or None,
                 )
-
                 result = supervisor.evaluate()
                 env_steps = [
                     s for s in result["steps"] if isinstance(s, EnvironmentStepRecord)
                 ]
                 trajectory = _reconstruct_trajectory(env_steps, init_state)
+
+                if verbose:
+                    print(f"  Result: {'success' if result['success'] else 'failure'} | {result.get('description', '')}")
 
                 if result["success"]:
                     break
@@ -288,6 +318,8 @@ def attempt_tasks_cmd(
                     hint = _derive_hint(
                         env_steps, task_str, game, critique_vlm, max_new_tokens, hint
                     )
+                    if verbose:
+                        print(f"  Derived hint: {hint}")
 
             results[group_idx] = {
                 "init_state": init_state,
@@ -305,8 +337,9 @@ def attempt_tasks_cmd(
                 pickle.dump(trajectories, f)
 
     # Write final outputs
+    success_trajectories = {gid: traj for gid, traj in trajectories.items() if results.get(gid, {}).get("success")}
     with open(pkl_path, "wb") as f:
-        pickle.dump(trajectories, f)
+        pickle.dump(success_trajectories, f)
 
     pd.DataFrame([
         {
@@ -314,13 +347,18 @@ def attempt_tasks_cmd(
             "init_state": res["init_state"],
             "task_string": res["task_string"],
             "success": res["success"],
-            "n_tries": 1,
+            "n_tries": res["n_tries"],
         }
         for group_idx, res in results.items()
     ]).to_csv(csv_path, index=False)
 
-    print(f"Saved results  -> {csv_path}")
-    print(f"Saved trajectories -> {pkl_path}")
+    success_json = {gid: res["task_string"] for gid, res in results.items() if res.get("success")}
+    with open(json_path, "w") as f:
+        json.dump(success_json, f, indent=2)
+
+    print(f"Saved results       -> {csv_path}")
+    print(f"Saved success tasks -> {json_path}")
+    print(f"Saved trajectories  -> {pkl_path}")
 
     if os.path.exists(checkpoint_json):
         os.remove(checkpoint_json)
