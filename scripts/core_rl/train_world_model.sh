@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
+# Trains a world model on a game's replay buffer, producing a predictive curiosity
+# module for use in subsequent RL training (curiosity_module=world_model). Called
+# between agent iterations in iterative_training.sh to keep the world model fresh
+# as the replay buffer grows.
 
-source scripts/utils.sh
+source scripts/core/utils.sh
 
 # Define Defaults
 declare -A ARGS
@@ -83,7 +87,7 @@ done
 # Logic here:
 
 env_arg_str="--game ${ARGS["game"]} --env default --init_state default --controller ${ARGS["controller"]} --max_steps 10"
-train_env_id=$(python scripts/get_strings.py "env_id" $env_arg_str)
+train_env_id=$(python scripts/python/get_strings.py "env_id" $env_arg_str)
 if [[ -z "$train_env_id" ]]; then
     echo "Error: Failed to get train_env_id"
     exit 1

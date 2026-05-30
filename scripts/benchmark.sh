@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
+# Runs the full benchmark suite on a game with a specified executor and VLM model,
+# recording video for each task attempt and logging all results to
+# results/benchmark/<game>/. The --regenerate flag forces task regeneration before
+# benchmarking.
 
-source scripts/utils.sh || { echo "Could not source utils"; exit 1; }
+source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 
 # Script-specific defaults and required args
 declare -A ARGS

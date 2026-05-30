@@ -1,6 +1,11 @@
+# NUCLEAR CLEANUP — deletes all replay buffers, models, curiosity buffers, tmp
+# data, and all per-game emulator sessions from the storage directory. Also calls
+# clean_cache.sh to wipe CleanRL artifacts. Guarded by an intentional exit at the
+# top; you must remove that line to actually run this. Use only when you want a
+# completely fresh slate.
 echo "Uncomment to run"; exit 1
-source scripts/utils.sh
-bash scripts/clean_cache.sh
+source scripts/core/utils.sh
+bash scripts/core/clean_cache.sh
 currpath=$(pwd)
 cd $storage_dir
 echo "Cleaning up all data folders in $storage_dir..."
@@ -13,4 +18,4 @@ for game in "${games[@]}"; do
     echo "Cleaning sessions for game: $game"
     rm -rf $storage_dir/sessions/$game/${game}_*
 done
-source scripts/utils.sh
+source scripts/core/utils.sh

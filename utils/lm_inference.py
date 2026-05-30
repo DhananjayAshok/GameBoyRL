@@ -150,7 +150,7 @@ class APIModel(InferenceModel, ABC):
         model: str,
         base_url: str,
         api_key: Optional[str] = None,
-        max_queries_per_minute: int = 60,
+        max_queries_per_minute: int = 40,
         parameters: dict[str, Any] = None,
     ) -> None:
         """

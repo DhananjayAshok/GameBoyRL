@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
+# Uses the VLM to annotate a trajectory file with step-by-step guidance, producing
+# a guidance file that practice_tasks.sh can use for guided practice sessions.
+# Input is a trajectory path (--trajectory_path); controls observation window size
+# via --max_obs_at_once.
 
-source scripts/utils.sh || { echo "Could not source utils"; exit 1; }
+source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 
 declare -A ARGS
 REQUIRED_ARGS=()
 
-populate_array INFER_TASKS_ESSENTIALS REQUIRED_ARGS
-populate_dict INFER_TASKS_DEFAULTS ARGS
+populate_array INFER_GUIDANCE_ESSENTIALS REQUIRED_ARGS
+populate_dict INFER_GUIDANCE_DEFAULTS ARGS
 
 # --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -62,21 +66,12 @@ else
     verbose_flag=""
 fi
 
-if [[ "${ARGS["describe_pairs"]}" == "true" || "${ARGS["describe_pairs"]}" == "yes" || "${ARGS["describe_pairs"]}" == "y" ]]; then
-    describe_pairs_flag="--describe_pairs"
-else
-    describe_pairs_flag=""
-fi
-
 python vlm.py \
     --game "${ARGS["game"]}" \
     --model_name "${ARGS["model_name"]}" \
     --vlm_kind "${ARGS["vlm_kind"]}" \
     --max_new_tokens "${ARGS["max_new_tokens"]}" \
     $overwrite_flag $verbose_flag \
-    infer_tasks \
+    infer_guidance \
     --trajectory_path "${ARGS["trajectory_path"]}" \
-    --run_name "${ARGS["run_name"]}" \
-    --lookback "${ARGS["lookback"]}" \
-    --max_trajectories_per_group "${ARGS["max_trajectories_per_group"]}" \
-    $describe_pairs_flag
+    --max_obs_at_once "${ARGS["max_obs_at_once"]}"

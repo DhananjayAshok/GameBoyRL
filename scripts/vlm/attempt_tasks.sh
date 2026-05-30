@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
+# Runs the VLM agent to attempt tasks loaded from a task file (--tasks_path) using
+# a configurable executor. Each task is attempted up to --max_attempts times with
+# --max_steps per attempt. Results are scored and logged for evaluation and
+# potential fine-tuning data collection.
 
-source scripts/utils.sh || { echo "Could not source utils"; exit 1; }
+source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 
 declare -A ARGS
 REQUIRED_ARGS=()

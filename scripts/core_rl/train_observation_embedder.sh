@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
+# Trains an observation encoder on replay buffer data collected for a given game,
+# saving the resulting embedding model to storage. The encoder is used as a
+# reusable similarity-based feature extractor for curiosity modules in subsequent
+# RL training runs (embedder_load_path argument).
 
-source scripts/utils.sh
+source scripts/core/utils.sh
 
+# Define Defaults
 declare -A ARGS
-REQUIRED_ARGS=("game" "replay_buffer_folder" "save_path")
+REQUIRED_ARGS=()
+populate_dict ALL_DEFAULTS ARGS
+populate_array ESSENTIAL_ARGS REQUIRED_ARGS
 
-ARGS["observation_embedder"]=random_patch
-ARGS["z_min"]=2.0
-ARGS["z_kind"]="global"
-
+ARGS["subfolder"]="none"
 
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
 
@@ -78,13 +82,24 @@ for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
-# error out if replay_buffer_folder is none
-if [[ "${ARGS["replay_buffer_folder"]}" == "none" ]]; then
-    echo "Error: Argument --replay_buffer_folder cannot be none."
-    exit 1
+
+cd cleanrl
+
+# Logic here:
+
+subfolder=""
+if [[ "${ARGS["subfolder"]}" != "none" ]]; then
+    subfolder="${ARGS["subfolder"]}"
 fi
 
-replay_buffer_save_folder="${ARGS["replay_buffer_folder"]}"
-cd cleanrl
-python cleanrl_utils/group_trajectories.py --replay_buffer_folder $storage_dir/replay_buffers/${ARGS["game"]}/$replay_buffer_save_folder --save_path ${ARGS["save_path"]} --z_min ${ARGS["z_min"]} --z_kind ${ARGS["z_kind"]}
+replay_buffer_folder=$storage_dir/replay_buffers/${ARGS["game"]}/${subfolder}/
+save_path=$storage_dir/observation_embedders/${ARGS["game"]}/global/
+
+
+echo "Training Observation Embedder Model:"
+
+python cleanrl_utils/train_observation_encoder.py --seed 1 --replay_buffer_folder $replay_buffer_folder \
+    --track --wandb-project-name $WANDB_PROJECT \
+    --save_path $save_path
+
 cd ..

@@ -77,13 +77,13 @@ def get_first_frame_and_actions(
 
 
 def get_extra_context(
-    outdir: str, init_state: str, extra, parameters: dict
+    outdir: str, init_state: str, extra, run_name: str, parameters: dict
 ) -> list[str]:
     tasks_dir = outdir
     if extra is None:
         return []
-
-    if extra == "zeroshot":
+    tasks = []
+    if "zeroshot" in extra:
         path = tasks_dir + "zeroshot/zeroshot_tasks.jsonl"
         if not os.path.exists(path):
             log_error(
@@ -98,23 +98,21 @@ def get_extra_context(
                 f"init_state '{init_state}' not found in {path} — file may be incomplete.",
                 parameters,
             )
-        return [task for tasks_list in df["tasks"] for task in tasks_list]
+        tasks.extend([task for tasks_list in df["tasks"] for task in tasks_list])
 
-    elif extra == "curiosity":
-        path = tasks_dir + "curiosity/all/trajectory_annotation.json"
+    if "curiosity" in extra:
+        path = tasks_dir + f"curiosity/{run_name}/trajectory_annotation.json"
         if not os.path.exists(path):
             log_error(
-                f"Curiosity tasks file not found at {path}. Run curiosity exploration first.",
+                f"Curiosity tasks file not found at {path}. Run infer_tasks first.",
                 parameters,
             )
-        tasks = json.load(open(path, "r"))
-        # keys are trajectory_group indices and values are task strings. Must collect task strings.
+        curiosity_data = json.load(open(path, "r"))
         task_list = []
-        for group_idx, task_info in tasks.items():
+        for group_idx, task_info in curiosity_data.items():
             task_list.append(task_info)
-        return task_list
-    else:
-        log_error(f"Invalid --extra value: {extra}", parameters)
+        tasks.extend(task_list)
+    return tasks
 
 
 def _parse_task_list(text: str) -> list[str]:
@@ -135,7 +133,7 @@ def _parse_task_list(text: str) -> list[str]:
 @click.option("--init_state", required=True, help="Name of the init state to load")
 @click.option(
     "--extra",
-    type=click.Choice([None, "zeroshot", "curiosity"], case_sensitive=False),
+    type=click.Choice([None, "zeroshot", "curiosity", "zeroshot_with_curiosity"], case_sensitive=False),
     default=None,
     help="How to look for prior tasks. None: no prior tasks. 'zeroshot': use all other init states zeroshot tasks. 'curiosity': use all other init states curiosity based exploration tasks.",
 )
@@ -145,8 +143,13 @@ def _parse_task_list(text: str) -> list[str]:
     type=int,
     help="Maximum number of extra tasks to sample when --extra is set.",
 )
+@click.option(
+    "--run_name",
+    default="all",
+    help="run_name used when infer_tasks was run, to locate the curiosity annotation.",
+)
 @click.pass_obj
-def propose_tasks_zeroshot(obj, init_state, extra, extra_k):
+def propose_tasks_zeroshot(obj, init_state, extra, extra_k, run_name):
     """Zero-shot VLM task proposal from a single initial frame."""
     parameters = obj["parameters"]
     game = obj["game"]
@@ -158,12 +161,14 @@ def propose_tasks_zeroshot(obj, init_state, extra, extra_k):
     outdir = parameters["storage_dir"] + f"/proposed_tasks/{game}/{model_save_name}/"
     os.makedirs(outdir, exist_ok=True)
     os.makedirs(outdir + "/zeroshot/", exist_ok=True)
-    if extra == None:
+    if extra is None:
         outpath = outdir + "zeroshot/zeroshot_tasks"
     elif extra == "zeroshot":
-        output = outdir + "zeroshot/zeroshot_tasks_prior_zeroshot"
+        outpath = outdir + "zeroshot/zeroshot_tasks_prior_zeroshot"
     elif extra == "curiosity":
         outpath = outdir + "zeroshot/zeroshot_tasks_prior_curiosity"
+    elif extra == "zeroshot_with_curiosity":
+        outpath = outdir + "zeroshot/zeroshot_tasks_prior_zeroshot_with_curiosity"
     out_path = outpath + ".jsonl"
     if os.path.exists(out_path):
         df = pd.read_json(out_path, lines=True)
@@ -188,7 +193,7 @@ def propose_tasks_zeroshot(obj, init_state, extra, extra_k):
     first_frame, action_space_str = get_first_frame_and_actions(
         init_state, game
     )
-    prior_tasks = get_extra_context(outdir, init_state, extra, parameters)
+    prior_tasks = get_extra_context(outdir, init_state, extra, run_name, parameters)
     if prior_tasks and len(prior_tasks) > extra_k:
         prior_tasks = list(np.random.choice(prior_tasks, size=extra_k, replace=False))
 

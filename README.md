@@ -5,4 +5,4 @@
 4. Run the sync data command
 5. Get the ROMs and place them in GameBoyWorlds Storage Directory
 6. Run scripts/default_rl.sh test
-7. Run runs/benchmark.sh test
+7. Run runs/benchmark_openrouter.sh test

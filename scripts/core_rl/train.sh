@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
+# Runs a single RL training job using the specified curiosity module (default:
+# combinationbuffer PPO). Constructs the experiment name and env_id from args,
+# resolves all storage paths (models, replay buffers, curiosity buffers), and
+# launches the cleanrl Python training loop. Skips the run if a model checkpoint
+# already exists, unless --overwrite_model true is passed.
 
-source scripts/utils.sh
+source scripts/core/utils.sh
 
 # Define Defaults
 declare -A ARGS
@@ -146,6 +151,6 @@ fi
 python cleanrl/${ARGS["algorithm"]}_curiosity.py --exp_name $exp_name --seed ${ARGS["seed"]} --gamma ${ARGS["gamma"]} --env-id $train_env_id --total-timesteps ${ARGS["timesteps"]} --track \
     --wandb-project-name $WANDB_PROJECT --model_save_path $model_save_path --save_model \
     --observation_embedder ${ARGS["observation_embedder"]} --similarity_metric ${ARGS["similarity_metric"]} \
-    --curiosity-module ${ARGS["curiosity_module"]} --ocr_alpha ${ARGS["ocr_alpha"]} --reset-curiosity-module $extra_arg_part || exit 1 #&> $log_file
+    --curiosity-module ${ARGS["curiosity_module"]} --ocr_alpha ${ARGS["ocr_alpha"]} --reset-curiosity-module $extra_arg_part &> $log_file || exit 1 #
 
 cd ..

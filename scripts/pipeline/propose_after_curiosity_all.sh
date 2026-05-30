@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
+# Batch version of propose_after_curiosity: checks that infer_tasks has been run,
+# then delegates to propose_and_attempt_all with extra=curiosity.
 
-source scripts/utils.sh || { echo "Could not source utils"; exit 1; }
+source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
+python scripts/python/create_task_dictionary.py
+source scripts/core/all_train_states.sh
 
 declare -A ARGS
 REQUIRED_ARGS=()
 
-populate_array INFER_GUIDANCE_ESSENTIALS REQUIRED_ARGS
-populate_dict INFER_GUIDANCE_DEFAULTS ARGS
+populate_array VLM_ESSENTIALS REQUIRED_ARGS
+populate_dict PROPOSE_AND_ATTEMPT_DEFAULTS ARGS
+unset ARGS["extra"]
 
 # --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -50,24 +55,18 @@ for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
-if [[ "${ARGS["overwrite"]}" == "true" || "${ARGS["overwrite"]}" == "yes" || "${ARGS["overwrite"]}" == "y" ]]; then
-    overwrite_flag="--overwrite"
-else
-    overwrite_flag=""
+model_save_name="${ARGS["model_name"]##*/}"
+curiosity_dir="$storage_dir/proposed_tasks/${ARGS["game"]}/${model_save_name}/curiosity/${ARGS["run_name"]}"
+
+if [[ ! -f "$curiosity_dir/trajectory_annotation.json" ]]; then
+    echo "Error: trajectory_annotation.json not found at $curiosity_dir. Run infer_tasks first."
+    exit 1
+fi
+if [[ ! -f "$curiosity_dir/trajectory_annotation.pkl" ]]; then
+    echo "Error: trajectory_annotation.pkl not found at $curiosity_dir. Run infer_tasks first."
+    exit 1
 fi
 
-if [[ "${ARGS["verbose"]}" == "true" || "${ARGS["verbose"]}" == "yes" || "${ARGS["verbose"]}" == "y" ]]; then
-    verbose_flag="--verbose"
-else
-    verbose_flag=""
-fi
-
-python vlm.py \
-    --game "${ARGS["game"]}" \
-    --model_name "${ARGS["model_name"]}" \
-    --vlm_kind "${ARGS["vlm_kind"]}" \
-    --max_new_tokens "${ARGS["max_new_tokens"]}" \
-    $overwrite_flag $verbose_flag \
-    infer_guidance \
-    --trajectory_path "${ARGS["trajectory_path"]}" \
-    --max_obs_at_once "${ARGS["max_obs_at_once"]}"
+ARGS["extra"]="curiosity"
+flags=$(args_to_flags_subset ARGS PROPOSE_AND_ATTEMPT_ARG_KEYS)
+bash scripts/pipeline/propose_and_attempt_all.sh $flags || exit 1

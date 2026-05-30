@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
+# Loads a trained model by experiment name and evaluates it on a test environment
+# without further training. The test game/init_state can differ from the training
+# environment, making this useful for out-of-distribution evaluation. Invoked
+# directly or as the evaluation phase of default_rl.sh.
 
-source scripts/utils.sh
+source scripts/core/utils.sh
 
 # Define Defaults
 declare -A ARGS

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
+# Orchestrates a full train-then-evaluate cycle: calls train.sh then enjoy.sh on
+# the resulting model. Supports --train_only and --eval_only flags to run just one
+# half of the pipeline. The test environment can be overridden independently of the
+# training environment via --test_env and --test_init_state.
 
-source scripts/utils.sh
+source scripts/core/utils.sh
 
 # Define Defaults
 declare -A ARGS
@@ -106,7 +110,7 @@ if [[ "${ARGS["eval_only"]}" == "true" || "${ARGS["eval_only"]}" == "yes" || "${
     echo "Eval only flag is set. Skipping training and going to evaluation."
 else
     arg_string=$(args_to_flags_subset ARGS TRAINING_ARG_KEYS)
-    bash scripts/train.sh $arg_string || exit 1
+    bash scripts/core_rl/train.sh $arg_string || exit 1
 fi
 
 # if test_env and test_init_state are empty, set them to train values:
@@ -126,4 +130,4 @@ fi
 
 ARGS["exp_name"]=$exp_name
 arg_string=$(args_to_flags_subset ARGS EVALUATION_ARG_KEYS)
-bash scripts/enjoy.sh $arg_string || exit 1
+bash scripts/core_rl/enjoy.sh $arg_string || exit 1

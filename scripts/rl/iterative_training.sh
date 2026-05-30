@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
+# Runs multiple rounds of RL training where each agent's curiosity buffer seeds
+# the next, implementing the iterative self-improvement loop. Optionally retrains
+# the world model between rounds (curiosity_module=world_model) and supports
+# sweeping over seeds/gammas/algorithms at each round via sweep.sh. Called by
+# create_traj.sh; can also be invoked directly for training-only runs.
 
-source scripts/utils.sh
+source scripts/core/utils.sh
 
 # Define Defaults for default_rl.sh
 declare -A ARGS
@@ -116,23 +121,23 @@ function call_agent(){
     ARGS["buffer_load_path"]=$buffer_load_path
     if [ "$sweeping" = true ]; then
         argstring=$(args_to_flags_subset ARGS SWEEP_ARG_KEYS)
-        bash scripts/sweep.sh $argstring || exit 1
+        bash scripts/rl/sweep.sh $argstring || exit 1
         if [ "$ocr_alpha_sweep" = true ]; then
             for ocr_alpha in "${combination_buffer_ocr_alphas[@]}"; do
                 ARGS["ocr_alpha"]=$ocr_alpha
                 argstring=$(args_to_flags_subset ARGS SWEEP_ARG_KEYS)
-                bash scripts/sweep.sh $argstring || exit 1
+                bash scripts/rl/sweep.sh $argstring || exit 1
             done
             ARGS["ocr_alpha"]=0.0 # reset to default after sweep
         fi
     else
         argstring=$(args_to_flags_subset ARGS TRAINING_ARG_KEYS)
-        bash scripts/default_rl.sh $argstring || exit 1
+        bash scripts/core_rl/default_rl.sh $argstring || exit 1
         if [ "$ocr_alpha_sweep" = true ]; then
             for ocr_alpha in "${combination_buffer_ocr_alphas[@]}"; do
                 ARGS["ocr_alpha"]=$ocr_alpha
                 argstring=$(args_to_flags_subset ARGS TRAINING_ARG_KEYS)
-                bash scripts/default_rl.sh $argstring || exit 1
+                bash scripts/core_rl/default_rl.sh $argstring || exit 1
             done
             ARGS["ocr_alpha"]=0.0 # reset to default after sweep
         fi
@@ -145,7 +150,7 @@ function train_world_model(){
     ARGS["buffer_load_path"]="none" # world model will train on all trajectories in the replay buffer folder, so no need to specify a single buffer to load from.
     # Don't bother with buffer_load_path, this will just make the WM train from scratch on all trajectories in the replay buffer folder. 
     argstring=$(args_to_flags_subset ARGS WORLD_MODEL_ARG_KEYS)
-    bash scripts/train_world_model.sh $argstring 
+    bash scripts/core_rl/train_world_model.sh $argstring 
 }
 
 ## Execution starts here

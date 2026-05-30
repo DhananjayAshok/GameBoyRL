@@ -1,9 +1,8 @@
 """
-Sometimes in bash, there are times when you want to call functions and get string values back.
-This script is a helper to get those string values from bash functions. It takes in the name of the string and the arguments to pass to that function, and it prints the output of the function to stdout.
-If there is an error at any point of time, it will print the error message to stderr and exit with a non-zero exit code.
-
-This script should ONLY print once, as the output of the function. If there are multiple print statements, it will be difficult to parse the output and get the desired string value.
+CLI helper called by bash scripts (via utils.sh get_string_from_args) to generate
+structured strings — experiment names and env IDs — from --key value argument pairs.
+Extensible: add a new StringFunction subclass and register it in STRING_FUNCTIONS to
+expose a new string kind. Prints exactly one line to stdout; all diagnostics go to stderr.
 """
 
 import sys

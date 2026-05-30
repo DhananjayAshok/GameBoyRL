@@ -7,5 +7,5 @@ games=("harry_potter_philosophers_stone" "harry_potter_chamber_of_secrets")
 mkdir -p logs/test_games
 for game in "${games[@]}"; do
     echo "Testing game: $game"
-    bash scripts/default_rl.sh --game "$game" --timesteps 1000 &> logs/test_games/${game}.out
+    bash scripts/core_rl/default_rl.sh --game "$game" --timesteps 1000 &> logs/test_games/${game}.out
 done
