@@ -232,7 +232,7 @@ def infer_guidance_cmd(obj, trajectory_path, max_obs_at_once):
     with open(annotation_json, "r") as f:
         task_map = json.load(f)
     with open(annotation_pkl, "rb") as f:
-        traj_map = pickle.load(f)
+        traj_map = {str(k): v for k, v in pickle.load(f).items()}
 
     if os.path.exists(checkpoint_path) and not overwrite:
         with open(checkpoint_path, "r") as f:

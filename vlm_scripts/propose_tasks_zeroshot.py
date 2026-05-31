@@ -172,7 +172,7 @@ def propose_tasks_zeroshot(obj, init_state, extra, extra_k, run_name):
     out_path = outpath + ".jsonl"
     if os.path.exists(out_path):
         df = pd.read_json(out_path, lines=True)
-        if init_state in df["init_state"]:
+        if init_state in df["init_state"].values:
             if not obj["overwrite"]:
                 log_info(
                     f"Skipping — output already exists for initial state {init_state} at {out_path}. Use --overwrite to rerun."

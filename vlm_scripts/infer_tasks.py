@@ -65,7 +65,7 @@ INFER_PROMPT = """You are analysing multiple screenshots in sequence from a game
 
 Over the course of some of these frames, a single primary task may have been performed by the player, with the task being completed either at the very end or in some frame close to the end. 
 Describe, with a single phrase, the action or task the player performed over the course these frames? Do not use conjunctions like "and" or "while" in your description. If there are multiple distinct tasks that seem to be happening, try to describe the whole subtrajectory wholistically and omit the less important subtasks. If there is no clear task, say "NO TASK".
-Be specific but concise, each task should be a single, specific and meaningful action and not trivial. Describe only what is clearly supported by the evidence above.
+Be specific but concise, each task should be a single, specific and meaningful action and not trivial. Describe only what is clearly supported by the evidence above. Make the task description as unambiguous as possible — include enough distinguishing detail that it cannot be confused with other similar tasks that could occur in the same game.
 
 Always try to pick the longest horizon, most multistep version of the task that is present in the trajectory. If there is no clear task, respond with "NO TASK"
 Otherwise, respond in exactly this format:
@@ -466,7 +466,7 @@ def infer_task_cmd(
 
     out_dir = (
         parameters["storage_dir"]
-        + f"proposed_tasks/{game}/{model_save_name}/curiosity/{run_name}/"
+        + f"/proposed_tasks/{game}/{model_save_name}/curiosity/{run_name}/"
     )
     os.makedirs(out_dir, exist_ok=True)
     traj_path = os.path.join(out_dir, f"trajectory_annotation.json")

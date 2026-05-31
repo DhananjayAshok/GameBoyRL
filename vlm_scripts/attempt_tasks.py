@@ -78,19 +78,32 @@ from utils import log_info, log_error
 from utils.vlm import VLM
 
 
-CRITIQUE_PROMPT = """You are analysing a failed attempt to complete a task in a game of [GAME].
+CRITIQUE_SLICE_PROMPT = """You are analysing a segment of a failed attempt to complete a task in a game of [GAME].
 
 Task: "[TASK]"
 
-Action sequence taken:
+Actions taken in this segment (steps [START_IDX]-[END_IDX] of [TOTAL] total):
 [ACTION_SEQUENCE]
 
-[PRIOR_HINT_BLOCK]The images show the frames of the attempted trajectory, from left to right.
+The images show frames [START_IDX]-[END_IDX] of the trajectory, from left to right.
 
-Analyse what went wrong, referencing specific actions in the sequence where relevant. Provide a concise hint for how to better approach the task on the next attempt.
+Describe what happened in this segment: what the player did, what went wrong (if anything), and any observations relevant to why the task was not completed.
 
 Respond in exactly this format:
-Critique: <what went wrong, referencing specific actions by number>
+Segment summary: <one or two sentences describing what happened in this segment>
+[STOP]"""
+
+CRITIQUE_CONSOLIDATE_PROMPT = """You are analysing a failed attempt to complete a task in a game of [GAME].
+
+Task: "[TASK]"
+
+Below are summaries of each segment of the failed trajectory:
+[SEGMENT_SUMMARIES]
+
+[PRIOR_HINT_BLOCK]Based on the full trajectory above, provide a concise hint for how to better approach the task on the next attempt.
+
+Respond in exactly this format:
+Critique: <what went wrong overall>
 Hint: <one or two sentence hint for a better approach>
 [STOP]"""
 
@@ -111,27 +124,58 @@ def _derive_hint(
     vlm: VLM,
     max_new_tokens: int,
     previous_hint: str = "",
+    max_frames_per_slice: int = 8,
 ) -> str:
-    """Call the VLM on the failed trajectory frames to produce a hint for the next attempt."""
+    """Slice the failed trajectory into fixed-size windows, critique each with images,
+    then consolidate into a single hint with a text-only call."""
     frames = [s.frame_after for s in env_steps]
     if not frames:
         return previous_hint
-    action_lines = []
-    for i, step in enumerate(env_steps):
-        action_lines.append(f"  {i + 1}. {step.action_class.get_action_name(**step.kwargs)}")
-    action_sequence_str = "\n".join(action_lines) if action_lines else "  (no actions taken)"
+
+    total = len(env_steps)
+    action_lines_all = [
+        f"  {i + 1}. {step.action_class.get_action_name(**step.kwargs)}"
+        for i, step in enumerate(env_steps)
+    ]
+
+    segment_summaries = []
+    for start in range(0, total, max_frames_per_slice):
+        end = min(start + max_frames_per_slice, total)
+        slice_frames = frames[start:end]
+        slice_actions = "\n".join(action_lines_all[start:end]) or "  (no actions taken)"
+        prompt = (
+            CRITIQUE_SLICE_PROMPT
+            .replace("[GAME]", game)
+            .replace("[TASK]", task)
+            .replace("[START_IDX]", str(start + 1))
+            .replace("[END_IDX]", str(end))
+            .replace("[TOTAL]", str(total))
+            .replace("[ACTION_SEQUENCE]", slice_actions)
+        )
+        output = vlm.infer(texts=prompt, images=slice_frames, max_new_tokens=max_new_tokens)
+        stop_idx = output.lower().find("[stop]")
+        if stop_idx != -1:
+            output = output[:stop_idx]
+        for line in output.splitlines():
+            if line.strip().lower().startswith("segment summary:"):
+                summary = line.strip()[len("segment summary:"):].strip()
+                segment_summaries.append(f"Steps {start + 1}-{end}: {summary}")
+                break
+        else:
+            segment_summaries.append(f"Steps {start + 1}-{end}: {output.strip()}")
+
     prior_block = (
         f'Previous hint (refine or build on this):\n"{previous_hint}"\n\n'
         if previous_hint else ""
     )
-    prompt = (
-        CRITIQUE_PROMPT
+    consolidate_prompt = (
+        CRITIQUE_CONSOLIDATE_PROMPT
         .replace("[GAME]", game)
         .replace("[TASK]", task)
-        .replace("[ACTION_SEQUENCE]", action_sequence_str)
+        .replace("[SEGMENT_SUMMARIES]", "\n".join(segment_summaries))
         .replace("[PRIOR_HINT_BLOCK]", prior_block)
     )
-    output = vlm.infer(texts=prompt, images=frames, max_new_tokens=max_new_tokens)
+    output = vlm.infer(texts=consolidate_prompt, max_new_tokens=max_new_tokens)
     return _parse_hint(output) or output.strip()
 
 
