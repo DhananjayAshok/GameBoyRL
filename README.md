@@ -6,3 +6,7 @@
 5. Get the ROMs and place them in GameBoyWorlds Storage Directory
 6. Run scripts/default_rl.sh test
 7. Run runs/benchmark_openrouter.sh test
+
+---
+
+For a walkthrough of each script and its core functionality, see [README_dev.md](README_dev.md).
