@@ -170,11 +170,15 @@ def practice_tasks_cmd(
     if not os.path.exists(guidance_path):
         log_error(f"guidance_path '{guidance_path}' does not exist.", parameters)
 
-    out_dir = os.path.join(os.path.dirname(guidance_path), "practice")
+    out_dir = os.path.join(os.path.dirname(guidance_path), f"practice_{executor_name}")
     os.makedirs(out_dir, exist_ok=True)
 
     csv_path = os.path.join(out_dir, "results.csv")
     checkpoint_path = os.path.join(out_dir, "checkpoint.json")
+
+    if os.path.exists(csv_path) and not overwrite and False:
+        log_info(f"Skipping practice — output already exists at {csv_path}. Use --overwrite to rerun.")
+        return
 
     if os.path.exists(checkpoint_path) and not overwrite:
         with open(checkpoint_path, "r") as f:
@@ -184,7 +188,6 @@ def practice_tasks_cmd(
     else:
         rows = []
         done = set()
-
     with open(guidance_path, "r") as f:
         guidance_data = {str(k): v for k, v in json.load(f).items()}
 
@@ -204,12 +207,12 @@ def practice_tasks_cmd(
             controller_variant=controller_variant,
             environment_variant="default",
             init_state=init_state,
-            max_steps=max_steps,
+            max_steps=max_steps + n_random_actions + 50, # extra buffer for random actions and potential overshooting
             headless=True,
             save_video=False,
         )
 
-        for attempt in tqdm(range(n_attempts), desc="attempts", leave=False):
+        for attempt in tqdm(range(n_attempts), desc="practicing", leave=False):
             if (group_idx, attempt) in done:
                 continue
 
@@ -229,6 +232,7 @@ def practice_tasks_cmd(
                 allow_self_termination=False,
                 score_mode=score_mode,
                 guidance=guidance_str or None,
+                hint=guidance_str or None,
                 goal_condition=goal_condition,
                 checker_vlm_model=model_name,
                 checker_vlm_kind=vlm_kind,

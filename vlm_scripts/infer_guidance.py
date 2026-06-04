@@ -35,6 +35,7 @@ Guidelines:
 - Order steps chronologically within this section.
 - Be specific about directions, button presses and targets when clearly visible.
 - If the exact button labels are intuitive, describe the action instead.
+- You must make sure that for each step, you explicitly refer to the visual cues in the frame that indicate WHEN to do a particular step, and when to move on to the next. For example, instead of saying "walk upwards", say "when the character is past the tree line, walk upwards until the door is visible at the top of the frame." Be very specific about the visual cues that indicate what to do and when.
 
 Respond in exactly this format:
 Summary: <one sentence describing what happens in frames [START_IDX]-[END_IDX]>

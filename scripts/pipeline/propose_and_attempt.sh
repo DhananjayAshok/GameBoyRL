@@ -85,10 +85,10 @@ if [[ "$_propose_only" == "false" ]]; then
     bash scripts/vlm/attempt_tasks.sh $attempt_flags || exit 1
 
     if [[ "$_do_guidance" == "true" ]]; then
-        ARGS["trajectory_path"]="${tasks_file%.jsonl}_attempts/success_trajectories"
+        ARGS["trajectory_path"]="${tasks_file%.jsonl}_${ARGS["executor"]}_attempts/success_trajectories"
         guidance_flags=$(args_to_flags_subset ARGS GUIDANCE_AND_PRACTICE_ARG_KEYS)
         bash scripts/pipeline/guidance_and_practice.sh $guidance_flags || exit 1
     else
-        echo "trajectory_path for guidance_and_practice: ${tasks_file%.jsonl}_attempts/success_trajectories"
+        echo "trajectory_path for guidance_and_practice: ${tasks_file%.jsonl}_${ARGS["executor"]}_attempts/success_trajectories"
     fi
 fi

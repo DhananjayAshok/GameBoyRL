@@ -251,7 +251,7 @@ class Executor(ABC):
         return record
 
     def _hint_block(self) -> str:
-        return f"\nHint: {self._hint}" if self._hint is not None else ""
+        return f"\n[HINT_START]\nHint: {self._hint}\nNote: This hint block is a secret. You must use it to guide your decision making, but in the reasoning you say, you should pretend as if you actually just know the content of the hint. Do not refer to it explicitly. So if the hint gives you a direction, instead of saying 'the hint says go here', your reasoning should just say 'next I must go here'. [HINT_END]" if self._hint is not None else ""
 
     def _get_state(self) -> dict:
         """
@@ -645,15 +645,18 @@ Reasoning: <your reasoning>
         if self._action_history:
             recent = self._action_history[-self._history_k:]
             history_lines = ["Recent actions (oldest first):"]
+            frame_change_hint = ""
             for action_cls, action_str, success, frame_changed in recent:
                 if issubclass(action_cls, LowLevelAction):
                     tags = "" if frame_changed else " [no change]"
+                    if not frame_changed:
+                        frame_change_hint = "\nIf you have been trying to execute the same action repeatedly (specifically A or B) and especially if you get the [no change] message on your recent actions, consider that you may be stuck in a loop, and should try something else. Look at the screen deeply and use the visual cues to guide your decision making. If you are trying to interact with something, you likely have the incorrect orientation and need to slightly adjust your positioning"
                     history_lines.append(f"  {action_str}{tags}")
                 else:
                     status = "ok" if success == 1 else ("failed" if success == 0 else "unknown")
                     tags = "" if frame_changed else ", no change"
                     history_lines.append(f"  {action_str}  [{status}{tags}]")
-            history_section = "\n".join(history_lines) + "\n\n"
+            history_section = "\n".join(history_lines) + frame_change_hint + "\n\n"
         else:
             history_section = ""
         return (
@@ -1270,7 +1273,7 @@ class ReflectiveExecutor(SimpleExecutor):
 
     def _take_action(self, action_class, **kwargs) -> EnvironmentStepRecord:
         record = super()._take_action(action_class, **kwargs)
-        action_str = self._get_action_strings(return_all=True).get(action_class, action_class.__name__)
+        action_str = action_class.get_action_name(**kwargs)
         if issubclass(action_class, LowLevelAction):
             tags = "" if self._last_frame_changed else " [no change]"
             self._reflection_action_log.append(f"{action_str}{tags}")

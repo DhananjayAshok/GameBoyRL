@@ -147,36 +147,55 @@ class SimpleCheckerSupervisor(Supervisor):
     :param executor_kwargs: Extra keyword arguments forwarded to the executor constructor.
     """
 
-    DESCRIBE_PROMPT = """You are watching a sequence of screenshots from a game of [GAME].
+    DESCRIBE_SLICE_PROMPT = """You are watching frames [START_IDX]-[END_IDX] of [TOTAL] total frames from a game of [GAME].
 
-Describe what is happening across these frames as if you have no knowledge of any particular task or goal. Focus on what the player is doing and what changes visually from frame to frame.
+Describe what the player does and what changes visually in this segment. Focus on actions taken and their outcomes. Do not assume any particular goal.
 
 Respond in exactly this format:
-Description: <concise description of the player's actions and visual changes>
+Description: <concise description of the player's actions and visual changes in this segment>
+[STOP]"""
+
+    DESCRIBE_CONSOLIDATE_PROMPT = """You are consolidating segment descriptions from a game of [GAME] into a single complete trajectory description.
+
+Segment descriptions (in chronological order):
+[SEGMENT_DESCRIPTIONS]
+
+Produce a single coherent description of the full trajectory from start to finish.
+
+Respond in exactly this format:
+Description: <complete description of the full trajectory>
 [STOP]"""
 
     JUDGE_BINARY_PROMPT = """Task: "[TASK]"
 [GOAL_CONDITION_BLOCK][GUIDANCE_BLOCK]
-A player attempted to complete this task. Here is a description of what happened:
+A player attempted to complete this task. Here is a description of what happened across the FULL trajectory:
 "[DESCRIPTION]"
 
-The images show the last frames of the trajectory. Did the player successfully complete the task?
+The images show only the FINAL frames of the trajectory. Task completion may have occurred earlier and may not be visible in these images.
+
+Did the player successfully complete the task at any point during the trajectory? Use the description as your primary evidence — if it mentions something that closely matches task completion, count it as success even if it is not visible in the final frames shown.
+
+Do not be overly strict in your judgement: the goal condition is a rough guide, not a strict requirement. If the player has basically achieved the task with only minor, trivial differences, consider it a success.
 
 Respond in exactly this format:
-Reasoning: <your reasoning, referencing specific visual evidence>
+Reasoning: <your reasoning, referencing the description and any visual evidence>
 Success: <yes or no>
 [STOP]"""
 
     JUDGE_SCORE_PROMPT = """Task: "[TASK]"
 [GOAL_CONDITION_BLOCK][GUIDANCE_BLOCK]
-A player attempted to complete this task. Here is a description of what happened:
+A player attempted to complete this task. Here is a description of what happened across the FULL trajectory:
 "[DESCRIPTION]"
 
-The images show the last frames of the trajectory. Score how well the player progressed toward or completed this task.
+The images show only the FINAL frames of the trajectory. Task completion may have occurred earlier and may not be visible in these images.
+
+Score how well the player progressed toward or completed this task at any point during the trajectory. Use the description as your primary evidence — if it mentions something that closely matches task completion, score it highly even if not visible in the final frames.
+
+Do not be overly strict in your judgement: the goal condition is a rough guide, not a strict requirement. Partial progress deserves a fair score and you are allowed to give a perfect score if the player has basically achieved the task with only minor, trivial differences.
 1 = no progress at all, 10 = task perfectly completed.
 
 Respond in exactly this format:
-Reasoning: <your reasoning, referencing specific visual evidence>
+Reasoning: <your reasoning, referencing the description and any visual evidence>
 Score: <integer from 1 to 10>
 [STOP]"""
 
@@ -217,7 +236,56 @@ Score: <integer from 1 to 10>
         """Run the executor on the stored task and return the checker result."""
         return self.call_executor(self._task)
 
+    _DESCRIBE_SLICE_SIZE = 10
+
+    def _describe_trajectory(self, env_steps: list) -> str:
+        all_frames = [s.frame_after for s in env_steps]
+        total = len(all_frames)
+        slice_size = self._DESCRIBE_SLICE_SIZE
+
+        if total <= slice_size:
+            output = self._checker_vlm.infer(
+                texts=self.DESCRIBE_SLICE_PROMPT
+                    .replace("[GAME]", self._game)
+                    .replace("[START_IDX]", "1")
+                    .replace("[END_IDX]", str(total))
+                    .replace("[TOTAL]", str(total)),
+                images=all_frames,
+                max_new_tokens=self._checker_max_new_tokens,
+            )
+            return _parse_checker_key(output, "Description") or output.strip()
+
+        segment_descriptions = []
+        for start in range(0, total, slice_size):
+            end = min(start + slice_size, total)
+            prompt = (
+                self.DESCRIBE_SLICE_PROMPT
+                .replace("[GAME]", self._game)
+                .replace("[START_IDX]", str(start + 1))
+                .replace("[END_IDX]", str(end))
+                .replace("[TOTAL]", str(total))
+            )
+            output = self._checker_vlm.infer(
+                texts=prompt,
+                images=all_frames[start:end],
+                max_new_tokens=self._checker_max_new_tokens,
+            )
+            desc = _parse_checker_key(output, "Description") or output.strip()
+            segment_descriptions.append(f"Frames {start + 1}-{end}: {desc}")
+
+        consolidate_prompt = (
+            self.DESCRIBE_CONSOLIDATE_PROMPT
+            .replace("[GAME]", self._game)
+            .replace("[SEGMENT_DESCRIPTIONS]", "\n".join(segment_descriptions))
+        )
+        output = self._checker_vlm.infer(
+            texts=consolidate_prompt,
+            max_new_tokens=self._checker_max_new_tokens,
+        )
+        return _parse_checker_key(output, "Description") or output.strip()
+
     def process_executor_return(self, report: ExecutorReport) -> dict:
+        self._last_report = report
         env_steps = [s for s in report.steps if isinstance(s, EnvironmentStepRecord)]
         k = min(self._evaluation_lookback, len(env_steps))
 
@@ -230,17 +298,11 @@ Score: <integer from 1 to 10>
             }
             return {**empty, "score": 1} if self._score_mode else {**empty, "success": False}
 
-        frames = [s.frame_after for s in env_steps[-k:]]
+        # Stage 1: describe full trajectory in slices
+        description = self._describe_trajectory(env_steps)
 
-        # Stage 1: task-blind description
-        describe_output = self._checker_vlm.infer(
-            texts=self.DESCRIBE_PROMPT.replace("[GAME]", self._game),
-            images=frames,
-            max_new_tokens=self._checker_max_new_tokens,
-        )
-        description = _parse_checker_key(describe_output, "Description") or describe_output.strip()
-
-        # Stage 2: judge
+        # Stage 2: judge using final k frames + full description
+        final_frames = [s.frame_after for s in env_steps[-k:]]
         goal_condition_block = (
             f"This task is considered complete if: {self._goal_condition}\n\n"
             if self._goal_condition else ""
@@ -258,12 +320,11 @@ Score: <integer from 1 to 10>
         )
         judge_output = self._checker_vlm.infer(
             texts=judge_prompt,
-            images=frames,
+            images=final_frames,
             max_new_tokens=self._checker_max_new_tokens,
         )
 
         reasoning = _parse_checker_key(judge_output, "Reasoning") or ""
-
         executor_meta = {"vlm_call_log": report.vlm_call_log, "steps": report.steps}
 
         if self._score_mode:

@@ -265,7 +265,7 @@ def attempt_tasks_cmd(
     if not os.path.exists(tasks_path):
         log_error(f"tasks_path '{tasks_path}' does not exist.", parameters)
 
-    out_dir = os.path.splitext(tasks_path)[0] + "_attempts/"
+    out_dir = os.path.splitext(tasks_path)[0] + f"_{executor_name}_attempts/"
     os.makedirs(out_dir, exist_ok=True)
 
     csv_path = os.path.join(out_dir, "all_trajectories.csv")

@@ -1,6 +1,6 @@
 source scripts/core/utils.sh
 #games=("pokemon_red" "sword_of_hope_1" "sword_of_hope_2" "deja_vu_1" "deja_vu_2" "legend_of_zelda_links_awakening" "legend_of_zelda_the_oracle_of_seasons" "harvest_moon_1" "harvest_moon_2" "harvest_moon_3" "bomberman_pocket" "bomberman_quest" "bomberman_max")
-games=("sword_of_hope_1" "sword_of_hope_2" "bomberman_pocket" "bomberman_quest" "bomberman_max")
+games=("sword_of_hope_1" "sword_of_hope_2")
 #games=("pokemon_red" "legend_of_zelda_links_awakening" "sword_of_hope_1" "harvest_moon_1" "bomberman_pocket" "deja_vu_1")
 #games=("pokemon_red")
 
