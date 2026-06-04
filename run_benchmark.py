@@ -1,6 +1,5 @@
 """
-Usage: python run_benchmark_zeroshot.py --game pokemon_red --save_video True --max_resets 3 --max_steps 30
-python run_benchmark_zeroshot.py --game pokemon_red --save_video True --max_resets 3 --max_steps 30 --random_sample 2 --verbose
+Called by scripts/benchmark.sh. Use --help for CLI options.
 """
 
 from gameboy_worlds import (

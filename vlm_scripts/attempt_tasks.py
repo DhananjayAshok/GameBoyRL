@@ -1,4 +1,6 @@
 """
+Called by scripts/vlm/attempt_tasks.sh (via vlm.py attempt_tasks). Use --help for CLI options.
+
 Input
 -----
 A JSONL file produced by propose_tasks_zeroshot.py.

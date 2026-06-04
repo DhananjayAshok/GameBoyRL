@@ -325,17 +325,12 @@ class APIModel(InferenceModel, ABC):
             for img_list in images:
                 all_images.append(self.get_encoded_images(img_list))
             images = all_images
-        base_input_dict = {
-            "role": "user",
-            "content": [{"type": "text"}],
-        }
         inputs = []
         for text, img_list in zip(texts, images):
-            prompt_dict = base_input_dict.copy()
-            prompt_dict["content"][0]["text"] = text
+            content = [{"type": "text", "text": text}]
             for img in img_list:
-                prompt_dict["content"].append(self.get_image_input_dict(img))
-            inputs.append(prompt_dict)
+                content.append(self.get_image_input_dict(img))
+            inputs.append({"role": "user", "content": content})
 
         self.wait()
         responses = []
@@ -433,7 +428,7 @@ class OpenAIAPIModel(APIModel):
                     backoff_time = self.seconds_to_wait * (2 ** attempt)
                     log_info(f"Waiting for {backoff_time:.2f} seconds before retrying...")
                     sleep(backoff_time)
-        log_error(f"OpenAI API call failed after {max_tries} attempts. Last error: {e}")
+        raise RuntimeError(f"OpenAI API call failed after {max_tries} attempts. Last error: {e}") from e
 
     def get_output_texts(self, response: Any) -> str:
         """
@@ -588,7 +583,7 @@ class AnthropicModel(APIModel):
                     backoff_time = self.seconds_to_wait * (2 ** attempt)
                     log_info(f"Waiting for {backoff_time:.2f} seconds before retrying...")
                     sleep(backoff_time)
-        log_error(f"Anthropic API call failed after {max_tries} attempts. Last error: {e}")
+        raise RuntimeError(f"Anthropic API call failed after {max_tries} attempts. Last error: {e}") from e
 
     def get_output_texts(self, response: Any) -> str:
         return response.content[0].text

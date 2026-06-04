@@ -133,6 +133,7 @@ class Executor(ABC):
         self._vlm = ExecutorVLM(parameters=self._parameters)
         self._max_new_tokens = self._parameters.get("executor_vlm_max_new_tokens", 512)
         self._last_frame_changed = True
+        self._n_tool_calls = 0
 
         self.report = self._make_report(task, kwargs, max_steps, max_tool_calls)
 
@@ -248,6 +249,7 @@ class Executor(ABC):
             success_code=success_code,
         )
         self.report.steps.append(record)
+        self._n_tool_calls += 1
         return record
 
     def _hint_block(self) -> str:
@@ -438,9 +440,38 @@ Reasoning: <your reasoning>
         self._last_frame_changed = info["core"].get("frame_changed", True)
         return record
 
+    # ------------------------------------------------------------------
+    # Template loop hooks — override in subclasses to customise behaviour
+    # ------------------------------------------------------------------
+
+    def _on_execute_start(self) -> None:
+        """Called once at the start of execution, before the main loop."""
+        pass
+
+    def _on_step_start(self, frame) -> None:
+        """Called at the top of each loop iteration after getting the current frame."""
+        pass
+
+    def _query_vlm(self, prompt: str, frame) -> str:
+        """Call the VLM for this step and return its raw output."""
+        return self._vlm_call("action", texts=prompt, images=[frame])
+
+    def _pick_action(self, vlm_output) -> Optional[str]:
+        """Parse VLM output into an action string. Returns None on parse failure."""
+        return self._parse_action(vlm_output)
+
+    def _on_env_step(self, record: EnvironmentStepRecord) -> None:
+        """Called after a successful env step, with the resulting record."""
+        pass
+
+    # ------------------------------------------------------------------
+    # Unified execution loop
+    # ------------------------------------------------------------------
+
     def _execute(self) -> int:
         self._last_terminated = False
         self._last_truncated = False
+        self._on_execute_start()
 
         tool_call_message: Optional[str] = None
         error_message: Optional[str] = None
@@ -450,20 +481,12 @@ Reasoning: <your reasoning>
         while n_env_steps < self._max_steps:
             state = self._get_state()
             frame = state["core"]["current_frame"]
+            self._on_step_start(frame)
 
-            n_tool_calls = sum(1 for s in self.report.steps if isinstance(s, ToolCallRecord))
-            tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
-
+            tool_calls_exceeded = self._n_tool_calls >= self._max_tool_calls
             prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-
-            response = self._vlm_call(
-                "action",
-                texts=prompt,
-                images=[frame],
-            )
-
-            # ---- parse structured response --------------------------------
-            action_str = self._parse_action(response)
+            vlm_output = self._query_vlm(prompt, frame)
+            action_str = self._pick_action(vlm_output)
 
             if action_str is None:
                 error_message = (
@@ -475,18 +498,16 @@ Reasoning: <your reasoning>
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self._record_invalid(response)
+                self._record_invalid(str(vlm_output))
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
                 continue
 
-            # ---- self-termination tokens (when enabled) -------------------
             outcome = self._check_self_termination(action_str)
             if outcome is not None:
                 return outcome
 
-            # ---- try tool call (if budget not exhausted) ------------------
             if not tool_calls_exceeded:
                 tool_result = self._try_parse_tool_call(action_str)
                 if tool_result is not None:
@@ -495,16 +516,16 @@ Reasoning: <your reasoning>
                     tool_call_message = str(record.result)
                     error_message = None
                     consecutive_invalid = 0
-                    continue  # tool calls do not count as env steps
+                    continue
 
-            # ---- try env action -------------------------------------------
             action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
             if action_class is not None:
-                self._take_action(action_class, **(action_kwargs or {}))
+                record = self._take_action(action_class, **(action_kwargs or {}))
                 tool_call_message = None
                 error_message = None
                 n_env_steps += 1
                 consecutive_invalid = 0
+                self._on_env_step(record)
 
                 if self._last_terminated:
                     self.report.termination_reason = "terminated"
@@ -513,7 +534,6 @@ Reasoning: <your reasoning>
                     self.report.termination_reason = "truncated"
                     return 2
             else:
-                # Parseable format but unrecognised action string
                 error_message = (
                     f"You tried to do '{action_str}' but that is not a recognised action. DO NOT use '{action_str}' in your response. "
                     "Choose exactly one from the listed actions."
@@ -521,9 +541,7 @@ Reasoning: <your reasoning>
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self._record_invalid(
-                    f"Unrecognised action string: {action_str!r}"
-                )
+                self._record_invalid(f"Unrecognised action string: {action_str!r}")
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -874,101 +892,17 @@ Reasoning: <your reasoning>
                         subgoals.append(sg)
         return subgoals if subgoals else [self._task]
 
-    def _execute(self) -> int:
-        self._last_terminated = False
-        self._last_truncated = False
-
-        # Decompose before main loop
+    def _on_execute_start(self) -> None:
         self._subgoals = self._decompose_task()
         self._subgoal_idx = 0
         self._steps_on_subgoal = 0
 
-        tool_call_message: Optional[str] = None
-        error_message: Optional[str] = None
-        n_env_steps: int = 0
-        consecutive_invalid: int = 0
-
-        while n_env_steps < self._max_steps:
-            state = self._get_state()
-            frame = state["core"]["current_frame"]
-
-            n_tool_calls = sum(1 for s in self.report.steps if isinstance(s, ToolCallRecord))
-            tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
-
-            prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-            response = self._vlm_call(
-                "action",
-                texts=prompt,
-                images=[frame],
-            )
-
-            action_str = self._parse_action(response)
-            if action_str is None:
-                error_message = (
-                    "Your previous response could not be parsed. "
-                    "You must end your response with:\n"
-                    "  Action: <action>\n"
-                    "  [STOP]"
-                )
-                tool_call_message = None
-                n_env_steps += 1
-                consecutive_invalid += 1
-                self._record_invalid(response)
-                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
-                    self.report.termination_reason = "max_invalid"
-                    return -1
-                continue
-
-            outcome = self._check_self_termination(action_str)
-            if outcome is not None:
-                return outcome
-
-            if not tool_calls_exceeded:
-                tool_result = self._try_parse_tool_call(action_str)
-                if tool_result is not None:
-                    tool_class, tool_kwargs = tool_result
-                    record = self._use_tool(tool_class, **tool_kwargs)
-                    tool_call_message = str(record.result)
-                    error_message = None
-                    consecutive_invalid = 0
-                    continue
-
-            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
-            if action_class is not None:
-                self._take_action(action_class, **(action_kwargs or {}))
-                tool_call_message = None
-                error_message = None
-                n_env_steps += 1
-                consecutive_invalid = 0
-                self._steps_on_subgoal += 1
-
-                # Advance subgoal after steps_per_subgoal steps
-                if (self._steps_on_subgoal >= self._steps_per_subgoal
-                        and self._subgoal_idx < len(self._subgoals) - 1):
-                    self._subgoal_idx += 1
-                    self._steps_on_subgoal = 0
-
-                if self._last_terminated:
-                    self.report.termination_reason = "terminated"
-                    return 1
-                if self._last_truncated:
-                    self.report.termination_reason = "truncated"
-                    return 2
-            else:
-                error_message = (
-                    f"'{action_str}' is not a recognised action. "
-                    "Choose exactly one from the listed actions."
-                )
-                tool_call_message = None
-                n_env_steps += 1
-                consecutive_invalid += 1
-                self._record_invalid(f"Unrecognised action string: {action_str!r}")
-                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
-                    self.report.termination_reason = "max_invalid"
-                    return -1
-
-        self.report.termination_reason = "max_steps"
-        return 0
+    def _on_env_step(self, record: EnvironmentStepRecord) -> None:
+        self._steps_on_subgoal += 1
+        if (self._steps_on_subgoal >= self._steps_per_subgoal
+                and self._subgoal_idx < len(self._subgoals) - 1):
+            self._subgoal_idx += 1
+            self._steps_on_subgoal = 0
 
     def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
         if self._subgoals:
@@ -993,98 +927,18 @@ class ScreenDiffExecutor(SimpleExecutor):
         self._prev_frame = None
         super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
 
-    def _execute(self) -> int:
-        self._last_terminated = False
-        self._last_truncated = False
+    def _on_execute_start(self) -> None:
         self._prev_frame = None
 
-        tool_call_message: Optional[str] = None
-        error_message: Optional[str] = None
-        n_env_steps: int = 0
-        consecutive_invalid: int = 0
+    def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
+        return self._build_diff_prompt(tool_call_message, error_message, tool_calls_exceeded)
 
-        while n_env_steps < self._max_steps:
-            state = self._get_state()
-            frame = state["core"]["current_frame"]
+    def _query_vlm(self, prompt: str, frame) -> str:
+        images = [self._prev_frame, frame] if self._prev_frame is not None else [frame]
+        return self._vlm_call("action", texts=prompt, images=images)
 
-            n_tool_calls = sum(1 for s in self.report.steps if isinstance(s, ToolCallRecord))
-            tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
-
-            prompt = self._build_diff_prompt(tool_call_message, error_message, tool_calls_exceeded)
-
-            # Pass [prev, curr] when previous frame exists, else just [curr]
-            if self._prev_frame is not None:
-                images = [self._prev_frame, frame]
-            else:
-                images = [frame]
-
-            response = self._vlm_call(
-                "action",
-                texts=prompt,
-                images=images,
-            )
-
-            action_str = self._parse_action(response)
-            if action_str is None:
-                error_message = (
-                    "Your previous response could not be parsed. "
-                    "You must end your response with:\n"
-                    "  Action: <action>\n"
-                    "  [STOP]"
-                )
-                tool_call_message = None
-                n_env_steps += 1
-                consecutive_invalid += 1
-                self._record_invalid(response)
-                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
-                    self.report.termination_reason = "max_invalid"
-                    return -1
-                continue
-
-            outcome = self._check_self_termination(action_str)
-            if outcome is not None:
-                return outcome
-
-            if not tool_calls_exceeded:
-                tool_result = self._try_parse_tool_call(action_str)
-                if tool_result is not None:
-                    tool_class, tool_kwargs = tool_result
-                    record = self._use_tool(tool_class, **tool_kwargs)
-                    tool_call_message = str(record.result)
-                    error_message = None
-                    consecutive_invalid = 0
-                    continue
-
-            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
-            if action_class is not None:
-                self._prev_frame = frame
-                self._take_action(action_class, **(action_kwargs or {}))
-                tool_call_message = None
-                error_message = None
-                n_env_steps += 1
-                consecutive_invalid = 0
-
-                if self._last_terminated:
-                    self.report.termination_reason = "terminated"
-                    return 1
-                if self._last_truncated:
-                    self.report.termination_reason = "truncated"
-                    return 2
-            else:
-                error_message = (
-                    f"'{action_str}' is not a recognised action. "
-                    "Choose exactly one from the listed actions."
-                )
-                tool_call_message = None
-                n_env_steps += 1
-                consecutive_invalid += 1
-                self._record_invalid(f"Unrecognised action string: {action_str!r}")
-                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
-                    self.report.termination_reason = "max_invalid"
-                    return -1
-
-        self.report.termination_reason = "max_steps"
-        return 0
+    def _on_env_step(self, record: EnvironmentStepRecord) -> None:
+        self._prev_frame = record.frame_before
 
     DIFF_PROMPT_SINGLE = """Task: [TASK][HINT_BLOCK]
 
@@ -1142,95 +996,17 @@ class SelfConsistencyExecutor(SimpleExecutor):
         self._temperature = temperature
         super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
 
-    def _execute(self) -> int:
-        self._last_terminated = False
-        self._last_truncated = False
+    def _query_vlm(self, prompt: str, frame) -> List[str]:
+        return self._vlm_call(
+            "action",
+            texts=prompt,
+            images=[frame],
+            temperature=self._temperature,
+            n_outputs=self._k,
+        )
 
-        tool_call_message: Optional[str] = None
-        error_message: Optional[str] = None
-        n_env_steps: int = 0
-        consecutive_invalid: int = 0
-
-        while n_env_steps < self._max_steps:
-            state = self._get_state()
-            frame = state["core"]["current_frame"]
-
-            n_tool_calls = sum(1 for s in self.report.steps if isinstance(s, ToolCallRecord))
-            tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
-
-            prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-
-            # Sample k responses — each logged separately with tag "action"
-            responses = self._vlm_call(
-                "action",
-                texts=prompt,
-                images=[frame],
-                temperature=self._temperature,
-                n_outputs=self._k,
-            )
-
-            # Parse all action strings and take majority vote
-            action_str = self._majority_vote(responses)
-
-            if action_str is None:
-                error_message = (
-                    "Your previous response could not be parsed. "
-                    "You must end your response with:\n"
-                    "  Action: <action>\n"
-                    "  [STOP]"
-                )
-                tool_call_message = None
-                n_env_steps += 1
-                consecutive_invalid += 1
-                self._record_invalid(str(responses))
-                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
-                    self.report.termination_reason = "max_invalid"
-                    return -1
-                continue
-
-            outcome = self._check_self_termination(action_str)
-            if outcome is not None:
-                return outcome
-
-            if not tool_calls_exceeded:
-                tool_result = self._try_parse_tool_call(action_str)
-                if tool_result is not None:
-                    tool_class, tool_kwargs = tool_result
-                    record = self._use_tool(tool_class, **tool_kwargs)
-                    tool_call_message = str(record.result)
-                    error_message = None
-                    consecutive_invalid = 0
-                    continue
-
-            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
-            if action_class is not None:
-                self._take_action(action_class, **(action_kwargs or {}))
-                tool_call_message = None
-                error_message = None
-                n_env_steps += 1
-                consecutive_invalid = 0
-
-                if self._last_terminated:
-                    self.report.termination_reason = "terminated"
-                    return 1
-                if self._last_truncated:
-                    self.report.termination_reason = "truncated"
-                    return 2
-            else:
-                error_message = (
-                    f"'{action_str}' is not a recognised action. "
-                    "Choose exactly one from the listed actions."
-                )
-                tool_call_message = None
-                n_env_steps += 1
-                consecutive_invalid += 1
-                self._record_invalid(f"Unrecognised action string: {action_str!r}")
-                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
-                    self.report.termination_reason = "max_invalid"
-                    return -1
-
-        self.report.termination_reason = "max_steps"
-        return 0
+    def _pick_action(self, vlm_output: List[str]) -> Optional[str]:
+        return self._majority_vote(vlm_output)
 
     def _majority_vote(self, responses: List[str]) -> Optional[str]:
         """Parse each response and return the most common action string."""
@@ -1320,92 +1096,9 @@ Reasoning: <your reasoning>
         result = self._vlm_call("reflection", texts=prompt, images=[frame], max_new_tokens=200)
         self._plan_summary = result.strip()
 
-    def _execute(self) -> int:
-        self._last_terminated = False
-        self._last_truncated = False
-
-        tool_call_message: Optional[str] = None
-        error_message: Optional[str] = None
-        n_env_steps: int = 0
-        consecutive_invalid: int = 0
-
-        while n_env_steps < self._max_steps:
-            state = self._get_state()
-            frame = state["core"]["current_frame"]
-
-            if self._steps_since_reflection >= self._reflection_interval:
-                self._reflect(frame)
-
-            n_tool_calls = sum(1 for s in self.report.steps if isinstance(s, ToolCallRecord))
-            tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
-
-            prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-            response = self._vlm_call(
-                "action",
-                texts=prompt,
-                images=[frame],
-            )
-
-            action_str = self._parse_action(response)
-            if action_str is None:
-                error_message = (
-                    "Your previous response could not be parsed. "
-                    "You must end your response with:\n"
-                    "  Action: <action>\n"
-                    "  [STOP]"
-                )
-                tool_call_message = None
-                n_env_steps += 1
-                consecutive_invalid += 1
-                self._record_invalid(response)
-                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
-                    self.report.termination_reason = "max_invalid"
-                    return -1
-                continue
-
-            outcome = self._check_self_termination(action_str)
-            if outcome is not None:
-                return outcome
-
-            if not tool_calls_exceeded:
-                tool_result = self._try_parse_tool_call(action_str)
-                if tool_result is not None:
-                    tool_class, tool_kwargs = tool_result
-                    record = self._use_tool(tool_class, **tool_kwargs)
-                    tool_call_message = str(record.result)
-                    error_message = None
-                    consecutive_invalid = 0
-                    continue
-
-            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
-            if action_class is not None:
-                self._take_action(action_class, **(action_kwargs or {}))
-                tool_call_message = None
-                error_message = None
-                n_env_steps += 1
-                consecutive_invalid = 0
-
-                if self._last_terminated:
-                    self.report.termination_reason = "terminated"
-                    return 1
-                if self._last_truncated:
-                    self.report.termination_reason = "truncated"
-                    return 2
-            else:
-                error_message = (
-                    f"'{action_str}' is not a recognised action. "
-                    "Choose exactly one from the listed actions."
-                )
-                tool_call_message = None
-                n_env_steps += 1
-                consecutive_invalid += 1
-                self._record_invalid(f"Unrecognised action string: {action_str!r}")
-                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
-                    self.report.termination_reason = "max_invalid"
-                    return -1
-
-        self.report.termination_reason = "max_steps"
-        return 0
+    def _on_step_start(self, frame) -> None:
+        if self._steps_since_reflection >= self._reflection_interval:
+            self._reflect(frame)
 
     def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
         plan_section = f"Current plan: {self._plan_summary}\n\n" if self._plan_summary else ""
@@ -1480,91 +1173,12 @@ Reasoning: <your reasoning>
         self._last_action_str = action_str
         return super()._take_action(action_class, **kwargs)
 
-    def _execute(self) -> int:
-        self._last_terminated = False
-        self._last_truncated = False
+    def _on_execute_start(self) -> None:
         self._spatial_map = ""
         self._last_action_str = ""
 
-        tool_call_message: Optional[str] = None
-        error_message: Optional[str] = None
-        n_env_steps: int = 0
-        consecutive_invalid: int = 0
-
-        while n_env_steps < self._max_steps:
-            state = self._get_state()
-            frame = state["core"]["current_frame"]
-
-            # Update map after every env step (not on tool calls)
-            if n_env_steps > 0 or not self._spatial_map:
-                self._update_map(frame, self._last_action_str)
-
-            n_tool_calls = sum(1 for s in self.report.steps if isinstance(s, ToolCallRecord))
-            tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
-
-            prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-            response = self._vlm_call(
-                "action",
-                texts=prompt, images=[frame],
-            )
-
-            action_str = self._parse_action(response)
-            if action_str is None:
-                error_message = (
-                    "Your previous response could not be parsed. "
-                    "You must end your response with:\n  Action: <action>\n  [STOP]"
-                )
-                tool_call_message = None
-                n_env_steps += 1
-                consecutive_invalid += 1
-                self._record_invalid(response)
-                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
-                    self.report.termination_reason = "max_invalid"
-                    return -1
-                continue
-
-            outcome = self._check_self_termination(action_str)
-            if outcome is not None:
-                return outcome
-
-            if not tool_calls_exceeded:
-                tool_result = self._try_parse_tool_call(action_str)
-                if tool_result is not None:
-                    tool_class, tool_kwargs = tool_result
-                    record = self._use_tool(tool_class, **tool_kwargs)
-                    tool_call_message = str(record.result)
-                    error_message = None
-                    consecutive_invalid = 0
-                    continue
-
-            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
-            if action_class is not None:
-                self._take_action(action_class, **(action_kwargs or {}))
-                tool_call_message = None
-                error_message = None
-                n_env_steps += 1
-                consecutive_invalid = 0
-                if self._last_terminated:
-                    self.report.termination_reason = "terminated"
-                    return 1
-                if self._last_truncated:
-                    self.report.termination_reason = "truncated"
-                    return 2
-            else:
-                error_message = (
-                    f"'{action_str}' is not a recognised action. "
-                    "Choose exactly one from the listed actions."
-                )
-                tool_call_message = None
-                n_env_steps += 1
-                consecutive_invalid += 1
-                self._record_invalid(f"Unrecognised action string: {action_str!r}")
-                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
-                    self.report.termination_reason = "max_invalid"
-                    return -1
-
-        self.report.termination_reason = "max_steps"
-        return 0
+    def _on_step_start(self, frame) -> None:
+        self._update_map(frame, self._last_action_str)
 
     def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
         map_section = f"Spatial map: {self._spatial_map}\n\n" if self._spatial_map else ""
@@ -1638,94 +1252,13 @@ Action: <one environment action>
             .replace("[ORIGINAL_RESPONSE]", original_response)
         )
 
-    def _execute(self) -> int:
-        self._last_terminated = False
-        self._last_truncated = False
-
-        tool_call_message: Optional[str] = None
-        error_message: Optional[str] = None
-        n_env_steps: int = 0
-        consecutive_invalid: int = 0
-
-        while n_env_steps < self._max_steps:
-            state = self._get_state()
-            frame = state["core"]["current_frame"]
-
-            n_tool_calls = sum(1 for s in self.report.steps if isinstance(s, ToolCallRecord))
-            tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
-
-            prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-            response = self._vlm_call(
-                "action",
-                texts=prompt, images=[frame],
-            )
-
-            # Re-query if confidence is low
-            confidence = self._parse_confidence(response)
-            if confidence is not None and confidence <= self._low_confidence_threshold:
-                rethink_prompt = self._build_rethink_prompt(response, prompt)
-                response = self._vlm_call(
-                    "rethink",
-                    texts=rethink_prompt, images=[frame],
-                    )
-
-            action_str = self._parse_action(response)
-            if action_str is None:
-                error_message = (
-                    "Your previous response could not be parsed. "
-                    "You must end your response with:\n  Action: <action>\n  [STOP]"
-                )
-                tool_call_message = None
-                n_env_steps += 1
-                consecutive_invalid += 1
-                self._record_invalid(response)
-                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
-                    self.report.termination_reason = "max_invalid"
-                    return -1
-                continue
-
-            outcome = self._check_self_termination(action_str)
-            if outcome is not None:
-                return outcome
-
-            if not tool_calls_exceeded:
-                tool_result = self._try_parse_tool_call(action_str)
-                if tool_result is not None:
-                    tool_class, tool_kwargs = tool_result
-                    record = self._use_tool(tool_class, **tool_kwargs)
-                    tool_call_message = str(record.result)
-                    error_message = None
-                    consecutive_invalid = 0
-                    continue
-
-            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
-            if action_class is not None:
-                self._take_action(action_class, **(action_kwargs or {}))
-                tool_call_message = None
-                error_message = None
-                n_env_steps += 1
-                consecutive_invalid = 0
-                if self._last_terminated:
-                    self.report.termination_reason = "terminated"
-                    return 1
-                if self._last_truncated:
-                    self.report.termination_reason = "truncated"
-                    return 2
-            else:
-                error_message = (
-                    f"'{action_str}' is not a recognised action. "
-                    "Choose exactly one from the listed actions."
-                )
-                tool_call_message = None
-                n_env_steps += 1
-                consecutive_invalid += 1
-                self._record_invalid(f"Unrecognised action string: {action_str!r}")
-                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
-                    self.report.termination_reason = "max_invalid"
-                    return -1
-
-        self.report.termination_reason = "max_steps"
-        return 0
+    def _query_vlm(self, prompt: str, frame) -> str:
+        response = self._vlm_call("action", texts=prompt, images=[frame])
+        confidence = self._parse_confidence(response)
+        if confidence is not None and confidence <= self._low_confidence_threshold:
+            rethink_prompt = self._build_rethink_prompt(response, prompt)
+            response = self._vlm_call("rethink", texts=rethink_prompt, images=[frame])
+        return response
 
 
 # ---------------------------------------------------------------------------
@@ -1933,94 +1466,15 @@ Reasoning: <your reasoning>
         record = super()._take_action(action_class, **kwargs)
         return record
 
-    def _execute(self) -> int:
-        self._last_terminated = False
-        self._last_truncated = False
+    def _on_execute_start(self) -> None:
         self._belief_state = ""
         self._last_action_str = ""
-
-        tool_call_message: Optional[str] = None
-        error_message: Optional[str] = None
-        n_env_steps: int = 0
-        consecutive_invalid: int = 0
-
-        # Initial belief state
         state = self._get_state()
         self._update_belief(state["core"]["current_frame"], "")
 
-        while n_env_steps < self._max_steps:
-            state = self._get_state()
-            frame = state["core"]["current_frame"]
-
-            n_tool_calls = sum(1 for s in self.report.steps if isinstance(s, ToolCallRecord))
-            tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
-
-            prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-            response = self._vlm_call(
-                "action",
-                texts=prompt, images=[frame],
-            )
-
-            action_str = self._parse_action(response)
-            if action_str is None:
-                error_message = (
-                    "Your previous response could not be parsed. "
-                    "You must end your response with:\n  Action: <action>\n  [STOP]"
-                )
-                tool_call_message = None
-                n_env_steps += 1
-                consecutive_invalid += 1
-                self._record_invalid(response)
-                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
-                    self.report.termination_reason = "max_invalid"
-                    return -1
-                continue
-
-            outcome = self._check_self_termination(action_str)
-            if outcome is not None:
-                return outcome
-
-            if not tool_calls_exceeded:
-                tool_result = self._try_parse_tool_call(action_str)
-                if tool_result is not None:
-                    tool_class, tool_kwargs = tool_result
-                    record = self._use_tool(tool_class, **tool_kwargs)
-                    tool_call_message = str(record.result)
-                    error_message = None
-                    consecutive_invalid = 0
-                    continue
-
-            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
-            if action_class is not None:
-                self._take_action(action_class, **(action_kwargs or {}))
-                tool_call_message = None
-                error_message = None
-                n_env_steps += 1
-                consecutive_invalid = 0
-                # Update belief after each env step
-                new_state = self._get_state()
-                self._update_belief(new_state["core"]["current_frame"], self._last_action_str)
-                if self._last_terminated:
-                    self.report.termination_reason = "terminated"
-                    return 1
-                if self._last_truncated:
-                    self.report.termination_reason = "truncated"
-                    return 2
-            else:
-                error_message = (
-                    f"'{action_str}' is not a recognised action. "
-                    "Choose exactly one from the listed actions."
-                )
-                tool_call_message = None
-                n_env_steps += 1
-                consecutive_invalid += 1
-                self._record_invalid(f"Unrecognised action string: {action_str!r}")
-                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
-                    self.report.termination_reason = "max_invalid"
-                    return -1
-
-        self.report.termination_reason = "max_steps"
-        return 0
+    def _on_env_step(self, record: EnvironmentStepRecord) -> None:
+        new_state = self._get_state()
+        self._update_belief(new_state["core"]["current_frame"], self._last_action_str)
 
     def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
         belief_section = f"Current belief state:\n{self._belief_state}\n\n" if self._belief_state else ""
@@ -2093,82 +1547,18 @@ Action: <one environment action>
         )
         return self._vlm_call("decide", texts=prompt, images=[frame], max_new_tokens=400)
 
-    def _execute(self) -> int:
-        self._last_terminated = False
-        self._last_truncated = False
+    def _on_execute_start(self) -> None:
+        self._last_proposal: str = ""
 
-        error_message: Optional[str] = None
-        n_env_steps: int = 0
-        consecutive_invalid: int = 0
+    def _query_vlm(self, prompt: str, frame) -> str:
+        proposal = self._propose(prompt, frame)
+        challenge = self._challenge(proposal, frame)
+        final_response = self._decide(proposal, challenge, prompt, frame)
+        self._last_proposal = proposal
+        return final_response
 
-        while n_env_steps < self._max_steps:
-            state = self._get_state()
-            frame = state["core"]["current_frame"]
-
-            n_tool_calls = sum(1 for s in self.report.steps if isinstance(s, ToolCallRecord))
-            tool_calls_exceeded = n_tool_calls >= self._max_tool_calls
-
-            base_prompt = self._build_prompt(None, error_message, tool_calls_exceeded)
-
-            # Three-call pipeline — each call is logged individually via _vlm_call
-            proposal = self._propose(base_prompt, frame)
-            challenge = self._challenge(proposal, frame)
-            final_response = self._decide(proposal, challenge, base_prompt, frame)
-
-            action_str = self._parse_action(final_response)
-            if action_str is None:
-                # Fall back to proposal
-                action_str = self._parse_action(proposal)
-
-            if action_str is None:
-                error_message = (
-                    "Your previous response could not be parsed. "
-                    "You must end your response with:\n  Action: <action>\n  [STOP]"
-                )
-                n_env_steps += 1
-                consecutive_invalid += 1
-                self._record_invalid(final_response)
-                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
-                    self.report.termination_reason = "max_invalid"
-                    return -1
-                continue
-
-            outcome = self._check_self_termination(action_str)
-            if outcome is not None:
-                return outcome
-
-            if not tool_calls_exceeded:
-                tool_result = self._try_parse_tool_call(action_str)
-                if tool_result is not None:
-                    tool_class, tool_kwargs = tool_result
-                    record = self._use_tool(tool_class, **tool_kwargs)
-                    error_message = None
-                    consecutive_invalid = 0
-                    continue
-
-            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
-            if action_class is not None:
-                self._take_action(action_class, **(action_kwargs or {}))
-                error_message = None
-                n_env_steps += 1
-                consecutive_invalid = 0
-                if self._last_terminated:
-                    self.report.termination_reason = "terminated"
-                    return 1
-                if self._last_truncated:
-                    self.report.termination_reason = "truncated"
-                    return 2
-            else:
-                error_message = (
-                    f"'{action_str}' is not a recognised action. "
-                    "Choose exactly one from the listed actions."
-                )
-                n_env_steps += 1
-                consecutive_invalid += 1
-                self._record_invalid(f"Unrecognised action string: {action_str!r}")
-                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
-                    self.report.termination_reason = "max_invalid"
-                    return -1
-
-        self.report.termination_reason = "max_steps"
-        return 0
+    def _pick_action(self, vlm_output: str) -> Optional[str]:
+        action_str = self._parse_action(vlm_output)
+        if action_str is None:
+            action_str = self._parse_action(self._last_proposal)
+        return action_str

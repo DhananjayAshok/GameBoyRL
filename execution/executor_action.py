@@ -1,10 +1,33 @@
-from utils import (
-    object_detection,
-    identify_matches,
-)
+from utils import object_detection
 from typing import Tuple, List, Dict, Any, Optional
 import numpy as np
 from abc import ABC, abstractmethod
+from gameboy_worlds.emulation.parser import StateParser
+
+
+def _get_quadrants(
+    grid_cells: Dict[Tuple[int, int], np.ndarray],
+) -> Dict[str, Dict]:
+    """Split grid_cells into four quadrants and stitch each into a screen image."""
+    coords = grid_cells.keys()
+    xs = sorted(set(c[0] for c in coords))
+    ys = sorted(set(c[1] for c in coords))
+    mid_x = xs[len(xs) // 2]
+    mid_y = ys[len(ys) // 2]
+    lower_x = [x for x in xs if x < mid_x]
+    higher_x = [x for x in xs if x >= mid_x]
+    lower_y = [y for y in ys if y < mid_y]
+    higher_y = [y for y in ys if y >= mid_y]
+    raw = {
+        "tl": {(x, y): grid_cells[(x, y)] for x in lower_x for y in higher_y},
+        "tr": {(x, y): grid_cells[(x, y)] for x in higher_x for y in higher_y},
+        "bl": {(x, y): grid_cells[(x, y)] for x in lower_x for y in lower_y},
+        "br": {(x, y): grid_cells[(x, y)] for x in higher_x for y in lower_y},
+    }
+    return {
+        q: {"cells": cells, "screen": StateParser.reform_image(cells)}
+        for q, cells in raw.items()
+    }
 
 
 class ExecutorAction(ABC):
@@ -116,35 +139,32 @@ class ExecutorAction(ABC):
 
 class LocateAction(ExecutorAction):
     """
-    Locates a target in the current screen.
-    1. Divides the screen into grid cells.
-    2. Recursively divides the grid cells into quadrants and checks each quadrant for the target.
-    3. If a quadrant contains the target, further divides it into smaller quadrants until the smallest grid cells are reached.
-    4. Returns the grid cell coordinates that may contain the target.
+    Locates a target in the current screen by recursively searching quadrants.
 
-    Uses VLM inference to check each grid cell for the target. There are three kinds of VLM search used:
-    - Description matching: if the target is specified as a known object in `pre_described_options`, uses a pre-defined description to search for the target.
-    - Image matching: if the target is specified as a known object in the provided state parser's `image_references`, uses a reference image as well as a description to search for the target.
-    - Free-form description matching: if the target is specified as a free-form string, uses the string as a description to search for the target.
+    Divides the screen into grid cells, then recursively narrows down which
+    quadrant contains the target using VLM-based object detection. Returns both
+    high-confidence (definitive) and lower-confidence (potential) cell coordinates.
 
-    Action Success Interpretation:
+    The target can be a key in ``pre_described_options`` (uses a curated description)
+    or any free-form string (used directly as the VLM description).
+
+    Action Success Codes:
     - -1: Object not found
-    - 0: A single object found and only definitively
-    - 1: Multiple objects found, but only definitively
-    - 2: A single object found, only potentially
-    - 3: Multiple objects found, both definitively and potentially
+    -  0: Exactly one definitive match
+    -  1: Multiple definitive matches
+    -  2: Exactly one potential match (no definitives)
+    -  3: Multiple potential matches (no definitives)
 
     Action Returns:
-    - `found` (`bool`): whether the target was found in any of the grid cells at any point.
-    - `potential_cells` (`List[Tuple[int, int]]`): list of grid cell coordinates that may contain the target.
-    - `definitive_cells` (`List[Tuple[int, int]]`): list of grid cell coordinates that, with high confidence, contain the target.
+    - ``found`` (bool): whether the target was found at any level.
+    - ``potential_cells`` (List[Tuple[int, int]]): grid coords that may contain the target.
+    - ``definitive_cells`` (List[Tuple[int, int]]): grid coords that with high confidence contain the target.
+    - ``potential_cells_str`` (str): human-readable form of potential_cells.
+    - ``definitive_cells_str`` (str): human-readable form of definitive_cells.
     """
 
-    pre_described_options = {}
-    """ Pre-defined descriptions for known objects to locate. Subclasses can override this dictionary to options. """
-
-    image_references = {}
-    """ Pre-defined mapping of strings to image_reference keys in the state parser. Subclasses can override this dictionary to options. This is needed because some objects may have image_reference keys that are not the same as their name. """
+    pre_described_options: Dict[str, str] = {}
+    """Maps known target names to VLM-ready descriptions. Subclasses override to add entries."""
 
     def coord_to_string(self, coord: Tuple[int, int]) -> str:
         start = "("
@@ -161,164 +181,94 @@ class LocateAction(ExecutorAction):
         return start
 
     def coords_to_string(self, coords: List[Tuple[int, int]]) -> str:
-        coord_strings = [self.coord_to_string(coord) for coord in coords]
-        return "[" + ", ".join(coord_strings) + "]"
+        return "[" + ", ".join(self.coord_to_string(c) for c in coords) + "]"
 
     def is_valid(self, target: str = None, **kwargs) -> bool:
-        if target is not None:
-            if not isinstance(target, str):
-                return False
-            if len(target.strip()) == 0:
-                return False
-            target = target.lower().strip()
-            if target not in self.image_references.keys():
-                if target not in self.pre_described_options.keys():
-                    return False  # most permissive case. Return False here if you want to restrict to known options.
-                else:
-                    pass  # known pre-described option. Return False here if you want to restrict to only image references.
-            else:
-                pass  # known image reference
-        return True
+        if target is None:
+            return True
+        return isinstance(target, str) and len(target.strip()) > 0
 
-    def check_for_target(self, description, screens, image_reference: str = None):
-        if image_reference is None:
-            return object_detection(description=description, images=screens)
-        else:
-            reference_image = self._emulator.state_parser.get_image_reference(
-                image_reference
-            )
-            founds = identify_matches(
-                description=description, screens=screens, reference=reference_image
-            )
-            return founds
+    def check_for_target(self, description: str, screens: List[np.ndarray]) -> List[bool]:
+        return object_detection(description=description, images=screens)
 
     def get_centroid(
         self, cells: Dict[Tuple[int, int], np.ndarray]
     ) -> Tuple[float, float]:
-        min_x = min([coord[0] for coord in cells.keys()])
-        min_y = min([coord[1] for coord in cells.keys()])
-        max_x = max([coord[0] for coord in cells.keys()])
-        max_y = max([coord[1] for coord in cells.keys()])
-        centroid_x = (min_x + max_x) // 2
-        centroid_y = (min_y + max_y) // 2
-        return (centroid_x, centroid_y)
+        xs = [coord[0] for coord in cells.keys()]
+        ys = [coord[1] for coord in cells.keys()]
+        return ((min(xs) + max(xs)) // 2, (min(ys) + max(ys)) // 2)
 
     def get_cells_found(
         self,
         grid_cells: Dict[Tuple[int, int], np.ndarray],
         description: str,
-        image_reference: str = None,
     ) -> Tuple[bool, List[Tuple[int, int]], List[Tuple[int, int]]]:
         """
         Recursively divides the grid cells into quadrants and checks each quadrant for the target.
 
         :param grid_cells: The dict of the subset of grid cells to search over.
         :type grid_cells: Dict[Tuple[int, int], np.ndarray]
-        :param description: Description of target.
+        :param description: VLM-ready description of the target.
         :type description: str
-        :param image_reference: Reference image key for the target.
-        :type image_reference: str
-        :return: A tuple containing:
-
-            - ``found`` (``bool``): whether the target was found in any of the grid cells at any point.
-            - ``potential_cells`` (``List[Tuple[int, int]]``): list of grid cell coordinates that may contain the target.
-              If found is true, this is almost always populated with something.
-              The only exception is when the item was found at too high a scan and not found at lower levels
-              (and so too many cells would have been potentials).
-            - ``definitive_cells`` (``List[Tuple[int, int]]``): list of grid cell coordinates that, with high
-              confidence, contain the target.
+        :return: ``(found, potential_cells, definitive_cells)``
         :rtype: Tuple[bool, List[Tuple[int, int]], List[Tuple[int, int]]]
         """
         quadrant_keys = ["tl", "tr", "bl", "br"]
         if len(grid_cells) == 1:
             screen = list(grid_cells.values())[0]
-            keys = list(grid_cells.keys())[0]
-            target_in_grid = self.check_for_target(
-                description, [screen], image_reference=image_reference
-            )[0]
-            if target_in_grid:
+            if self.check_for_target(description, [screen])[0]:
                 return True, list(grid_cells.keys()), list(grid_cells.keys())
-            else:
-                return False, [], []
-        quadrants = self._emulator.state_parser.get_quadrant_frame(
-            grid_cells=grid_cells
-        )
-        screens = []
-        for quadrant in quadrant_keys:
-            screen = quadrants[quadrant]["screen"]
-            screens.append(screen)
-        quadrant_founds = self.check_for_target(
-            description, screens, image_reference=image_reference
-        )
+            return False, [], []
+
+        quadrants = _get_quadrants(grid_cells)
+        screens = [quadrants[q]["screen"] for q in quadrant_keys]
+        quadrant_founds = self.check_for_target(description, screens)
+
         if not any(quadrant_founds):
             return False, [], []
-        else:
-            potential_cells = []
-            quadrant_definites = []
-            for i in range(len(quadrant_keys)):
-                quadrant = quadrant_keys[i]
-                if quadrant_founds[i]:
-                    cells = quadrants[quadrant]["cells"]
-                    if len(cells) < 4:
-                        potential_cells.append(self.get_centroid(cells))
-                        cell_keys = list(cells.keys())
-                        cell_screens = [cells[key] for key in cell_keys]
-                        cell_founds = self.check_for_target(
-                            description, cell_screens, image_reference=image_reference
-                        )
-                        for i, found in enumerate(cell_founds):
-                            if found:
-                                quadrant_definites.append(cell_keys[i])
-                            else:
-                                pass
+
+        potential_cells = []
+        quadrant_definites = []
+        for i, quadrant in enumerate(quadrant_keys):
+            if not quadrant_founds[i]:
+                continue
+            cells = quadrants[quadrant]["cells"]
+            if len(cells) < 4:
+                potential_cells.append(self.get_centroid(cells))
+                cell_keys = list(cells.keys())
+                cell_screens = [cells[k] for k in cell_keys]
+                for j, found in enumerate(self.check_for_target(description, cell_screens)):
+                    if found:
+                        quadrant_definites.append(cell_keys[j])
+            else:
+                found_in_quadrant, quadrant_potentials, recursive_definites = self.get_cells_found(
+                    cells, description
+                )
+                quadrant_definites.extend(recursive_definites)
+                if found_in_quadrant:
+                    if quadrant_potentials:
+                        potential_cells.extend(quadrant_potentials)
                     else:
-                        (
-                            found_in_quadrant,
-                            quadrant_potentials,
-                            recursive_quadrant_definites,
-                        ) = self.get_cells_found(
-                            cells, description, image_reference=image_reference
-                        )
-                        if len(recursive_quadrant_definites) > 0:
-                            quadrant_definites.extend(recursive_quadrant_definites)
-                        if (
-                            found_in_quadrant
-                        ):  # then there is some potential, so add the quadrants potentials.
-                            if len(quadrant_potentials) != 0:
-                                potential_cells.extend(quadrant_potentials)
-                            else:
-                                potential_cells.append(self.get_centroid(cells))
-            return True, potential_cells, quadrant_definites
+                        potential_cells.append(self.get_centroid(cells))
+
+        return True, potential_cells, quadrant_definites
 
     def do_location(
-        self, description: str, image_reference: str = None
+        self, info: Dict[str, Any], description: str
     ) -> Tuple[Dict[str, Any], int]:
         """
         Performs the locate action to find the target described by ``description`` in the current screen.
 
-        :param description: Description of the target to locate.
+        :param info: Full state information from the environment.
+        :type info: Dict[str, Any]
+        :param description: VLM-ready description of the target to locate.
         :type description: str
-        :param image_reference: String key for the image reference in the state parser to use for matching.
-        :type image_reference: str
-        :return: A tuple containing:
-
-            - A dictionary with:
-
-                * ``found`` (``bool``): whether the target was found in any of the grid cells at any point.
-                * ``potential_cells`` (``List[Tuple[int, int]]``): list of grid cell coordinates that may contain the target.
-                * ``definitive_cells`` (``List[Tuple[int, int]]``): list of grid cell coordinates that, with high confidence, contain the target.
-                * ``potential_cells_str`` (``str``): string representation of potential_cells for logging.
-                * ``definitive_cells_str`` (``str``): string representation of definitive_cells for logging.
-
-            - An integer representing the action success code.
+        :return: Result dict and action success code.
         :rtype: Tuple[Dict[str, Any], int]
         """
-        grid_cells = self._emulator.state_parser.capture_grid_cells(
-            self._emulator.get_current_frame()
-        )
-        found, potential_cells, definitive_cells = self.get_cells_found(
-            grid_cells, description, image_reference=image_reference
-        )
+        frame = info["core"]["current_frame"]
+        grid_cells = StateParser.capture_grid_cells(frame)
+        found, potential_cells, definitive_cells = self.get_cells_found(grid_cells, description)
         ret_dict = {
             "found": found,
             "potential_cells": potential_cells,
@@ -326,31 +276,20 @@ class LocateAction(ExecutorAction):
             "potential_cells_str": self.coords_to_string(potential_cells),
             "definitive_cells_str": self.coords_to_string(definitive_cells),
         }
-        action_success = None
         if not found:
             action_success = -1
-        else:
-            if len(definitive_cells) == 0:
-                if len(potential_cells) == 1:
-                    action_success = 2
-                elif len(potential_cells) > 1:
-                    action_success = 3
-                else:
-                    action_success = -1
+        elif not definitive_cells:
+            if len(potential_cells) == 1:
+                action_success = 2
+            elif len(potential_cells) > 1:
+                action_success = 3
             else:
-                if len(definitive_cells) == 1:
-                    action_success = 0
-                else:
-                    action_success = 1
+                action_success = -1
+        else:
+            action_success = 0 if len(definitive_cells) == 1 else 1
         return ret_dict, action_success
 
     def _execute(self, info: Dict[str, Dict[str, Any]], target: str, **kwargs) -> Tuple[Dict[str, Any], int]:
-        if target in self.image_references:
-            return self.do_location(
-                description=self.pre_described_options[target],
-                image_reference=self.image_references[target],
-            )
-        elif target in self.pre_described_options:
-            return self.do_location(description=self.pre_described_options[target])
-        else:
-            return self.do_location(description=target)
+        key = target.lower().strip()
+        description = self.pre_described_options.get(key, target)
+        return self.do_location(info, description)

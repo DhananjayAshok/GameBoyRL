@@ -1,4 +1,6 @@
 """
+Called by scripts/vlm/practice_tasks.sh (via vlm.py practice_tasks). Use --help for CLI options.
+
 Input
 -----
 A trajectory_guidance.json produced by infer_guidance.py.

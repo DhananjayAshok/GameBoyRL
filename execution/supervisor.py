@@ -370,7 +370,7 @@ def _parse_numbered_list(text: str, marker: str) -> List[str]:
             # If we've started collecting and hit a blank line, stop
             if items and stripped == "":
                 break
-    return [i for i in items if i]
+    return [item for item in items if item]
 
 
 # ---------------------------------------------------------------------------

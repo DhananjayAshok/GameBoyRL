@@ -1,4 +1,7 @@
 """
+Called by scripts/vlm/propose_zeroshot.sh and scripts/vlm/propose_all_zeroshot.sh (via vlm.py propose_tasks_zeroshot).
+Use --help for CLI options.
+
 Input: a single init_state name (str) and the game environment
     - The first frame and action space are loaded live from the environment via get_first_frame_and_actions.
     - Optional prior tasks (--extra) are loaded from:

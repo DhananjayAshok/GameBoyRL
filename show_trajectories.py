@@ -1,3 +1,8 @@
+"""
+Loads a grouped_high_reward_trajectories.pkl file and renders each trajectory as a sequence
+of PNG images saved to disk. Trajectories are grouped by similarity of final frames;
+images are organized by group and trajectory index. Use --help for CLI options.
+"""
 # trajectories are saved in parameters["storage_dir"]/grouped_trajectories/$game/<path>/grouped_high_reward_trajectories.pkl
 # it is a dictionary with numeric keys and values that are lists of trajectories
 # each trajectory is a list (observations, actions, high_level_actions, rewards)

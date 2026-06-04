@@ -1,3 +1,8 @@
+"""
+Generates benchmark result plots comparing model performance across games.
+Reads per-model CSVs from the results directory and produces bar charts and
+summary figures via matplotlib. Use --help for CLI options.
+"""
 import os
 
 import click

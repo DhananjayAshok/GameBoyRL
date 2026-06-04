@@ -12,12 +12,6 @@ class PokemonLocateAction(LocateAction):
         "sign": "a pixelated, greyscale white signpost with dots on its face",
     }
 
-    image_references = {
-        "item": "pokeball",
-        "pokeball": "pokeball",
-        "grass": "grass",
-        "sign": "sign",
-    }
 
     def is_valid(self, target=None):
         if (
@@ -27,10 +21,6 @@ class PokemonLocateAction(LocateAction):
             return False
         return super().is_valid(target=target)
 
-
-"""
-all_options = set(LocateAction.image_references.keys()).union(LocateAction.pre_described_options.keys())
-"""
 
 
 class CheckInteractionAction(ExecutorAction):

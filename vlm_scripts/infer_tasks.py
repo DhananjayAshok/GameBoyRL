@@ -1,4 +1,6 @@
 """
+Called by scripts/vlm/infer_tasks.sh (via vlm.py infer_tasks). Use --help for CLI options.
+
 Input: grouped_high_reward_trajectories.pkl
     Path: parameters["storage_dir"]/grouped_trajectories/$game/<path>/grouped_high_reward_trajectories.pkl
     Format: dict[int, list[trajectory]]

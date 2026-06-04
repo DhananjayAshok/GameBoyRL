@@ -1,3 +1,7 @@
+"""
+Called by scripts/vlm/{attempt_tasks,infer_guidance,infer_tasks,practice_tasks,propose_zeroshot,propose_all_zeroshot}.sh.
+Use --help for CLI options.
+"""
 from vlm_scripts import infer_tasks, propose_tasks_zeroshot, infer_guidance, attempt_tasks, practice_tasks
 import numpy as np
 import click

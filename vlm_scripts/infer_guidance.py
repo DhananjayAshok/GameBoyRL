@@ -1,3 +1,6 @@
+"""
+Called by scripts/vlm/infer_guidance.sh (via vlm.py infer_guidance). Use --help for CLI options.
+"""
 # Reads from the output JSON and pickle files produced by infer_task.py.
 # For each group, generates a gold step-by-step guidance description on how
 # to accomplish the inferred task, then saves the enriched data to a sibling JSON.
