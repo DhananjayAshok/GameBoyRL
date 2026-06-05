@@ -1943,61 +1943,34 @@
             <h2 class="section-heading">Method</h2>
             <div class="section-divider"></div>
 
-            <!-- Architecture overview -->
-            <div class="columns is-vcentered" style="margin-bottom:2rem;">
-                <div class="columns-item column is-7">
-                    <img src="assets/images/robometer_method_figure.png" alt="Robometer method overview"
-                        style="width:100%; display:block; border-radius:8px;">
-                </div>
-                <div class="column is-5">
-                    <h3 class="title is-4" style="color:#1a1a2e;">Dual-Objective Training</h3>
-                    <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
-                        <strong>Frame-Level Progress and Success Prediction</strong><br />
-                        Anchors the magnitude of predicted rewards by regressing per-frame progress and success values
-                        on expert demonstration data,
-                        providing dense supervision at the intra-trajectory level.
-                    </div>
-                    <div class="highlight-box is-success-light">
-                        <strong>Trajectory-Comparison Preference Prediction</strong><br />
-                        Imposes global ordering constraints across pairs of trajectories of the same task, enabling
-                        robust learning
-                        from suboptimal and failed data via a preference comparison objective.
-                    </div>
-                </div>
-            </div>
-
             <div style="margin-bottom:2rem;">
                 <div style="display: flex; justify-content: center;">
-                    <img src="assets/images/robometer_training_objectives.jpeg"
-                        alt="Robometer Training Objectives and Types"
+                    <img src="assets/images/robometer_method_figure.png" alt="Method overview"
                         style="width:100%; display:block; border-radius:8px;">
                 </div>
-                <h3 class="title is-4" style="color:#1a1a2e; margin-top:1.7rem;">Model Training Inputs and Objectives
-                </h3>
+                <h3 class="title is-4" style="color:#1a1a2e; margin-top:1.7rem;">Unstructured Exploration &rarr; Task Identification &rarr; Task Rehearsal</h3>
                 <div class="columns">
                     <div class="column">
                         <div class="highlight-box is-info-light" style="height:100%; margin-bottom:0;">
-                            <strong>Different Expertise</strong><br />
-                            We pair together expert and suboptimal trajectories of the same task, training per-frame
-                            progress/success prediction on the expert trajectory and training the model to prefer the
-                            expert trajectory.
+                            <strong>Curiosity Based Task Discovery</strong><br />
+                            Uses RL (PPO) with a simple CNN agent to seek out novel experiences in the environment.
+                            The most unique trajectories are ones where "tasks" are potentially being implicitly executed.
                         </div>
                     </div>
                     <div class="column">
                         <div class="highlight-box is-warning-light" style="height:100%; margin-bottom:0;">
-                            <strong>Different Tasks</strong><br />
-                            We pair trajectories of different tasks together, training the model to prefer the video
-                            corresponding to the correct input language instruction.
-                            We can train per-frame progress/success on both types of trajectories.
+                            <strong>Synthetic Annotation</strong><br />
+                            The agent VLM observes the trajectories and infers the task being performed. Similar
+                            trajectories are grouped together and the model attempts to extract insight on how to
+                            properly achieve the specific task.
                         </div>
                     </div>
                     <div class="column">
                         <div class="highlight-box is-success-light" style="height:100%; margin-bottom:0;">
-                            <strong>Augmented Trajectory</strong><br />
-                            We also augment a given trajectory to simulate failures, for example by using <a
-                                href="https://rewind-reward.github.io/">video rewind</a>.
-                            The model is trained to prefer the original, unaugmented trajectory, and per-frame
-                            progress/success prediction can occur on either trajectory.
+                            <strong>Agent Rehearsal</strong><br />
+                            The agent attempts to complete the task from many starting positions, assessing its own
+                            progress and saving the successful rollouts to a separate dataset. Fine-tuning on this
+                            dataset yields a high-quality Vision Language Action model.
                         </div>
                     </div>
                 </div>
