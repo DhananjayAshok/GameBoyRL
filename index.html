@@ -5,7 +5,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Robometer: Scaling General-Purpose Robotic Reward Models via Trajectory Comparisons</title>
-    <link rel="icon" type="image/png" href="assets/images/robometer_logo.png" />
+    <link rel="icon" type="image/png" href="assets/logo.png" />
 
     <!-- SEO meta tags -->
     <meta name="description"
@@ -379,7 +379,7 @@
         }
 
         /* At a Glance teaser: 60% on desktop, full width when shrunk or on phone */
-        #at-a-glance .teaser-video-wrap {
+        #overview .teaser-video-wrap {
             max-width: 60%;
             margin-left: auto;
             margin-right: auto;
@@ -387,7 +387,7 @@
         }
 
         @media (max-width: 768px) {
-            #at-a-glance .teaser-video-wrap {
+            #overview .teaser-video-wrap {
                 max-width: 100%;
             }
         }
@@ -841,9 +841,9 @@
         <div class="container">
             <div class="navbar-brand">
                 <a class="navbar-item" href="#">
-                    <img id="navbar-logo" src="assets/images/robometer_logo_white.png" alt="Robometer logo"
+                    <img id="navbar-logo" src="assets/logo.png" alt="GameBoyWorlds logo"
                         style="height:1.8em;vertical-align:middle;margin-right:0.3em;" />
-                    <strong>Robometer</strong>
+                    <strong>GameBoyWorlds</strong>
                 </a>
                 <a role="button" class="navbar-burger" data-target="navMenu" aria-label="menu" aria-expanded="false">
                     <span aria-hidden="true"></span>
@@ -853,14 +853,12 @@
             </div>
             <div id="navMenu" class="navbar-menu">
                 <div class="navbar-end">
-                    <!--<a class="navbar-item" href="#abstract">Abstract</a>-->
-                    <a class="navbar-item" href="#at-a-glance">Robometer Overview</a>
+                    <a class="navbar-item" href="#overview">Project Overview</a>
+                    <a class="navbar-item" href="#gameboyworlds">GameBoyWorlds</a>
+                    <a class="navbar-item" href="#leaderboard">Leaderboard</a>
+                    <a class="navbar-item" href="#submissions">Submissions</a>
                     <a class="navbar-item" href="#method">Method</a>
-                    <a class="navbar-item" href="#dataset">Dataset</a>
-                    <a class="navbar-item" href="#ablations">Offline Eval</a>
-                    <a class="navbar-item" href="#experiments">Policy Learning Experiments</a>
-                    <a class="navbar-item" href="#demo">Robometer Demo</a>
-                    <a class="navbar-item" href="#finetuning">LoRA Finetuning</a>
+                    <a class="navbar-item" href="#results">Results</a>
                     <a class="navbar-item" href="#bibtex">BibTeX</a>
                 </div>
             </div>
@@ -873,9 +871,9 @@
             var navbarLogo = document.getElementById('navbar-logo');
             if (!navbar || !navbarLogo) return;
             if (navbar.classList.contains('navbar-over-video')) {
-                navbarLogo.src = "assets/images/robometer_logo_white.png";
+                navbarLogo.src = "assets/logo.png";
             } else {
-                navbarLogo.src = "assets/images/robometer_logo.png";
+                navbarLogo.src = "assets/logo.png";
             }
         }
         // Run at startup and also on any navbar class changes
@@ -915,57 +913,25 @@
                 <div class="hero-teaser-content">
 
                     <p class="title paper-title">
-                        <img src="assets/images/robometer_logo_white.png" alt="Robometer logo"
-                            style="float:left;height:2.2em;vertical-align:middle;margin-right:0.3em;filter:drop-shadow(0 2px 8px rgba(0,0,0,0.5));" />
-                        Robometer: Scaling General-Purpose Robotic Reward Models via Trajectory Comparisons
+                        GameBoyWorlds: Creating Self-Improving Agents in Embodied Environments
                         <br>
-                        <span style="font-size: 0.6em; color: #cdd6f4;">Robotics: Science and Systems (RSS) 2026</span>
+                        <span style="font-size: 0.6em; color: #cdd6f4;">In Submission</span>
                     </p>
 
                     <!-- Authors -->
                     <p class="author-list">
-                        <a href="https://aliang8.github.io/">Anthony Liang</a><sup>*1</sup>&ensp;
-                        <a href="https://ygtkorkmaz.github.io/">Yigit Korkmaz</a><sup>*1</sup>&ensp;
-                        <a href="https://jiahui-3205.github.io/">Jiahui Zhang</a><sup>2</sup>&ensp;
-                        <a href="https://minyoung1005.github.io/">Minyoung Hwang</a><sup>3</sup>&ensp;
-                        <a href="https://abraranwar.github.io/">Abrar Anwar</a><sup>1</sup>&ensp;
-                        <a href="https://www.linkedin.com/in/sidk99/">Sidhant Kaushik</a><sup>4</sup>
-                    </p>
-                    <p class="author-list">
-                        <a href="https://www.linkedin.com/in/aditya0shah">Aditya Shah</a><sup>5</sup>&ensp;
-                        <a href="https://www.linkedin.com/in/alexhuang1029/">Alex S. Huang</a><sup>2</sup>&ensp;
-                        <a href="https://homes.cs.washington.edu/~lsz/">Luke Zettlemoyer</a><sup>5</sup>&ensp;
-                        <a href="https://homes.cs.washington.edu/~fox/">Dieter Fox</a><sup>5,6</sup>&ensp;
-                        <a href="https://yuxng.github.io/">Yu Xiang</a><sup>2</sup>&ensp;
-                        <a href="https://anqili.github.io/">Anqi Li</a><sup>7</sup>
-                    </p>
-                    <p class="author-list">
-                        <a href="https://www.mit.edu/~abobu/">Andreea Bobu</a><sup>3</sup>&ensp;
-                        <a href="https://abhishekunique.github.io/">Abhishek Gupta</a><sup>5</sup>&ensp;
-                        <a href="https://stephentu.github.io/">Stephen Tu</a><sup>&dagger;1</sup>&ensp;
-                        <a href="https://ebiyik.github.io/">Erdem Bıyık</a><sup>&dagger;1</sup>&ensp;
-                        <a href="https://www.jessezhang.net/">Jesse Zhang</a><sup>&dagger;5</sup>
+                        Dhananjay Ashok<sup>1</sup>&ensp;
+                        [Placeholder]<sup>2</sup>&ensp;
+                        Jonathan May<sup>1</sup>&ensp;
+                        Jesse Thomasson<sup>3</sup>
                     </p>
 
                     <!-- Affiliations -->
                     <p class="affiliation-list">
-                        <sup>1</sup>Univ. of Southern California&emsp;
-                        <sup>2</sup>UT Dallas&emsp;
-                        <sup>3</sup>MIT&emsp;
-                        <sup>4</sup>Indep. Researcher&emsp;
-                        <sup>5</sup>Univ. of Washington&emsp;
-                        <sup>6</sup>Ai2&emsp;
-                        <sup>7</sup>NVIDIA
+                        <sup>1</sup>ISI (USC)&emsp;
+                        <sup>2</sup>USC&emsp;
+                        <sup>3</sup>GTech
                     </p>
-                    <p class="affiliation-list" style="margin-top:0.3rem;">
-                        <sup>*</sup>Equal contribution&emsp;
-                        <sup>&dagger;</sup>Equal advising
-                    </p>
-
-                    <!-- Conference / Venue 
-      <p style="margin-top:0.6rem; font-style:italic; color:#666; font-size:0.95rem;">
-        Conference / Journal Name, Year
-      </p> -->
 
 
                     <!-- Link buttons -->
@@ -1004,10 +970,10 @@
     </section>
 
     <!-- Overview – teaser video (below hero, after scroll) -->
-    <section class="section is-light-alt" id="at-a-glance"
+    <section class="section is-light-alt" id="overview"
         style="padding: 2rem 1.5rem; max-width: 100%; margin: 0 auto;">
         <div class="teaser-video-wrap">
-            <h2 class="section-heading">Robometer: Dense, General-Purpose, Video-Language Reward Model</h2>
+            <h2 class="section-heading">Project Overview</h2>
             <div class="section-divider"></div>
             <video controls muted playsinline autoplay loop preload="auto"
                 style="width:100%; border-radius:8px; display:block;">
@@ -1134,9 +1100,9 @@
     <!-- ════════════════════════════════════════════════════════════
      DATASET — RBM-1M
 ════════════════════════════════════════════════════════════ -->
-    <section class="section is-light-alt" id="dataset">
+    <section class="section is-light-alt" id="submissions">
         <div class="container">
-            <h2 class="section-heading">RBM-1M Dataset</h2>
+            <h2 class="section-heading">Submissions</h2>
             <div class="section-divider"></div>
 
             <div class="columns is-multiline is-centered" style="margin-bottom:1.5rem;">
@@ -1241,9 +1207,9 @@
     <!-- ════════════════════════════════════════════════════════════
      PEARSON'S CORRELATION (REWARD MODEL EVALUATION)
 ════════════════════════════════════════════════════════════ -->
-    <section class="section is-white-alt" id="ablations">
+    <section class="section is-white-alt" id="leaderboard">
         <div class="container">
-            <h2 class="section-heading">Offline Reward Model Evaluations</h2>
+            <h2 class="section-heading">Leaderboard</h2>
             <div class="section-divider"></div>
 
             <h3 class="title is-5" style="margin-top:0;margin-bottom:1rem;text-align:center;color:#1a1a2e;">
@@ -2025,9 +1991,9 @@
     <!-- ════════════════════════════════════════════════════════════
      EXPERIMENTS
 ════════════════════════════════════════════════════════════ -->
-    <section class="section is-light-alt" id="experiments">
+    <section class="section is-light-alt" id="results">
         <div class="container">
-            <h2 class="section-heading">Policy Learning Experiments</h2>
+            <h2 class="section-heading">Results</h2>
             <div class="section-divider"></div>
 
             <p
@@ -2581,9 +2547,9 @@
     <!-- ════════════════════════════════════════════════════════════
      DEMO – HUGGING FACE SPACE
 ════════════════════════════════════════════════════════════ -->
-    <section class="section is-light-alt" id="demo">
+    <section class="section is-light-alt" id="gameboyworlds">
         <div class="container">
-            <h2 class="section-heading">Robometer Demo</h2>
+            <h2 class="section-heading">GameBoyWorlds</h2>
             <div class="section-divider"></div>
             <p
                 style="text-align:center; color:#555; margin-bottom:1.5rem; max-width:600px; margin-left:auto; margin-right:auto;">
@@ -2871,7 +2837,7 @@
         /* Scroll button: smooth scroll without changing URL (avoids #method in shared links) */
         (function () {
             var btn = document.getElementById('scroll-indicator-btn');
-            var target = document.getElementById('at-a-glance');
+            var target = document.getElementById('overview');
             if (btn && target) {
                 btn.addEventListener('click', function () {
                     target.scrollIntoView({ behavior: 'smooth', block: 'start' });
