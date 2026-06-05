@@ -49,15 +49,44 @@ The `--recursive` flag is required to pull the [GameBoyWorlds](GameBoyWorlds/REA
 
 ## 2. Create Environments
 
-```bash
-bash setup/create_env.sh
-```
-
-If you intend to run VLM fine-tuning, also create the llm-utils environment:
+### Main environment
 
 ```bash
-bash setup/create_llm_utils_env.sh
+bash setup/create_env.sh --env_dir /path/to/env
 ```
+
+This script creates a Python 3.12 virtual environment at `env_dir` using `uv`, symlinks it to `setup/.venv`, installs all dependencies via `uv sync`, and generates the `config.env` files for both this repo and GameBoyWorlds.
+
+<details>
+<summary>Manual alternative</summary>
+
+```bash
+uv venv /path/to/env --python 3.12
+ln -s /path/to/env setup/.venv
+cd setup && uv sync && cd ..
+source setup/.venv/bin/activate
+python configs/create_env_file.py
+python GameBoyWorlds/configs/create_env_file.py
+```
+</details>
+
+### llm-utils environment (VLM fine-tuning only)
+
+```bash
+bash setup/create_llm_utils_env.sh --env_dir /path/to/llm-env
+```
+
+This script creates a separate Python 3.12 environment for the `llm-utils` submodule, symlinks it to `llm-utils/setup/.venv`, and installs its dependencies via `uv sync`.
+
+<details>
+<summary>Manual alternative</summary>
+
+```bash
+uv venv /path/to/llm-env --python 3.12
+ln -s /path/to/llm-env llm-utils/setup/.venv
+cd llm-utils/setup && uv sync
+```
+</details>
 
 ## 3. Configure
 
@@ -69,7 +98,19 @@ huggingface_repo_namespace: "your-username"
 huggingface_repo_name: "your-repo"
 ```
 
-Also set the storage directory in `GameBoyWorlds/configs/private_vars.yaml` to the same path.
+Also set a storage directory in `GameBoyWorlds/configs/private_vars.yaml`. This does **not** have to be the same path as above — GameBoyWorlds storage is independent of this repo's storage.
+
+### ROMs
+
+GameBoyWorlds ROMs must be downloaded and placed at the correct path. All ROMs follow the pattern:
+
+```
+<GameBoyWorlds_storage_dir>/rom_data/<game_series>/<game_name>/ROM_NAME.extension
+```
+
+See [GameBoyWorlds/README.md](GameBoyWorlds/README.md) for the full list of supported games, how to legally obtain ROMs, and the exact expected path for each.
+
+> **If you skip this step you will not be able to run any games.**
 
 ## 4. Sync Data
 
@@ -79,11 +120,7 @@ Pull the project data from the HuggingFace Hub:
 python sync_data.py main setup_sync
 ```
 
-## 5. ROMs
-
-Legally acquire ROMs and place them in the GameBoyWorlds storage directory. See [GameBoyWorlds/README.md](GameBoyWorlds/README.md) for the expected paths per game.
-
-## 6. Test
+## 5. Test
 
 ```bash
 bash scripts/core_rl/default_rl.sh test
