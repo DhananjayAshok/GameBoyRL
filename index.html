@@ -1,0 +1,2912 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Robometer: Scaling General-Purpose Robotic Reward Models via Trajectory Comparisons</title>
+    <link rel="icon" type="image/png" href="assets/images/robometer_logo.png" />
+
+    <!-- SEO meta tags -->
+    <meta name="description"
+        content="Robometer: a general-purpose robotic reward model trained on trajectory comparisons from the RBM-1M dataset. Provides dense, video-language-conditioned rewards for robot learning." />
+    <meta name="keywords"
+        content="Robometer, reward model, robotics, robot learning, reinforcement learning, trajectory comparison, reward function, RBM-1M, general-purpose reward, video-language model" />
+    <meta name="robots" content="index, follow" />
+
+    <!-- Open Graph (Facebook, LinkedIn, Slack, Discord, etc.) -->
+    <meta property="og:title"
+        content="Robometer: Scaling General-Purpose Robotic Reward Models via Trajectory Comparisons" />
+    <meta property="og:description"
+        content="A general-purpose robotic reward model trained on trajectory comparisons from the RBM-1M dataset. Provides dense, video-language-conditioned rewards for robot learning." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://robometer.github.io/" />
+    <meta property="og:image" content="https://robometer.github.io/assets/images/robometer_teaser_small.jpeg" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title"
+        content="Robometer: Scaling General-Purpose Robotic Reward Models via Trajectory Comparisons" />
+    <meta name="twitter:description"
+        content="A general-purpose robotic reward model trained on trajectory comparisons from the RBM-1M dataset." />
+    <meta name="twitter:image" content="https://robometer.github.io/assets/images/robometer_teaser_small.jpeg" />
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap" />
+    <!-- Bulma CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css" />
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <!-- Academic Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css" />
+
+    <!-- Include MathJax -->
+    <script type="text/javascript" async
+        src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+        </script>
+    <script type="text/javascript">
+        // Ensure MathJax is fully loaded before configuring it
+        window.onload = function () {
+            MathJax.Hub.Config({
+                tex2jax: {
+                    inlineMath: [['$', '$']]  // This ensures inline math works with $
+                }
+            });
+
+            // Optionally, reprocess math formulas on page load
+            MathJax.Hub.Queue(["Typeset", MathJax.Hub]);
+        };
+    </script>
+
+
+    <style>
+        /* ── General ─────────────────────────────────────────────── */
+        html {
+            scroll-behavior: smooth;
+            scroll-padding-top: 3.25rem;
+            overscroll-behavior-y: none;
+            /* prevent pull-up at top so white navbar doesn’t show */
+        }
+
+        body {
+            font-family: "Google Sans", "Segoe UI", Roboto, Arial, sans-serif;
+            background: #fff;
+            color: #333;
+            overscroll-behavior-y: none;
+        }
+
+        /* Override Bulma .container max-width (Bulma default is 1152px at full width) */
+        .container {
+            width: 80%;
+        }
+
+        /* ── Page progress bar (USC red) ───────────────────────────── */
+        .page-progress-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: rgba(0, 0, 0, 0.06);
+            z-index: 101;
+            pointer-events: none;
+        }
+
+        .page-progress-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: #990000;
+            /* USC cardinal red */
+            transition: width 0.08s ease-out;
+        }
+
+        /* ── Navbar ──────────────────────────────────────────────── */
+        .navbar {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(6px);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, .07);
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            transition: background 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .navbar-item {
+            font-weight: 500;
+            color: #333 !important;
+            transition: color 0.2s ease;
+        }
+
+        .navbar-item:hover {
+            color: #3273dc !important;
+        }
+
+        .navbar-item.is-active-section {
+            color: #3273dc !important;
+        }
+
+        /* Transparent navbar when over video (RISE-style); background reappears on scroll */
+        .navbar.navbar-over-video {
+            background: transparent !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+            box-shadow: none !important;
+        }
+
+        .navbar.navbar-over-video .navbar-item {
+            color: rgba(255, 255, 255, 0.9) !important;
+        }
+
+        .navbar.navbar-over-video .navbar-item:hover {
+            color: #3273dc !important;
+        }
+
+        .navbar.navbar-over-video .navbar-item.is-active-section {
+            color: #fff !important;
+            border-bottom: 2px solid #fff;
+        }
+
+        .navbar.navbar-over-video .navbar-burger span {
+            background-color: #fff;
+        }
+
+        /* ── Hero ────────────────────────────────────────────────── */
+        .hero-body {
+            padding: 4rem 1.5rem 2rem;
+        }
+
+        /* Hero + teaser overlay: video as background, header on top */
+        .hero-teaser-wrap {
+            position: relative;
+            overflow-x: hidden;
+            min-height: 100vh;
+            background: #000;
+        }
+
+        .hero-teaser-wrap .teaser-video-bg {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100%;
+            max-width: 1800px;
+            height: 100%;
+            object-fit: cover;
+            z-index: 0;
+        }
+
+        /* Overlay only on bottom 25%: video unchanged above, slightly less opaque at bottom */
+        .hero-teaser-wrap .teaser-overlay {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to bottom,
+                    transparent 0%,
+                    transparent 50%,
+                    rgba(0, 0, 0, 0.25) 88%,
+                    rgba(0, 0, 0, 0.4) 100%) !important;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        .hero-teaser-wrap::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to bottom,
+                    transparent 0%,
+                    transparent 50%,
+                    rgba(0, 0, 0, 0.25) 88%,
+                    rgba(0, 0, 0, 0.4) 100%);
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        .hero-teaser-wrap .hero-body {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 2;
+            padding: 2.5rem 1.5rem 5rem;
+            width: 100%;
+            transition: opacity 0.12s ease-out;
+        }
+
+        .hero-teaser-wrap .hero-teaser-content {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .hero-teaser-wrap .paper-title {
+            margin-bottom: 0.5rem;
+        }
+
+        .hero-teaser-wrap .author-list {
+            margin-top: 0.6rem;
+            margin-bottom: 0.35rem;
+        }
+
+        .hero-teaser-wrap .affiliation-list {
+            margin-top: 0.5rem;
+            margin-bottom: 0.2rem;
+        }
+
+        .hero-teaser-wrap .link-buttons {
+            margin-top: 1.25rem;
+        }
+
+        .hero-teaser-wrap .title.paper-title {
+            color: #fff;
+            text-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+        }
+
+        .hero-teaser-wrap .author-list {
+            color: rgba(255, 255, 255, 0.95);
+            text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .hero-teaser-wrap .author-list a {
+            color: #b8d4ff;
+        }
+
+        .hero-teaser-wrap .author-list a:hover {
+            color: #fff;
+            text-decoration: underline;
+        }
+
+        .hero-teaser-wrap .affiliation-list {
+            color: rgba(255, 255, 255, 0.9);
+            text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .hero-teaser-wrap .affiliation-list sup {
+            color: rgba(255, 255, 255, 0.95);
+        }
+
+        .hero-teaser-wrap p[style*="font-style:italic"] {
+            color: rgba(255, 255, 255, 0.85) !important;
+        }
+
+        .hero-teaser-wrap .link-buttons .button {
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Scroll indicator (RISE-style) */
+        .scroll-indicator {
+            position: absolute;
+            bottom: 1.5rem;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 3;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.35rem;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 0.75rem;
+            font-weight: 500;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        .scroll-indicator:hover {
+            color: #fff;
+        }
+
+        .scroll-indicator {
+            transition: opacity 0.12s ease-out;
+        }
+
+        .scroll-indicator-arrow {
+            animation: scroll-bounce 2s ease-in-out infinite;
+        }
+
+        @keyframes scroll-bounce {
+
+            0%,
+            100% {
+                transform: translateY(0);
+                opacity: 1;
+            }
+
+            50% {
+                transform: translateY(6px);
+                opacity: 0.7;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .hero-teaser-wrap {
+                min-height: 100vh;
+                padding: 0;
+                display: flex;
+                flex-direction: column;
+                justify-content: flex-end;
+            }
+
+            .hero-teaser-wrap .teaser-video-bg {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                min-height: 100%;
+                object-fit: cover;
+                object-position: center center;
+                transform: none;
+            }
+
+            .hero-teaser-wrap .hero-body {
+                position: relative !important;
+                padding: 1.5rem 1rem 4rem;
+                padding-top: calc(3.25rem + 1rem);
+            }
+
+            .hero-teaser-wrap .title.paper-title {
+                font-size: 1.4rem;
+            }
+
+            .hero-teaser-wrap .author-list {
+                font-size: 0.85rem;
+                margin-bottom: 0.25rem;
+            }
+
+            .hero-teaser-wrap .affiliation-list {
+                font-size: 0.78rem;
+            }
+
+            .hero-teaser-wrap .link-buttons .button {
+                font-size: 0.8rem;
+                padding: 0.4em 0.8em;
+                margin: 0.2rem;
+            }
+
+            .scroll-indicator {
+                bottom: 1rem;
+                font-size: 0.7rem;
+            }
+        }
+
+        /* At a Glance teaser: 60% on desktop, full width when shrunk or on phone */
+        #at-a-glance .teaser-video-wrap {
+            max-width: 60%;
+            margin-left: auto;
+            margin-right: auto;
+            width: 100%;
+        }
+
+        @media (max-width: 768px) {
+            #at-a-glance .teaser-video-wrap {
+                max-width: 100%;
+            }
+        }
+
+        .title.paper-title {
+            font-size: 2.2rem;
+            font-weight: 700;
+            line-height: 1.25;
+            color: #1a1a2e;
+        }
+
+        .author-list {
+            font-size: 1.05rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .author-list a {
+            color: #3273dc;
+            text-decoration: none;
+        }
+
+        .author-list a:hover {
+            text-decoration: underline;
+        }
+
+        .affiliation-list {
+            font-size: 0.95rem;
+            color: #555;
+        }
+
+        /* ── Buttons ─────────────────────────────────────────────── */
+        .link-buttons {
+            margin-top: 1.5rem;
+        }
+
+        .link-buttons .button {
+            margin: 0.3rem;
+            border-radius: 20px;
+            font-weight: 600;
+        }
+
+        /* ── Section headings ────────────────────────────────────── */
+        .section-heading {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #1a1a2e;
+            text-align: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .section-divider {
+            width: 60px;
+            height: 4px;
+            background: #3273dc;
+            margin: 0 auto 2rem;
+            border-radius: 2px;
+        }
+
+        /* ── Abstract ────────────────────────────────────────────── */
+        .abstract-box {
+            background: #f7f9fc;
+            border-left: 4px solid #3273dc;
+            padding: 1.5rem 2rem;
+            border-radius: 0 8px 8px 0;
+            font-size: 1rem;
+            line-height: 1.75;
+            text-align: justify;
+        }
+
+        /* ── Placeholder image / video ───────────────────────────── */
+        .placeholder-img {
+            background: linear-gradient(135deg, #e8edf5 25%, #d0dae8 100%);
+            border: 2px dashed #a0b0cc;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #6678a0;
+            font-size: 0.9rem;
+            font-weight: 500;
+            min-height: 220px;
+            padding: 1rem;
+            gap: 0.5rem;
+        }
+
+        .placeholder-img .icon-wrap {
+            font-size: 2.5rem;
+            opacity: 0.5;
+        }
+
+        .placeholder-video {
+            background: linear-gradient(135deg, #1a1a2e 60%, #2c3e50 100%);
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 0.9rem;
+            font-weight: 500;
+            min-height: 220px;
+            padding: 1rem;
+            gap: 0.5rem;
+        }
+
+        .placeholder-video .icon-wrap {
+            font-size: 2.5rem;
+            opacity: 0.7;
+        }
+
+        /* ── Result cards ────────────────────────────────────────── */
+        .result-card {
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, .08);
+            transition: transform .2s, box-shadow .2s;
+            height: 100%;
+        }
+
+        .result-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, .12);
+        }
+
+        .result-card .card-caption {
+            padding: 0.75rem 1rem;
+            background: #fff;
+            font-size: 0.88rem;
+            color: #444;
+            text-align: center;
+        }
+
+        /* ── Table styling ───────────────────────────────────────── */
+        .results-table {
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, .07);
+        }
+
+        .results-table table {
+            width: 100%;
+        }
+
+        .results-table th {
+            background: #1a1a2e !important;
+            color: #fff !important;
+            font-weight: 600;
+            text-align: center;
+            vertical-align: middle;
+        }
+
+        .results-table td {
+            text-align: center;
+            vertical-align: middle;
+            background: #fff !important;
+        }
+
+        .results-table tr.ours td {
+            background: #eef3ff !important;
+        }
+
+        .results-table .best {
+            font-weight: 700;
+            color: #0a6b2e;
+            background-color: #e6f4ea !important;
+        }
+
+        /* Override Bulma .table / is-hoverable: no alternating rows, force white then ours/best */
+        .results-table table.table tbody tr td {
+            background: #fff !important;
+        }
+
+        .results-table table.table tbody tr:nth-child(even) td {
+            background: #fff !important;
+        }
+
+        .results-table table.table tbody tr:nth-child(odd) td {
+            background: #fff !important;
+        }
+
+        .results-table table.table tbody tr.ours td {
+            background: #eef3ff !important;
+        }
+
+        .results-table table.table td.best,
+        .results-table table.table td.ours.best {
+            background-color: #e6f4ea !important;
+            color: #0a6b2e !important;
+            font-weight: 700 !important;
+        }
+
+        /* Force all "best in row" cells green by default (beat Bulma .table) */
+        body .results-table table.table tbody tr td.best,
+        body .results-table table.table tbody tr td.ours.best {
+            background-color: #e6f4ea !important;
+            color: #0a6b2e !important;
+            font-weight: 700 !important;
+        }
+
+        .results-table table.table td.best strong {
+            color: #0a6b2e !important;
+        }
+
+        .results-table table.table tbody tr:hover td.best,
+        .results-table table.table tbody tr:hover td.ours.best {
+            background-color: #e6f4ea !important;
+        }
+
+        .results-table table.table tbody tr.ours:hover td {
+            background: #eef3ff !important;
+        }
+
+        .failure-detection-task-table th:nth-child(4),
+        .failure-detection-task-table th:nth-child(7),
+        .failure-detection-task-table th:nth-child(10),
+        .failure-detection-task-table td:nth-child(4),
+        .failure-detection-task-table td:nth-child(7),
+        .failure-detection-task-table td:nth-child(10) {
+            background-color: #f0f0f0;
+        }
+
+        .task-success-rates-table td.best {
+            background-color: #e6f4ea !important;
+            color: #0a6b2e !important;
+            font-weight: 700 !important;
+        }
+
+        .task-success-rates-table td.best strong {
+            color: #0a6b2e !important;
+        }
+
+        .results-table td.ours {
+            background: #eef3ff !important;
+        }
+
+        .results-table .separator-row td {
+            background: #e8ecf5;
+            font-style: italic;
+            font-size: 0.85rem;
+            color: #555;
+            text-align: left;
+            padding-left: 1rem;
+        }
+
+        .results-table-caption {
+            text-align: center;
+            color: #555;
+            margin: 1rem auto 1.5rem;
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+
+        /* ── Tabs ────────────────────────────────────────────────── */
+        .exp-tabs .tabs ul {
+            border-bottom: none;
+        }
+
+        .exp-tabs .tabs li.is-active a {
+            background-color: #3273dc;
+            border-color: #3273dc;
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .eval-tabs .tabs ul {
+            border-bottom: none;
+        }
+
+        .eval-tabs .tabs li.is-active a {
+            background-color: #3273dc;
+            border-color: #3273dc;
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .eval-tab-panel {
+            display: none;
+        }
+
+        .eval-tab-panel.is-active {
+            display: block;
+        }
+
+        .offline-eval-tabs .tabs ul {
+            border-bottom: none;
+        }
+
+        .offline-eval-tabs .tabs li.is-active a {
+            background-color: #3273dc;
+            border-color: #3273dc;
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .offline-eval-tab-panel {
+            display: none;
+        }
+
+        .offline-eval-tab-panel.is-active {
+            display: block;
+        }
+
+        /* ── BibTex ──────────────────────────────────────────────── */
+        .bibtex-box {
+            background: #1e1e2e;
+            color: #cdd6f4;
+            border-radius: 10px;
+            padding: 1.5rem;
+            font-family: "Courier New", monospace;
+            font-size: 0.85rem;
+            line-height: 1.7;
+            overflow-x: auto;
+            white-space: pre;
+            position: relative;
+        }
+
+        .bibtex-copy-btn {
+            position: absolute;
+            top: 0.75rem;
+            right: 0.75rem;
+            cursor: pointer;
+        }
+
+        /* ── Section alternating backgrounds ────────────────────── */
+        .section.is-light-alt {
+            background: #f7f9fc;
+        }
+
+        .section.is-white-alt {
+            background: #fff;
+        }
+
+        /* ── Footer ──────────────────────────────────────────────── */
+        .footer {
+            background: #1a1a2e;
+            color: rgba(255, 255, 255, .65);
+            padding: 2rem 1.5rem;
+        }
+
+        .footer a {
+            color: rgba(255, 255, 255, .8);
+        }
+
+        .footer a:hover {
+            color: #fff;
+        }
+
+        /* ── Responsive tweaks ───────────────────────────────────── */
+        @media (max-width: 768px) {
+            .title.paper-title {
+                font-size: 1.5rem;
+            }
+
+            .section-heading {
+                font-size: 1.4rem;
+            }
+        }
+
+        /* ── Keyword pill ────────────────────────────────────────── */
+        .keyword-pill {
+            display: inline-block;
+            background: #eef3ff;
+            color: #3273dc;
+            border: 1px solid #b8cef5;
+            border-radius: 20px;
+            padding: 0.2rem 0.8rem;
+            margin: 0.2rem;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        /* ── Method figure caption ───────────────────────────────── */
+        .fig-caption {
+            font-size: 0.9rem;
+            color: #555;
+            text-align: center;
+            margin-top: 0.75rem;
+            line-height: 1.5;
+        }
+
+        /* ── Highlight box ───────────────────────────────────────── */
+        .highlight-box {
+            border-radius: 10px;
+            padding: 1.25rem 1.5rem;
+            font-size: 0.95rem;
+            line-height: 1.7;
+        }
+
+        .highlight-box.is-info-light {
+            background: #eef5ff;
+            border-left: 4px solid #3273dc;
+        }
+
+        .highlight-box.is-success-light {
+            background: #effaf3;
+            border-left: 4px solid #23d160;
+        }
+
+        .highlight-box.is-warning-light {
+            background: #fff3e0;
+            border-left: 4px solid #ffa500;
+        }
+
+        /* ── Sub-tabs (nested within experiment tabs) ──────────── */
+        .sub-tabs .tabs ul {
+            border-bottom: none;
+        }
+
+        .sub-tabs .tabs li.is-active a {
+            background-color: #3273dc;
+            border-color: #3273dc;
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .sub-tab-content {
+            display: none;
+        }
+
+        .sub-tab-content.is-active {
+            display: block;
+        }
+
+        .result-card video {
+            width: 100%;
+            border-radius: 8px 8px 0 0;
+            display: block;
+        }
+
+        /* Separator between Offline Reward Model Evaluation subsections */
+        .offline-eval-separator {
+            border: none;
+            border-top: 1px solid #e0e5ec;
+            margin: 2.5rem 0;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Page scroll progress bar (USC red) -->
+    <div class="page-progress-bar" role="progressbar" aria-label="Page scroll progress">
+        <div class="page-progress-bar-fill" id="page-progress-fill"></div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════
+     NAVBAR
+════════════════════════════════════════════════════════════ -->
+    <nav class="navbar navbar-over-video" role="navigation" aria-label="main navigation">
+        <div class="container">
+            <div class="navbar-brand">
+                <a class="navbar-item" href="#">
+                    <img id="navbar-logo" src="assets/images/robometer_logo_white.png" alt="Robometer logo"
+                        style="height:1.8em;vertical-align:middle;margin-right:0.3em;" />
+                    <strong>Robometer</strong>
+                </a>
+                <a role="button" class="navbar-burger" data-target="navMenu" aria-label="menu" aria-expanded="false">
+                    <span aria-hidden="true"></span>
+                    <span aria-hidden="true"></span>
+                    <span aria-hidden="true"></span>
+                </a>
+            </div>
+            <div id="navMenu" class="navbar-menu">
+                <div class="navbar-end">
+                    <!--<a class="navbar-item" href="#abstract">Abstract</a>-->
+                    <a class="navbar-item" href="#at-a-glance">Robometer Overview</a>
+                    <a class="navbar-item" href="#method">Method</a>
+                    <a class="navbar-item" href="#dataset">Dataset</a>
+                    <a class="navbar-item" href="#ablations">Offline Eval</a>
+                    <a class="navbar-item" href="#experiments">Policy Learning Experiments</a>
+                    <a class="navbar-item" href="#demo">Robometer Demo</a>
+                    <a class="navbar-item" href="#finetuning">LoRA Finetuning</a>
+                    <a class="navbar-item" href="#bibtex">BibTeX</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+    <script>
+        // Switch navbar logo based on overlay state
+        function updateNavbarLogo() {
+            var navbar = document.querySelector('.navbar');
+            var navbarLogo = document.getElementById('navbar-logo');
+            if (!navbar || !navbarLogo) return;
+            if (navbar.classList.contains('navbar-over-video')) {
+                navbarLogo.src = "assets/images/robometer_logo_white.png";
+            } else {
+                navbarLogo.src = "assets/images/robometer_logo.png";
+            }
+        }
+        // Run at startup and also on any navbar class changes
+        document.addEventListener('DOMContentLoaded', function () {
+            updateNavbarLogo();
+            // Observe class changes on navbar to handle overlay switching
+            const navbar = document.querySelector('.navbar');
+            if (navbar) {
+                // Some navbars are toggled by JS, so listen for attribute modifications
+                // Fallback for environments without MutationObserver
+                if (window.MutationObserver) {
+                    const observer = new MutationObserver(updateNavbarLogo);
+                    observer.observe(navbar, { attributes: true, attributeFilter: ['class'] });
+                } else {
+                    // Fallback: poll periodically (rarely needed)
+                    setInterval(updateNavbarLogo, 500);
+                }
+            }
+        });
+    </script>
+
+    <!-- ════════════════════════════════════════════════════════════
+     HERO – TITLE, AUTHORS & TEASER VIDEO (overlay)
+════════════════════════════════════════════════════════════ -->
+    <section class="hero hero-teaser-wrap" id="hero-video">
+        <video id="teaser-video" class="teaser-video-bg" muted playsinline autoplay loop preload="auto">
+            <source src="assets/website_teaser_compressed.mp4" type="video/mp4">
+            <source src="assets/website_teaser_compressed.mov" type="video/quicktime">
+        </video>
+        <div class="teaser-overlay" aria-hidden="true"></div>
+        <button type="button" class="scroll-indicator" id="scroll-indicator-btn" aria-label="Scroll to content">
+            <span class="scroll-indicator-arrow"><i class="fas fa-chevron-down"></i></span>
+            <span>Scroll</span>
+        </button>
+        <div class="hero-body">
+            <div class="container has-text-centered">
+                <div class="hero-teaser-content">
+
+                    <p class="title paper-title">
+                        <img src="assets/images/robometer_logo_white.png" alt="Robometer logo"
+                            style="float:left;height:2.2em;vertical-align:middle;margin-right:0.3em;filter:drop-shadow(0 2px 8px rgba(0,0,0,0.5));" />
+                        Robometer: Scaling General-Purpose Robotic Reward Models via Trajectory Comparisons
+                        <br>
+                        <span style="font-size: 0.6em; color: #cdd6f4;">Robotics: Science and Systems (RSS) 2026</span>
+                    </p>
+
+                    <!-- Authors -->
+                    <p class="author-list">
+                        <a href="https://aliang8.github.io/">Anthony Liang</a><sup>*1</sup>&ensp;
+                        <a href="https://ygtkorkmaz.github.io/">Yigit Korkmaz</a><sup>*1</sup>&ensp;
+                        <a href="https://jiahui-3205.github.io/">Jiahui Zhang</a><sup>2</sup>&ensp;
+                        <a href="https://minyoung1005.github.io/">Minyoung Hwang</a><sup>3</sup>&ensp;
+                        <a href="https://abraranwar.github.io/">Abrar Anwar</a><sup>1</sup>&ensp;
+                        <a href="https://www.linkedin.com/in/sidk99/">Sidhant Kaushik</a><sup>4</sup>
+                    </p>
+                    <p class="author-list">
+                        <a href="https://www.linkedin.com/in/aditya0shah">Aditya Shah</a><sup>5</sup>&ensp;
+                        <a href="https://www.linkedin.com/in/alexhuang1029/">Alex S. Huang</a><sup>2</sup>&ensp;
+                        <a href="https://homes.cs.washington.edu/~lsz/">Luke Zettlemoyer</a><sup>5</sup>&ensp;
+                        <a href="https://homes.cs.washington.edu/~fox/">Dieter Fox</a><sup>5,6</sup>&ensp;
+                        <a href="https://yuxng.github.io/">Yu Xiang</a><sup>2</sup>&ensp;
+                        <a href="https://anqili.github.io/">Anqi Li</a><sup>7</sup>
+                    </p>
+                    <p class="author-list">
+                        <a href="https://www.mit.edu/~abobu/">Andreea Bobu</a><sup>3</sup>&ensp;
+                        <a href="https://abhishekunique.github.io/">Abhishek Gupta</a><sup>5</sup>&ensp;
+                        <a href="https://stephentu.github.io/">Stephen Tu</a><sup>&dagger;1</sup>&ensp;
+                        <a href="https://ebiyik.github.io/">Erdem Bıyık</a><sup>&dagger;1</sup>&ensp;
+                        <a href="https://www.jessezhang.net/">Jesse Zhang</a><sup>&dagger;5</sup>
+                    </p>
+
+                    <!-- Affiliations -->
+                    <p class="affiliation-list">
+                        <sup>1</sup>Univ. of Southern California&emsp;
+                        <sup>2</sup>UT Dallas&emsp;
+                        <sup>3</sup>MIT&emsp;
+                        <sup>4</sup>Indep. Researcher&emsp;
+                        <sup>5</sup>Univ. of Washington&emsp;
+                        <sup>6</sup>Ai2&emsp;
+                        <sup>7</sup>NVIDIA
+                    </p>
+                    <p class="affiliation-list" style="margin-top:0.3rem;">
+                        <sup>*</sup>Equal contribution&emsp;
+                        <sup>&dagger;</sup>Equal advising
+                    </p>
+
+                    <!-- Conference / Venue 
+      <p style="margin-top:0.6rem; font-style:italic; color:#666; font-size:0.95rem;">
+        Conference / Journal Name, Year
+      </p> -->
+
+
+                    <!-- Link buttons -->
+                    <div class="link-buttons">
+                        <a class="button is-dark" href="https://arxiv.org/abs/2603.02115" target="_blank">
+                            <span class="icon"><i class="ai ai-arxiv"></i></span>
+                            <span>arXiv</span>
+                        </a>
+                        <a class="button is-info" href="assets/robometer.pdf" target="_blank">
+                            <span class="icon"><i class="fas fa-file-pdf"></i></span>
+                            <span>Paper</span>
+                        </a>
+                        <a class="button is-dark" href="https://github.com/robometer/robometer" target="_blank">
+                            <span class="icon"><i class="fab fa-github"></i></span>
+                            <span>Code</span>
+                        </a>
+                        <a class="button is-warning" href="#" target="_blank">
+                            <span class="icon"><i class="fas fa-database"></i></span>
+                            <span>RBM-1M Data (Coming Soon)</span>
+                        </a>
+                        <a class="button is-warning" href="https://huggingface.co/datasets/robometer/rbm-1m-ood"
+                            target="_blank">
+                            <span class="icon"><i class="fas fa-database"></i></span>
+                            <span>OOD Eval Data</span>
+                        </a>
+                        <a class="button is-success" href="https://huggingface.co/robometer/Robometer-4B"
+                            target="_blank">
+                            <span class="icon"><i class="fas fa-cube"></i></span>
+                            <span>Model Weights</span>
+                        </a>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Overview – teaser video (below hero, after scroll) -->
+    <section class="section is-light-alt" id="at-a-glance"
+        style="padding: 2rem 1.5rem; max-width: 100%; margin: 0 auto;">
+        <div class="teaser-video-wrap">
+            <h2 class="section-heading">Robometer: Dense, General-Purpose, Video-Language Reward Model</h2>
+            <div class="section-divider"></div>
+            <video controls muted playsinline autoplay loop preload="auto"
+                style="width:100%; border-radius:8px; display:block;">
+                <source src="assets/robometer_teaser_video.mp4" type="video/mp4">
+            </video>
+            <br>
+            <h3 class="title is-4" style="color:#1a1a2e;">Specific Contributions</h3>
+            <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
+                <strong>Training Rewards on Different Expertise Data</strong><br />
+                Robometer enables scalable training of rewards on both (1) reward-labeled / expert demonstrations and
+                (2) reward-unlabeled, suboptimal trajectories.
+                This enables well-calibrated, dense rewards usable zero-shot for policy learning.
+            </div>
+            <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
+                <strong>RBM-1M Dataset</strong><br />
+                We release RBM-1M, a large-scale reward-learning dataset comprising over one million trajectories
+                spanning diverse robot embodiments and tasks, including substantial suboptimal and failure data.
+            </div>
+            <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
+                <strong>Downstream Applications</strong><br />
+                Robometer significantly improves robot learning performance across a diverse set of downstream
+                applications, including model-free online RL, model-based online RL, offline RL, failure detection, and
+                data retrieval for IL.
+            </div>
+        </div>
+
+    </section>
+
+    <!-- ════════════════════════════════════════════════════════════
+     ABSTRACT
+════════════════════════════════════════════════════════════ -->
+    <!--<section class="section is-white-alt" id="abstract">
+  <div class="container" style="max-width:860px;">
+    <h2 class="section-heading">Abstract</h2>
+    <div class="section-divider"></div>
+    <div class="abstract-box">
+      General-purpose robot reward models are typically trained to predict absolute task progress from expert demonstrations,
+      providing only local, frame-level supervision. While effective for expert demonstrations, this paradigm scales poorly
+      to large-scale real-world robotics datasets where failed and suboptimal trajectories are abundant, and assigning dense
+      progress labels is ambiguous or ill-defined. We introduce <strong>Robometer</strong>, a scalable reward modeling
+      framework that combines intra-trajectory progress supervision with inter-trajectory preference supervision.
+      Robometer is trained with a dual objective: a <em>frame-level progress loss</em> that anchors reward magnitude on
+      expert data, and a <em>trajectory-comparison preference loss</em> that imposes global ordering constraints across
+      trajectories of the same task, enabling effective learning from suboptimal and failed trajectories. To support this
+      formulation at scale, we curate <strong>RBM-1M</strong>, a large-scale reward-learning dataset comprising over one
+      million trajectories spanning diverse robot embodiments and tasks, including substantial suboptimal and failure data.
+      Across benchmarks and real-world evaluations, Robometer learns more generalizable reward functions than prior methods
+      and improves robot learning performance across a diverse set of downstream applications.
+    </div>
+  </div>
+</section> -->
+
+    <!-- ════════════════════════════════════════════════════════════
+     METHOD
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-white-alt" id="method">
+        <div class="container">
+            <h2 class="section-heading">Method</h2>
+            <div class="section-divider"></div>
+
+            <!-- Architecture overview -->
+            <div class="columns is-vcentered" style="margin-bottom:2rem;">
+                <div class="columns-item column is-7">
+                    <img src="assets/images/robometer_method_figure.png" alt="Robometer method overview"
+                        style="width:100%; display:block; border-radius:8px;">
+                </div>
+                <div class="column is-5">
+                    <h3 class="title is-4" style="color:#1a1a2e;">Dual-Objective Training</h3>
+                    <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
+                        <strong>Frame-Level Progress and Success Prediction</strong><br />
+                        Anchors the magnitude of predicted rewards by regressing per-frame progress and success values
+                        on expert demonstration data,
+                        providing dense supervision at the intra-trajectory level.
+                    </div>
+                    <div class="highlight-box is-success-light">
+                        <strong>Trajectory-Comparison Preference Prediction</strong><br />
+                        Imposes global ordering constraints across pairs of trajectories of the same task, enabling
+                        robust learning
+                        from suboptimal and failed data via a preference comparison objective.
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-bottom:2rem;">
+                <div style="display: flex; justify-content: center;">
+                    <img src="assets/images/robometer_training_objectives.jpeg"
+                        alt="Robometer Training Objectives and Types"
+                        style="width:100%; display:block; border-radius:8px;">
+                </div>
+                <h3 class="title is-4" style="color:#1a1a2e; margin-top:1.7rem;">Model Training Inputs and Objectives
+                </h3>
+                <div class="columns">
+                    <div class="column">
+                        <div class="highlight-box is-info-light" style="height:100%; margin-bottom:0;">
+                            <strong>Different Expertise</strong><br />
+                            We pair together expert and suboptimal trajectories of the same task, training per-frame
+                            progress/success prediction on the expert trajectory and training the model to prefer the
+                            expert trajectory.
+                        </div>
+                    </div>
+                    <div class="column">
+                        <div class="highlight-box is-warning-light" style="height:100%; margin-bottom:0;">
+                            <strong>Different Tasks</strong><br />
+                            We pair trajectories of different tasks together, training the model to prefer the video
+                            corresponding to the correct input language instruction.
+                            We can train per-frame progress/success on both types of trajectories.
+                        </div>
+                    </div>
+                    <div class="column">
+                        <div class="highlight-box is-success-light" style="height:100%; margin-bottom:0;">
+                            <strong>Augmented Trajectory</strong><br />
+                            We also augment a given trajectory to simulate failures, for example by using <a
+                                href="https://rewind-reward.github.io/">video rewind</a>.
+                            The model is trained to prefer the original, unaugmented trajectory, and per-frame
+                            progress/success prediction can occur on either trajectory.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════════════
+     DATASET — RBM-1M
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-light-alt" id="dataset">
+        <div class="container">
+            <h2 class="section-heading">RBM-1M Dataset</h2>
+            <div class="section-divider"></div>
+
+            <div class="columns is-multiline is-centered" style="margin-bottom:1.5rem;">
+                <!-- Stats cards -->
+                <div class="column is-3 has-text-centered">
+                    <div style="background:#eef3ff;border-radius:12px;padding:1.5rem;">
+                        <p style="font-size:2.2rem;font-weight:700;color:#3273dc;">1M+</p>
+                        <p style="color:#555;">Trajectories</p>
+                    </div>
+                </div>
+                <div class="column is-3 has-text-centered">
+                    <div style="background:#eef3ff;border-radius:12px;padding:1.5rem;">
+                        <p style="font-size:2.2rem;font-weight:700;color:#3273dc;">21</p>
+                        <p style="color:#555;">Robot Embodiments</p>
+                    </div>
+                </div>
+                <!--<div class="column is-3 has-text-centered">
+        <div style="background:#eef3ff;border-radius:12px;padding:1.5rem;">
+          <p style="font-size:2.2rem;font-weight:700;color:#3273dc;">XXX+</p>
+          <p style="color:#555;">Tasks</p>
+        </div>
+      </div>-->
+                <div class="column is-3 has-text-centered">
+                    <div style="background:#eef3ff;border-radius:12px;padding:1.5rem;">
+                        <p style="font-size:2.2rem;font-weight:700;color:#3273dc;">140,000+</p>
+                        <p style="color:#555;">Trajs. from Mixed Expertise Datasets</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dataset figure -->
+            <div class="columns is-vcentered" style="align-items: stretch;">
+                <div class="column is-4" style="display: flex; flex-direction: column; height: 100%;">
+                    <div class="result-card"
+                        style="margin-bottom:2rem; height:100%; display: flex; flex-direction: column; justify-content: center;">
+                        <img src="assets/images/rbm_1m_pie_chart.jpeg" alt="RBM-1M statistics"
+                            style="width:100%; display:block; margin:0 auto;">
+                        <div class="card-caption" style="font-size:0.97rem;"><strong>Distribution of different
+                                trajectory types in RBM-1M.</strong></div>
+                    </div>
+                </div>
+                <div class="column is-8" style="display: flex; flex-direction: column; height: 100%;">
+                    <div class="result-card"
+                        style="margin-bottom:2rem; height:100%; display:flex; flex-direction:column; justify-content:center;">
+                        <div
+                            style="margin-top:2.5rem; display: flex; gap: 0; justify-content: center; align-items: flex-end; flex-wrap: nowrap;">
+                            <div
+                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
+                                <img src="assets/example_trajs/example_1.gif" alt="Example Trajectory 1"
+                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
+                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#444;">Expert</div> -->
+                            </div>
+                            <div
+                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
+                                <img src="assets/example_trajs/example_2.gif" alt="Example Trajectory 2"
+                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
+                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#444;">Suboptimal</div> -->
+                            </div>
+                            <div
+                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
+                                <img src="assets/example_trajs/example_3.gif" alt="Example Trajectory 3"
+                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
+                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#444;">Suboptimal</div> -->
+                            </div>
+                            <div
+                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
+                                <img src="assets/example_trajs/example_4.gif" alt="Example Trajectory 4"
+                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
+                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#d24343;">Failed</div> -->
+                            </div>
+                            <div
+                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
+                                <img src="assets/example_trajs/example_5.gif" alt="Example Trajectory 5"
+                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
+                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#444;">Expert</div> -->
+                            </div>
+                            <div
+                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
+                                <img src="assets/example_trajs/example_6.gif" alt="Example Trajectory 6"
+                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
+                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#d24343;">Failed</div> -->
+                            </div>
+                        </div>
+                        <div class="card-caption" style="font-size:0.97rem;"><strong>Example trajectories from
+                                RBM-1M.</strong>
+                            Dataset composition across robot embodiments, tasks, and trajectory quality levels.
+                            Suboptimal and failure data
+                            constitute a substantial fraction, enabling the preference-based learning component of
+                            Robometer.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- <p class="fig-caption">
+      <strong>Figure 3 — RBM-1M.</strong>
+      Dataset composition across robot embodiments, tasks, and trajectory quality levels. Suboptimal and failure data
+      constitute a substantial fraction, enabling the preference-based learning component of Robometer.
+    </p> -->
+        </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════════════
+     PEARSON'S CORRELATION (REWARD MODEL EVALUATION)
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-white-alt" id="ablations">
+        <div class="container">
+            <h2 class="section-heading">Offline Reward Model Evaluations</h2>
+            <div class="section-divider"></div>
+
+            <h3 class="title is-5" style="margin-top:0;margin-bottom:1rem;text-align:center;color:#1a1a2e;">
+                Video-language Reward Confusion Matrix</h3>
+            <div class="result-card" style="margin-bottom:2rem;">
+                <img src="assets/images/robometer_confusionmatrix.png" alt="Failure detection confusion matrix"
+                    style="width:100%; display:block; border-radius:8px 8px 0 0;">
+                <div class="card-caption"><strong>Video-language reward confusion matrix.</strong> For each task (unseen
+                    data), we score all video–instruction pairs. Robometer yields the most diagonal matrix, indicating
+                    strong alignment between demos and instructions. Values are column-normalized diagonal means
+                    (fraction of reward on aligned pairs).</div>
+            </div>
+            <hr class="offline-eval-separator" aria-hidden="true">
+
+            <!-- Qualitative plots -->
+            <h3 class="title is-5" style="margin-top:2.5rem;text-align:center;color:#1a1a2e;">Qualitative Reward Curves
+            </h3>
+            <p style="text-align:center;color:#555;margin-bottom:1.5rem;font-size:0.95rem;">
+                Reward curves predicted by Robometer and ablated variants on example trajectories.
+            </p>
+            <div class="columns">
+                <div class="column is-12">
+                    <div class="result-card">
+                        <img src="assets/images/qualitative_plots.png" alt="Qualitative reward plots"
+                            style="width:100%; display:block; border-radius:8px 8px 0 0;">
+                        <div class="card-caption">Qualitative reward curves across expert, suboptimal, and failed
+                            trajectories.
+                            Robometer predictions reflect subtle failures and best align with true progress.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <hr class="offline-eval-separator" aria-hidden="true">
+
+            <h3 class="title is-5" style="margin-top:2.5rem;margin-bottom:1rem;text-align:center;color:#1a1a2e;">
+                Quantitative Reward Evaluations</h3>
+            <div class="offline-eval-tabs" style="margin-top:0;">
+                <div class="tabs is-centered is-medium is-toggle" style="margin-bottom:1.5rem;">
+                    <ul id="offline-eval-tab-list">
+                        <li class="is-active" data-offline-tab="voc-ranking"><a>VOC + Trajectory Ranking</a></li>
+                        <li data-offline-tab="roborewardbench"><a>RoboRewardBench</a></li>
+                        <li data-offline-tab="preference-accuracy"><a>Preference Accuracy</a></li>
+                    </ul>
+                </div>
+
+                <!-- Tab: VOC + Trajectory Ranking -->
+                <div id="offline-tab-voc-ranking" class="offline-eval-tab-panel is-active">
+                    <div class="highlight-box is-info-light" style="margin-bottom:1.5rem;">
+                        <strong>Setting.</strong>
+                        Reward alignment is measured with Value Order Correlation (VOC Pearson $r$) between predicted
+                        rewards and ground-truth progress; trajectory ranking is measured with Kendall $\tau$ on
+                        RBM-EVAL (in-distribution and out-of-distribution). We compare baselines (GVL, VLAC,
+                        RoboDopamine, TOPReward), models trained on RoboReward data, and ReWiND / Robometer on full
+                        RBM-1M.
+                    </div>
+                    <div class="results-table"
+                        style="margin-bottom:1rem; overflow-x:auto; max-width:1400px; margin-left:auto; margin-right:auto;">
+                        <table class="table is-fullwidth is-bordered is-hoverable" style="min-width:800px;">
+                            <thead>
+                                <tr>
+                                    <th rowspan="2">Dataset</th>
+                                    <th colspan="4">Baselines</th>
+                                    <th colspan="3">w/ RoboReward Training Data</th>
+                                    <th colspan="2">w/ our RBM-1M data</th>
+                                </tr>
+                                <tr>
+                                    <th>GVL</th>
+                                    <th>VLAC</th>
+                                    <th>RoboDopamine-8B</th>
+                                    <th>TOPReward</th>
+                                    <th>RoboReward-4B</th>
+                                    <th>RoboReward-8B</th>
+                                    <th>Robometer</th>
+                                    <th>ReWiND</th>
+                                    <th>Robometer</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr class="separator-row">
+                                    <td colspan="10"><strong>(a) Reward alignment (VOC Pearson $r$) ↑</strong></td>
+                                </tr>
+                                <tr>
+                                    <td>RBM-EVAL-ID</td>
+                                    <td>0.16</td>
+                                    <td>0.16</td>
+                                    <td>0.79</td>
+                                    <td>0.42</td>
+                                    <td>0.77</td>
+                                    <td>0.82</td>
+                                    <td>0.84</td>
+                                    <td>0.46</td>
+                                    <td class="ours best"><strong>0.92</strong></td>
+                                </tr>
+                                <tr>
+                                    <td>RBM-EVAL-OOD</td>
+                                    <td>0.21</td>
+                                    <td>0.17</td>
+                                    <td>0.80</td>
+                                    <td>0.40</td>
+                                    <td>0.88</td>
+                                    <td>0.88</td>
+                                    <td>0.93</td>
+                                    <td>0.51</td>
+                                    <td class="ours best"><strong>0.94</strong></td>
+                                </tr>
+                                <tr class="separator-row">
+                                    <td colspan="10"><strong>(b) Trajectory ranking (Kendall $\tau$) ↑</strong></td>
+                                </tr>
+                                <tr>
+                                    <td>RBM-EVAL-OOD</td>
+                                    <td>0.19</td>
+                                    <td>0.08</td>
+                                    <td>0.45</td>
+                                    <td>0.13</td>
+                                    <td>0.50</td>
+                                    <td>0.47</td>
+                                    <td>0.55</td>
+                                    <td>0.01</td>
+                                    <td class="ours best"><strong>0.64</strong></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="results-table-caption" style="max-width:1400px;margin-left:auto;margin-right:auto;">
+                        (a) <b>Reward alignment</b> (VOC Pearson $r$) and (b) <b>trajectory ranking</b> (Kendall
+                        $\tau_a$) on RBM-EVAL. Baselines by training data: GVL (w/ GPT-5-mini, unknown data), VLAC (300k
+                        trajectories), RoboDopamine (100k), TOPReward (Qwen3-VL-8B) We compare Robometer to
+                        RoboReward-4B/8B on their data, and ReWiND and Robometer on the full RBM-1M dataset.
+                    </p>
+                    <p style="text-align:center;margin-bottom:1rem;">
+                        <button type="button" class="button is-small is-light" id="toggle-full-eval"
+                            aria-expanded="false">Show full per-dataset results</button>
+                    </p>
+                    <div id="full-eval-panels" style="display:none;">
+                        <div class="eval-tabs" style="margin-bottom:1.5rem;">
+                            <div class="tabs is-centered is-medium is-toggle">
+                                <ul id="eval-split-tab-list">
+                                    <li class="is-active" data-eval-tab="id"><a>RBM-EVAL-ID</a></li>
+                                    <li data-eval-tab="ood"><a>RBM-EVAL-OOD</a></li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <!-- Panel: RBM-EVAL-ID -->
+                        <div id="eval-panel-id" class="eval-tab-panel is-active">
+                            <div class="results-table" style="margin-bottom:2rem; overflow-x:auto;">
+                                <table class="table is-fullwidth is-bordered is-hoverable">
+                                    <thead>
+                                        <tr>
+                                            <th rowspan="2">Dataset</th>
+                                            <th colspan="4">Baselines</th>
+                                            <th colspan="3">w/ RoboReward Training Data</th>
+                                            <th colspan="2">w/ our RBM-1M data</th>
+                                        </tr>
+                                        <tr>
+                                            <th>GVL</th>
+                                            <th>VLAC-8B</th>
+                                            <th>RoboDopamine-8B</th>
+                                            <th>TOPReward</th>
+                                            <th>RoboReward-4B</th>
+                                            <th>RoboReward-8B</th>
+                                            <th>Robometer</th>
+                                            <th>ReWiND</th>
+                                            <th>Robometer</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td>RACER</td>
+                                            <td>0.131</td>
+                                            <td>0.156</td>
+                                            <td>0.752</td>
+                                            <td>0.239</td>
+                                            <td>0.491</td>
+                                            <td>0.652</td>
+                                            <td>0.937</td>
+                                            <td>0.561</td>
+                                            <td class="ours best"><strong>0.950</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>OXE (BC-Z)</td>
+                                            <td>0.142</td>
+                                            <td>−0.150</td>
+                                            <td>0.767</td>
+                                            <td>0.413</td>
+                                            <td>0.643</td>
+                                            <td class="best">0.809</td>
+                                            <td>0.683</td>
+                                            <td>0.442</td>
+                                            <td class="ours">0.785</td>
+                                        </tr>
+                                        <tr>
+                                            <td>OXE (Berkeley Cable Routing)</td>
+                                            <td>0.075</td>
+                                            <td>−0.425</td>
+                                            <td>0.728</td>
+                                            <td>0.151</td>
+                                            <td>0.657</td>
+                                            <td>0.801</td>
+                                            <td>0.900</td>
+                                            <td>0.491</td>
+                                            <td class="ours best"><strong>0.915</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>OXE (Bridge V2)</td>
+                                            <td>0.143</td>
+                                            <td>−0.875</td>
+                                            <td>0.830</td>
+                                            <td>0.427</td>
+                                            <td>0.891</td>
+                                            <td class="best">0.898</td>
+                                            <td>0.633</td>
+                                            <td>0.526</td>
+                                            <td class="ours">0.878</td>
+                                        </tr>
+                                        <tr>
+                                            <td>OXE (Jaco Play)</td>
+                                            <td>0.114</td>
+                                            <td>−0.151</td>
+                                            <td>0.873</td>
+                                            <td>0.499</td>
+                                            <td>0.793</td>
+                                            <td>0.785</td>
+                                            <td>0.861</td>
+                                            <td>0.550</td>
+                                            <td class="ours best"><strong>0.894</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>OXE (Toto)</td>
+                                            <td>0.254</td>
+                                            <td>−0.416</td>
+                                            <td>0.732</td>
+                                            <td>0.734</td>
+                                            <td>0.886</td>
+                                            <td>0.939</td>
+                                            <td>0.947</td>
+                                            <td>0.340</td>
+                                            <td class="ours best"><strong>0.973</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>OXE (Viola)</td>
+                                            <td>0.264</td>
+                                            <td>0.479</td>
+                                            <td>0.750</td>
+                                            <td>0.463</td>
+                                            <td>0.915</td>
+                                            <td>0.896</td>
+                                            <td>0.967</td>
+                                            <td>−0.014</td>
+                                            <td class="ours best"><strong>0.988</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>Metaworld</td>
+                                            <td>0.134</td>
+                                            <td>0.211</td>
+                                            <td>0.773</td>
+                                            <td>0.238</td>
+                                            <td>0.746</td>
+                                            <td>0.779</td>
+                                            <td>0.737</td>
+                                            <td>0.630</td>
+                                            <td class="ours best"><strong>0.929</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>Libero (90)</td>
+                                            <td>0.254</td>
+                                            <td>0.217</td>
+                                            <td>0.876</td>
+                                            <td>0.586</td>
+                                            <td>0.874</td>
+                                            <td>0.846</td>
+                                            <td>0.912</td>
+                                            <td>0.592</td>
+                                            <td class="ours best"><strong>0.962</strong></td>
+                                        </tr>
+                                        <tr class="ours">
+                                            <td><strong>Average</strong></td>
+                                            <td>0.168</td>
+                                            <td>0.089</td>
+                                            <td>0.787</td>
+                                            <td>0.417</td>
+                                            <td>0.766</td>
+                                            <td>0.823</td>
+                                            <td>0.842</td>
+                                            <td>0.458</td>
+                                            <td class="best"><strong>0.919</strong></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Panel: RBM-EVAL-OOD (Pearson + Kendall) -->
+                        <div id="eval-panel-ood" class="eval-tab-panel">
+                            <div class="results-table" style="margin-bottom:2rem; overflow-x:auto;">
+                                <table class="table is-fullwidth is-bordered is-hoverable">
+                                    <thead>
+                                        <tr>
+                                            <th rowspan="2">Dataset</th>
+                                            <th colspan="4">Baselines</th>
+                                            <th colspan="3">w/ RoboReward Training Data</th>
+                                            <th colspan="2">w/ our RBM-1M data</th>
+                                        </tr>
+                                        <tr>
+                                            <th>GVL</th>
+                                            <th>VLAC-8B</th>
+                                            <th>RoboDopamine-8B</th>
+                                            <th>TOPReward</th>
+                                            <th>RoboReward-4B</th>
+                                            <th>RoboReward-8B</th>
+                                            <th>Robometer</th>
+                                            <th>ReWiND</th>
+                                            <th>Robometer</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td>USC Franka</td>
+                                            <td>0.102</td>
+                                            <td>0.356</td>
+                                            <td>0.842</td>
+                                            <td>0.480</td>
+                                            <td>0.909</td>
+                                            <td>0.909</td>
+                                            <td class="best">0.959</td>
+                                            <td>0.772</td>
+                                            <td class="ours">0.949</td>
+                                        </tr>
+                                        <tr>
+                                            <td>USC Koch</td>
+                                            <td>0.176</td>
+                                            <td>0.074</td>
+                                            <td>0.847</td>
+                                            <td>0.384</td>
+                                            <td>0.866</td>
+                                            <td>0.916</td>
+                                            <td class="best">0.969</td>
+                                            <td>0.585</td>
+                                            <td class="ours">0.967</td>
+                                        </tr>
+                                        <tr>
+                                            <td>USC Trossen</td>
+                                            <td>0.542</td>
+                                            <td>0.256</td>
+                                            <td>0.647</td>
+                                            <td>0.390</td>
+                                            <td>0.781</td>
+                                            <td>0.726</td>
+                                            <td class="best">0.925</td>
+                                            <td>0.226</td>
+                                            <td class="ours">0.910</td>
+                                        </tr>
+                                        <tr>
+                                            <td>USC xArm</td>
+                                            <td>0.282</td>
+                                            <td>0.454</td>
+                                            <td>0.840</td>
+                                            <td>0.160</td>
+                                            <td>0.896</td>
+                                            <td>0.914</td>
+                                            <td>0.951</td>
+                                            <td>0.435</td>
+                                            <td class="ours best"><strong>0.980</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>MIT Franka</td>
+                                            <td>0.268</td>
+                                            <td>0.601</td>
+                                            <td>0.733</td>
+                                            <td>0.471</td>
+                                            <td>0.896</td>
+                                            <td>0.899</td>
+                                            <td>0.868</td>
+                                            <td>0.531</td>
+                                            <td class="ours best"><strong>0.945</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>UT Dallas SO101</td>
+                                            <td>0.203</td>
+                                            <td>0.511</td>
+                                            <td>0.868</td>
+                                            <td>0.497</td>
+                                            <td>0.926</td>
+                                            <td class="best">0.930</td>
+                                            <td>0.888</td>
+                                            <td>0.497</td>
+                                            <td class="ours">0.916</td>
+                                        </tr>
+                                        <tr class="ours">
+                                            <td><strong>Average</strong></td>
+                                            <td>0.262</td>
+                                            <td>0.375</td>
+                                            <td>0.796</td>
+                                            <td>0.397</td>
+                                            <td>0.879</td>
+                                            <td>0.882</td>
+                                            <td>0.927</td>
+                                            <td>0.508</td>
+                                            <td class="best"><strong>0.94</strong></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <h3 class="title is-5"
+                                style="margin-top:2rem;margin-bottom:1rem;text-align:center;color:#1a1a2e;">Kendall's
+                                $\tau$ (out-of-distribution)</h3>
+                            <p style="text-align:center;color:#555;margin-bottom:1rem;font-size:0.9rem;">Kendall's rank
+                                correlation. Higher is better.</p>
+                            <div class="results-table" style="margin-bottom:2rem; overflow-x:auto;">
+                                <table class="table is-fullwidth is-bordered is-hoverable">
+                                    <thead>
+                                        <tr>
+                                            <th rowspan="2">Dataset</th>
+                                            <th colspan="5">Baselines</th>
+                                            <th colspan="3">w/ RoboReward Training Data</th>
+                                            <th colspan="2">w/ our RBM-1M data</th>
+                                        </tr>
+                                        <tr>
+                                            <th>GVL</th>
+                                            <th>VLAC-2B</th>
+                                            <th>VLAC-8B</th>
+                                            <th>RoboDopamine-8B</th>
+                                            <th>TOPReward</th>
+                                            <th>RoboReward-4B</th>
+                                            <th>RoboReward-8B</th>
+                                            <th>Robometer</th>
+                                            <th>ReWiND</th>
+                                            <th>Robometer</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td>USC Franka</td>
+                                            <td>0.250</td>
+                                            <td>0.292</td>
+                                            <td>0.271</td>
+                                            <td>0.479</td>
+                                            <td>0.167</td>
+                                            <td>0.625</td>
+                                            <td>0.625</td>
+                                            <td>0.583</td>
+                                            <td>−0.125</td>
+                                            <td class="ours best"><strong>0.625</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>USC Koch</td>
+                                            <td>−0.008</td>
+                                            <td>0.167</td>
+                                            <td>0.064</td>
+                                            <td>0.442</td>
+                                            <td>0.183</td>
+                                            <td>0.332</td>
+                                            <td>0.264</td>
+                                            <td class="best">0.533</td>
+                                            <td>0.336</td>
+                                            <td class="ours">0.477</td>
+                                        </tr>
+                                        <tr>
+                                            <td>USC Trossen</td>
+                                            <td>0.292</td>
+                                            <td>−0.111</td>
+                                            <td>−0.417</td>
+                                            <td>0.333</td>
+                                            <td>−0.292</td>
+                                            <td>0.333</td>
+                                            <td>0.389</td>
+                                            <td class="best">0.646</td>
+                                            <td>0.028</td>
+                                            <td class="ours">0.569</td>
+                                        </tr>
+                                        <tr>
+                                            <td>USC xArm</td>
+                                            <td>0.056</td>
+                                            <td>0.167</td>
+                                            <td>0.139</td>
+                                            <td>0.431</td>
+                                            <td>−0.111</td>
+                                            <td>0.528</td>
+                                            <td>0.347</td>
+                                            <td>0.403</td>
+                                            <td>−0.167</td>
+                                            <td class="ours best"><strong>0.750</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>MIT Franka</td>
+                                            <td>0.306</td>
+                                            <td>−0.017</td>
+                                            <td>0.072</td>
+                                            <td>0.333</td>
+                                            <td>0.286</td>
+                                            <td>0.494</td>
+                                            <td>0.396</td>
+                                            <td>0.479</td>
+                                            <td>0.080</td>
+                                            <td class="ours best"><strong>0.572</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>UT Dallas SO101</td>
+                                            <td>0.300</td>
+                                            <td>−0.033</td>
+                                            <td>0.167</td>
+                                            <td>0.700</td>
+                                            <td>0.533</td>
+                                            <td>0.700</td>
+                                            <td>0.767</td>
+                                            <td>0.667</td>
+                                            <td>−0.067</td>
+                                            <td class="ours best"><strong>0.867</strong></td>
+                                        </tr>
+                                        <tr class="ours">
+                                            <td><strong>Average</strong></td>
+                                            <td>0.199</td>
+                                            <td>0.077</td>
+                                            <td>0.049</td>
+                                            <td>0.453</td>
+                                            <td>0.128</td>
+                                            <td>0.502</td>
+                                            <td>0.465</td>
+                                            <td>0.552</td>
+                                            <td>0.014</td>
+                                            <td class="best"><strong>0.643</strong></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                    </div><!-- #full-eval-panels -->
+                </div><!-- end offline-tab-voc-ranking -->
+
+                <!-- Tab: RoboRewardBench -->
+                <div id="offline-tab-roborewardbench" class="offline-eval-tab-panel">
+                    <div class="highlight-box is-info-light" style="margin-bottom:1.5rem;">
+                        <strong>Setting.</strong>
+                        We evaluate on the <a href="https://arxiv.org/abs/2601.00675" target="_blank"
+                            rel="noopener">RoboRewardBench</a> benchmark: mean absolute error (MAE) between predicted
+                        rewards and human-annotated progress labels. Lower is better.
+                    </div>
+                    <div class="results-table"
+                        style="margin-bottom:1rem; overflow-x:auto; max-width:720px; margin-left:auto; margin-right:auto;">
+                        <table class="table is-fullwidth is-bordered is-hoverable" style="min-width:480px;">
+                            <thead>
+                                <tr>
+                                    <th>Model Type</th>
+                                    <th>Model</th>
+                                    <th>RoboRewardBench MAE &darr;</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td rowspan="4" style="vertical-align:middle; font-weight:600;">Qwen3-4B Models</td>
+                                    <td>Robometer (ours)</td>
+                                    <td class="best"><strong>0.72</strong></td>
+                                </tr>
+                                <tr>
+                                    <td>Robometer (RoboReward data only)</td>
+                                    <td>0.75</td>
+                                </tr>
+                                <tr>
+                                    <td>RoboReward-4B</td>
+                                    <td>0.85</td>
+                                </tr>
+                                <tr>
+                                    <td>Qwen3-VL-4B-Instr.</td>
+                                    <td>1.03</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="results-table-caption" style="max-width:720px;margin-left:auto;margin-right:auto;">
+                        Evaluation on the <b><a href="https://arxiv.org/abs/2601.00675">RoboRewardBench</a>
+                            benchmark</b> (mean absolute error, lower is better).
+                    </p>
+                </div><!-- end offline-tab-roborewardbench -->
+
+                <!-- Tab: Preference Accuracy -->
+                <div id="offline-tab-preference-accuracy" class="offline-eval-tab-panel">
+                    <div class="highlight-box is-info-light" style="margin-bottom:1.5rem;">
+                        <strong>Setting.</strong>
+                        We compare Robometer to RL-VLM-F on pairwise preference accuracy over 500 comparisons per
+                        RBM-EVAL-OOD dataset: (i) <em>Different Quality</em> — same task, different trajectory quality;
+                        (ii) <em>Different Task</em> — different tasks, model must prefer the trajectory matching the
+                        instruction.
+                    </div>
+                    <div class="columns" style="align-items:flex-start;gap:1.5rem;">
+                        <div class="column is-6">
+                            <p class="has-text-weight-semibold"
+                                style="margin-bottom:0.75rem;color:#1a1a2e;text-align:center;">Different Quality</p>
+                            <div class="results-table" style="overflow-x:auto;">
+                                <table class="table is-fullwidth is-bordered is-hoverable">
+                                    <thead>
+                                        <tr>
+                                            <th>Dataset</th>
+                                            <th>RL-VLM-F (%)</th>
+                                            <th>Robometer (%)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td>USC Franka</td>
+                                            <td>52.1</td>
+                                            <td class="best"><strong>75.0</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>USC Koch</td>
+                                            <td>54.4</td>
+                                            <td class="best"><strong>79.4</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>USC Trossen</td>
+                                            <td>66.7</td>
+                                            <td class="best"><strong>76.2</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>USC xArm</td>
+                                            <td>48.6</td>
+                                            <td class="best"><strong>88.9</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>MIT Franka</td>
+                                            <td>54.4</td>
+                                            <td class="best"><strong>85.4</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>UT Dallas SO-101</td>
+                                            <td>56.7</td>
+                                            <td class="best"><strong>90.0</strong></td>
+                                        </tr>
+                                        <tr class="ours">
+                                            <td><strong>Average</strong></td>
+                                            <td>55.5</td>
+                                            <td class="best"><strong>82.5</strong></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <p class="is-size-6" style="color:#666;margin-top:0.5rem;text-align:center;">Different
+                                quality trajectory pairwise preference accuracy.</p>
+                        </div>
+                        <div class="column is-6">
+                            <p class="has-text-weight-semibold"
+                                style="margin-bottom:0.75rem;color:#1a1a2e;text-align:center;">Different task</p>
+                            <div class="results-table" style="overflow-x:auto;">
+                                <table class="table is-fullwidth is-bordered is-hoverable">
+                                    <thead>
+                                        <tr>
+                                            <th>Dataset</th>
+                                            <th>RL-VLM-F (%)</th>
+                                            <th>Robometer (%)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td>USC Franka</td>
+                                            <td>70.7</td>
+                                            <td class="best"><strong>100.0</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>USC Koch</td>
+                                            <td>54.7</td>
+                                            <td class="best"><strong>89.8</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>USC Trossen</td>
+                                            <td>64.0</td>
+                                            <td class="best"><strong>99.0</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>USC xArm</td>
+                                            <td>73.3</td>
+                                            <td class="best"><strong>98.2</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>MIT Franka</td>
+                                            <td>55.3</td>
+                                            <td class="best"><strong>98.4</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>UT Dallas SO-101</td>
+                                            <td>72.7</td>
+                                            <td class="best"><strong>100.0</strong></td>
+                                        </tr>
+                                        <tr class="ours">
+                                            <td><strong>Average</strong></td>
+                                            <td>65.1</td>
+                                            <td class="best"><strong>97.6</strong></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <p class="is-size-6" style="color:#666;margin-top:0.5rem;text-align:center;">Different task
+                                trajectory pairwise preference accuracy.</p>
+                        </div>
+                    </div>
+                </div><!-- end offline-tab-preference-accuracy -->
+            </div><!-- end offline-eval-tabs -->
+            <hr class="offline-eval-separator" aria-hidden="true">
+
+            <!-- Reward curves by task (video) -->
+            <h3 class="title is-5" style="margin-top:2.5rem;text-align:center;color:#1a1a2e;">Reward curves by task</h3>
+            <p style="text-align:center;color:#555;margin-bottom:1.25rem;font-size:0.95rem;">Select a task to view the
+                reward curve video.</p>
+            <div class="reward-curves-viewer" style="max-width:900px;margin:0 auto 2rem;">
+                <div class="reward-curves-controls"
+                    style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:1rem;margin-bottom:1.5rem;padding:1rem;background:#f7f9fc;border-radius:10px;">
+                    <label
+                        style="display:flex;align-items:center;gap:0.5rem;font-size:0.9rem;font-weight:600;color:#333;">
+                        Task
+                        <div class="select is-small">
+                            <select id="reward-curves-task">
+                                <option value="">— Select —</option>
+                            </select>
+                        </div>
+                    </label>
+                </div>
+                <div class="result-card" style="overflow:hidden;">
+                    <video id="reward-curves-video" controls muted playsinline preload="metadata"
+                        style="width:100%;display:block;border-radius:8px 8px 0 0;vertical-align:top;background:#f5f5f5;">
+                        <source id="reward-curves-video-src" src="" type="video/mp4">
+                    </video>
+                </div>
+            </div>
+            <script>
+                (function () {
+                    var BASE = 'assets/reward_curves';
+                    var taskSelect = document.getElementById('reward-curves-task');
+                    var video = document.getElementById('reward-curves-video');
+                    var videoSrc = document.getElementById('reward-curves-video-src');
+                    function filenameToLabel(filename) {
+                        var name = filename.replace(/\.mp4$/i, '').replace(/_/g, ' ');
+                        return name;
+                    }
+                    function updateVideo() {
+                        var filename = taskSelect.value;
+                        if (!filename) {
+                            videoSrc.src = '';
+                            video.style.display = 'none';
+                            return;
+                        }
+                        videoSrc.src = BASE + '/' + encodeURIComponent(filename);
+                        video.style.display = 'block';
+                        video.load();
+                        function tryPlay() {
+                            var p = video.play();
+                            if (p && p.catch) p.catch(function () { });
+                        }
+                        video.addEventListener('canplay', tryPlay, { once: true });
+                        if (video.readyState >= 2) tryPlay();
+                    }
+                    taskSelect.addEventListener('change', updateVideo);
+                    fetch(BASE + '/config.json').then(function (r) { return r.json(); }).then(function (filenames) {
+                        if (!filenames || !filenames.length) return;
+                        filenames.forEach(function (filename) {
+                            if (!/\.mp4$/i.test(filename)) return;
+                            var o = document.createElement('option');
+                            o.value = filename;
+                            o.textContent = filenameToLabel(filename);
+                            taskSelect.appendChild(o);
+                        });
+                        taskSelect.value = filenames[0];
+                        updateVideo();
+                    }).catch(function () {
+                        var fallback = ['stack_the_red_cube_on_the_gray_cube.mp4'];
+                        fallback.forEach(function (filename) {
+                            var o = document.createElement('option');
+                            o.value = filename;
+                            o.textContent = filenameToLabel(filename);
+                            taskSelect.appendChild(o);
+                        });
+                        taskSelect.value = fallback[0];
+                        updateVideo();
+                    });
+                })();
+            </script>
+
+        </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════════════
+     EXPERIMENTS
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-light-alt" id="experiments">
+        <div class="container">
+            <h2 class="section-heading">Policy Learning Experiments</h2>
+            <div class="section-divider"></div>
+
+            <p
+                style="text-align:center;color:#555;margin-bottom:2.5rem;max-width:700px;margin-left:auto;margin-right:auto;">
+                Robometer is evaluated across five diverse downstream applications.
+                In every setting Robometer is used as a <em>plug-in</em> reward function without task-specific
+                fine-tuning.
+            </p>
+
+            <!-- ── Tab navigation ── -->
+            <div class="exp-tabs">
+                <div class="tabs is-centered is-medium is-toggle">
+                    <ul id="exp-tab-list">
+                        <li class="is-active" data-tab="online-rl"><a>Online RL</a></li>
+                        <li data-tab="offline-rl"><a>Offline RL</a></li>
+                        <li data-tab="model-based-rl"><a>Model-Based RL</a></li>
+                        <li data-tab="failure-detection"><a>Failure Detection</a></li>
+                        <li data-tab="data-retrieval"><a>Data Retrieval + IL</a></li>
+                    </ul>
+                </div>
+
+                <!-- ── ONLINE RL ── -->
+                <div id="tab-online-rl" class="tab-content">
+
+                    <!-- Sub-tab navigation -->
+                    <div class="sub-tabs" style="margin-bottom:1.5rem;">
+                        <div class="tabs is-centered is-small is-toggle">
+                            <ul id="online-rl-sub-tab-list">
+                                <li class="is-active" data-subtab="single-stage"><a>Single-Stage RL</a></li>
+                                <li data-subtab="multi-stage"><a>Multi-Stage RL</a></li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- ── Single-Stage RL ── -->
+                    <div id="subtab-single-stage" class="sub-tab-content is-active">
+                        <div class="highlight-box is-info-light" style="margin-bottom:1.5rem;">
+                            <strong>Setting.</strong>
+                            Robometer rewards are used as dense reward signals for single-stage, online reinforcement
+                            learning with <a href="https://diffusion-steering.github.io/">DSRL</a> + $\pi_0$.
+                            Successes are *automatically* detected by the reward model.
+                        </div>
+                        <div class="columns is-multiline is-centered">
+                            <div class="column is-6">
+                                <div class="result-card">
+                                    <video controls muted playsinline autoplay loop preload="metadata">
+                                        <source src="assets/online_rl/roboreward_auto_online_rl_small.mp4"
+                                            type="video/mp4">
+                                    </video>
+                                    <div class="card-caption"><b>RoboReward</b> 100x speed real world training clip.
+                                        RoboReward consistently
+                                        falsely predicts success/full reward before the robot finishes the task, leading
+                                        to poor evaluation performance.
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="column is-6">
+                                <div class="result-card">
+                                    <video controls muted playsinline autoplay loop preload="metadata">
+                                        <source src="assets/online_rl/robometer_auto_online_rl_small.mp4"
+                                            type="video/mp4">
+                                    </video>
+                                    <div class="card-caption"><b>Robometer</b> 100x speed real world training clip.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="results-table" style="margin-bottom:1.5rem;">
+                            <table class="table is-fullwidth is-bordered is-hoverable">
+                                <thead>
+                                    <tr>
+                                        <th>Method</th>
+                                        <th>Success Rate ↑</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td>$\pi_0$ base (before RL)</td>
+                                        <td>0.20</td>
+                                    </tr>
+                                    <tr>
+                                        <td>RoboReward</td>
+                                        <td>0.55</td>
+                                    </tr>
+                                    <tr class="ours">
+                                        <td><strong>Robometer (ours) ✓</strong></td>
+                                        <td class="best">0.85</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- ── Multi-Stage RL ── -->
+                    <div id="subtab-multi-stage" class="sub-tab-content">
+                        <div class="highlight-box is-info-light" style="margin-bottom:1.5rem;">
+                            <strong>Setting.</strong>
+                            Robometer rewards are used as dense reward signals for multi-stage online policy learning
+                            with <a href="https://diffusion-steering.github.io/">DSRL</a> + $\pi_0$.
+                            We perform a long-horizon, multi-stage RL task by using a VLM to break down the task into 2
+                            sub-tasks, "put the corn in the pot on the dish rack" and "put the pot lid on the pot in the
+                            dish rack".
+                            Successes and stage advancement are *automatically* detected by the reward model.
+                        </div>
+                        <div class="columns is-multiline">
+                            <div class="column is-6">
+                                <div class="result-card">
+                                    <video controls muted playsinline autoplay loop preload="metadata">
+                                        <source src="assets/online_rl/roboreward_multistage_online_rl_small.mp4"
+                                            type="video/mp4">
+                                    </video>
+                                    <div class="card-caption"><b>RoboReward</b> Multi-stage RL at 100x speed. RoboReward
+                                        is
+                                        often falsely predicts success for the first stage when the robot drops the corn
+                                        next to but not into the pot, leading to poor downstream evaluation performance
+                                        where the robot rarely puts the corn into the pot.
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="column is-6">
+                                <div class="result-card">
+                                    <video controls muted playsinline autoplay loop preload="metadata">
+                                        <source src="assets/online_rl/robometer_multistage_online_rl_small.mp4"
+                                            type="video/mp4">
+                                    </video>
+                                    <div class="card-caption"><b>Robometer</b> Multi-stage RL at 100x speed. Robometer
+                                        is
+                                        robust to when the robot drops the corn next to but not into the pot, leading to
+                                        few false stage advancements.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="results-table" style="margin-bottom:1.5rem;">
+                            <table class="table is-fullwidth is-bordered is-hoverable">
+                                <thead>
+                                    <tr>
+                                        <th>Method</th>
+                                        <th>Success Rate ↑</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td>$\pi_0$ base (before RL)</td>
+                                        <td>0.20</td>
+                                    </tr>
+                                    <tr>
+                                        <td>RoboReward</td>
+                                        <td>0.20</td>
+                                    </tr>
+                                    <tr class="ours">
+                                        <td><strong>Robometer (ours) ✓</strong></td>
+                                        <td class="best">0.70</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- ── OFFLINE RL ── -->
+                <div id="tab-offline-rl" class="tab-content" style="display:none;">
+                    <div class="highlight-box is-info-light" style="margin-bottom:1.5rem;">
+                        <strong>Setting.</strong>
+                        Robometer rewards serve as dense feedback for offline RL with IQL on mixed-expertise data. By
+                        providing intermediate
+                        supervision, they reduce long-horizon credit assignment and enable effective trajectory
+                        stitching at lower discount
+                        factors $\gamma$; we sweep $\gamma$ for each reward model and report the best-performing
+                        configuration.
+                    </div>
+                    <div class="results-table" style="margin-bottom:1.5rem;">
+                        <table class="table is-fullwidth is-bordered is-hoverable">
+                            <thead>
+                                <tr>
+                                    <th>Task</th>
+                                    <th>Sparse</th>
+                                    <th>RoboReward</th>
+                                    <th>Robometer</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Put the bread in the oven (Setting 1)</td>
+                                    <td>0.50</td>
+                                    <td>0.55</td>
+                                    <td class="best"><strong>0.85</strong></td>
+                                </tr>
+                                <tr>
+                                    <td>Put red bowl on the blue plate (Setting 2)</td>
+                                    <td>0.05</td>
+                                    <td>0.00</td>
+                                    <td class="best"><strong>0.15</strong></td>
+                                </tr>
+                                <tr class="ours">
+                                    <td><strong>Average</strong></td>
+                                    <td>0.275</td>
+                                    <td>0.275</td>
+                                    <td class="best"><strong>0.50</strong></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p style="text-align:center; color:#555; margin-bottom:1rem; font-size:0.95rem;">We observe that
+                        Robometer performs best at a
+                        lower discount factor $\gamma=0.9$. Compared to sparse rewards and prior reward models,
+                        Robometer achieves up to a 2.4× higher
+                        success rate by providing temporally aligned feedback that enables more effective trajectory
+                        stitching.
+                    </p>
+                    <div class="columns">
+                        <div class="column is-6">
+                            <div class="result-card">
+                                <div style="min-height:240px;">
+                                    <video controls muted playsinline autoplay loop preload="metadata"
+                                        style="border-radius:8px 8px 0 0; width:100%;">
+                                        <source src="assets/offline_rl/setting_1.mp4" type="video/mp4">
+                                    </video>
+                                </div>
+                                <div class="card-caption">Policy trained on Robometer rewards on Setting 1.</div>
+                            </div>
+                        </div>
+                        <div class="column is-6">
+                            <div class="result-card">
+                                <div style="min-height:240px;">
+                                    <video controls muted playsinline autoplay loop preload="metadata"
+                                        style="border-radius:8px 8px 0 0; width:100%;">
+                                        <source src="assets/offline_rl/setting_2.mp4" type="video/mp4">
+                                    </video>
+                                </div>
+                                <div class="card-caption">Policy trained on Robometer rewards on Setting 2.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── MODEL-BASED RL ── -->
+                <div id="tab-model-based-rl" class="tab-content" style="display:none;">
+                    <div class="highlight-box is-info-light" style="margin-bottom:1.5rem;">
+                        <strong>Setting.</strong>
+                        Robometer is used as a reward model to guide model-based planning with <a
+                            href="https://dreamzero0.github.io/">DreamZero</a>
+                        via using Robometer rewards on imagined trajectories to choose the best next action chunk.
+                    </div>
+                    <div class="results-table" style="margin-bottom:1.5rem;">
+                        <table class="table is-fullwidth is-bordered is-hoverable">
+                            <thead>
+                                <tr>
+                                    <th>Method</th>
+                                    <th>Task: "Put the ice cream cone in the pink plate"</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>DreamZero Base</td>
+                                    <td>0.20</td>
+                                </tr>
+                                <tr class="ours">
+                                    <td><strong>+Robometer (ours) ✓</strong></td>
+                                    <td class="best">0.70</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="columns">
+                        <div class="column is-6">
+                            <div class="result-card">
+                                <div style="min-height:240px;">
+                                    <video controls muted playsinline autoplay loop preload="metadata"
+                                        style="border-radius:8px 8px 0 0; width:100%;">
+                                        <source src="assets/mbrl/mbrl_dreamzero.mov" type="video/mp4">
+                                    </video>
+                                </div>
+                                <div class="card-caption">Model-based planning with <b>DreamZero</b>. It mostly fails to
+                                    put the ice cream cone in the correct plate. Video plays at 30x speed.</div>
+                            </div>
+                        </div>
+                        <div class="column is-6">
+                            <div class="result-card">
+                                <div style="min-height:240px;">
+                                    <video controls muted playsinline autoplay loop preload="metadata"
+                                        style="border-radius:8px 8px 0 0; width:100%;">
+                                        <source src="assets/mbrl/mbrl_robometer.mov" type="video/mp4">
+                                    </video>
+                                </div>
+                                <div class="card-caption">Model-based planning guided by <b>Robometer</b> reward. It
+                                    successfully guides DreamZero to execute the action chunk
+                                    corresponding to putting the ice cream cone in the correct plate. Video plays at
+                                    100x speed -- inference delay comes from sampling multiple action chunks and not
+                                    from the model itself.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── FAILURE DETECTION ── -->
+                <div id="tab-failure-detection" class="tab-content" style="display:none;">
+                    <div class="highlight-box is-info-light" style="margin-bottom:1.5rem;">
+                        <strong>Setting.</strong>
+                        Robometer rewards are used for zero-shot failure detection on various real-world manipulation
+                        trajectories from an unseen robot platform,
+                        spanning seven tasks and including both irreversible and insufficient-progress failures.
+                        Failures are detected via temporal inconsistencies
+                        in predicted per-frame rewards. Evaluated with precision, recall and F1 against human-labeled
+                        outcomes.
+                    </div>
+                    <p style="margin-bottom:1rem;font-size:0.95rem;color:#555;">Per-task TPR, TNR, and F1 for failure
+                        detection. Best F1 per task in <span style="color:#0a6b2e;font-weight:700;">green</span>.</p>
+                    <div class="results-table" style="margin-bottom:1.5rem; overflow-x:auto;">
+                        <table class="table is-fullwidth is-bordered is-hoverable failure-detection-task-table">
+                            <thead>
+                                <tr>
+                                    <th rowspan="2">Task</th>
+                                    <th colspan="3">GPT-5-mini</th>
+                                    <th colspan="3">RoboReward-4B</th>
+                                    <th colspan="3">Robometer</th>
+                                </tr>
+                                <tr>
+                                    <th>TPR</th>
+                                    <th>TNR</th>
+                                    <th>F1</th>
+                                    <th>TPR</th>
+                                    <th>TNR</th>
+                                    <th>F1</th>
+                                    <th>TPR</th>
+                                    <th>TNR</th>
+                                    <th>F1</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>move banana</td>
+                                    <td>0.31</td>
+                                    <td>1.00</td>
+                                    <td>0.48</td>
+                                    <td>1.00</td>
+                                    <td>0.62</td>
+                                    <td>0.91</td>
+                                    <td>1.00</td>
+                                    <td>0.75</td>
+                                    <td class="best"><strong>0.94</strong></td>
+                                </tr>
+                                <tr>
+                                    <td>move mouse</td>
+                                    <td>0.80</td>
+                                    <td>1.00</td>
+                                    <td>0.89</td>
+                                    <td>0.80</td>
+                                    <td>0.75</td>
+                                    <td>0.80</td>
+                                    <td>1.00</td>
+                                    <td>0.75</td>
+                                    <td class="best"><strong>0.91</strong></td>
+                                </tr>
+                                <tr>
+                                    <td>pour pebble</td>
+                                    <td>0.14</td>
+                                    <td>1.00</td>
+                                    <td>0.25</td>
+                                    <td>0.57</td>
+                                    <td>1.00</td>
+                                    <td>0.73</td>
+                                    <td>0.71</td>
+                                    <td>1.00</td>
+                                    <td class="best"><strong>0.83</strong></td>
+                                </tr>
+                                <tr>
+                                    <td>fold towel</td>
+                                    <td>0.15</td>
+                                    <td>1.00</td>
+                                    <td>0.27</td>
+                                    <td>0.31</td>
+                                    <td>0.67</td>
+                                    <td>0.40</td>
+                                    <td>0.54</td>
+                                    <td>0.56</td>
+                                    <td class="best"><strong>0.58</strong></td>
+                                </tr>
+                                <tr>
+                                    <td>pull tissue</td>
+                                    <td>0.00</td>
+                                    <td>1.00</td>
+                                    <td>0.00</td>
+                                    <td>0.55</td>
+                                    <td>0.00</td>
+                                    <td>0.57</td>
+                                    <td>0.73</td>
+                                    <td>0.50</td>
+                                    <td class="best"><strong>0.76</strong></td>
+                                </tr>
+                                <tr>
+                                    <td>put spoon</td>
+                                    <td>0.14</td>
+                                    <td>1.00</td>
+                                    <td>0.25</td>
+                                    <td>0.57</td>
+                                    <td>1.00</td>
+                                    <td class="best"><strong>0.73</strong></td>
+                                    <td>0.57</td>
+                                    <td>1.00</td>
+                                    <td>0.73</td>
+                                </tr>
+                                <tr>
+                                    <td>stir pot</td>
+                                    <td>0.09</td>
+                                    <td>1.00</td>
+                                    <td>0.17</td>
+                                    <td>0.91</td>
+                                    <td>1.00</td>
+                                    <td class="best"><strong>0.95</strong></td>
+                                    <td>0.82</td>
+                                    <td>1.00</td>
+                                    <td>0.90</td>
+                                </tr>
+                                <tr class="ours">
+                                    <td><strong>Average</strong></td>
+                                    <td>0.20</td>
+                                    <td>1.00</td>
+                                    <td>0.33</td>
+                                    <td>0.69</td>
+                                    <td>0.63</td>
+                                    <td>0.74</td>
+                                    <td>0.77</td>
+                                    <td>0.70</td>
+                                    <td class="best"><strong>0.81</strong></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="columns is-centered" style="display: flex; flex-wrap: nowrap; gap: 0.15rem;">
+                        <div class="column" style="flex: 1;">
+                            <div class="result-card" style="height:100%;">
+                                <video controls muted playsinline autoplay loop preload="metadata"
+                                    style="border-radius:8px 8px 0 0; width:100%;">
+                                    <source src="assets/failure_detection/failure_detection_1.mp4" type="video/mp4">
+                                </video>
+                                <div class="card-caption">Robometer detects a failure when the pebbles are spilled
+                                    during pouring.</div>
+                            </div>
+                        </div>
+                        <div class="column" style="flex: 1;">
+                            <div class="result-card" style="height:100%;">
+                                <video controls muted playsinline autoplay loop preload="metadata"
+                                    style="border-radius:8px 8px 0 0; width:100%;">
+                                    <source src="assets/failure_detection/failure_detection_2.mp4" type="video/mp4">
+                                </video>
+                                <div class="card-caption">Robometer detects a failure when the spoon is dropped.</div>
+                            </div>
+                        </div>
+                        <!-- <div class="column" style="flex: 1;">
+            <div class="result-card" style="height:100%;">
+              <video controls muted playsinline preload="metadata" style="border-radius:8px 8px 0 0; width:100%;">
+                <source src="assets/failure_detection/failure_detection_3.mp4" type="video/mp4">
+              </video>
+              <div class="card-caption"><b>$\pi_{0.5}$ LoRA-finetuned on Robometer-retrieved data.</b></div>
+            </div>
+          </div> -->
+                    </div>
+                </div>
+
+                <!-- ── DATA RETRIEVAL + IL ── -->
+                <div id="tab-data-retrieval" class="tab-content" style="display:none;">
+                    <div class="highlight-box is-info-light" style="margin-bottom:1.5rem;">
+                        <strong>Setting.</strong>
+                        Given a multi-task, unlabeled play dataset, Robometer retrieves the most relevant
+                        subtrajectories for a task instruction using either
+                        (i) preference-based pairwise trajectory comparisons or (ii) progress-based ranking via
+                        per-timestep reward predictions and
+                        value–order correlation.
+                    </div>
+                    <div class="result-card"
+                        style="margin-bottom:1.5rem;max-width:75%;margin-left:auto;margin-right:auto;">
+                        <img src="assets/retrieval/retrieval_setup.png"
+                            alt="Data retrieval and imitation learning results"
+                            style="width:100%; display:block; border-radius:8px 8px 0 0;">
+                    </div>
+                    <p style="text-align:center; color:#555; margin-bottom:1rem; font-size:0.95rem;">Task success rates
+                        of LoRA-finetuned $\pi_{0.5}$ on 100 retrieved segments with highest similarity.</p>
+                    <div class="results-table task-success-rates-table"
+                        style="margin-bottom:1.5rem; overflow-x:auto; max-width:75%; margin-left:auto; margin-right:auto;">
+                        <table class="table is-fullwidth is-bordered is-hoverable">
+                            <thead>
+                                <tr>
+                                    <th>Task</th>
+                                    <th>$\pi_{0.5}$ Base</th>
+                                    <th>SigLIP</th>
+                                    <th>STRAP</th>
+                                    <th>RoboReward-4B</th>
+                                    <th>Robometer-Pref</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><strong>Stir Pot</strong></td>
+                                    <td>0/20</td>
+                                    <td>3/20</td>
+                                    <td>2/20</td>
+                                    <td>0/20</td>
+                                    <td class="best"><strong>13/20</strong></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Open Red Drawer</strong></td>
+                                    <td>0/20</td>
+                                    <td>0/20</td>
+                                    <td>3/20</td>
+                                    <td>0/20</td>
+                                    <td class="best"><strong>14/20</strong></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="columns is-multiline">
+                        <div class="column is-8">
+                            <div class="result-card">
+                                <div
+                                    style="display: flex; flex-wrap: nowrap; justify-content: space-between; align-items: flex-start;">
+                                    <img src="assets/retrieval/retrieved1.gif" alt="Stir Pot Example 1"
+                                        style="width: 32%; border-radius:8px; background:#eee;">
+                                    <img src="assets/retrieval/wrist1.gif" alt="Stir Pot Example 2"
+                                        style="width: 32%; border-radius:8px; background:#eee;">
+                                    <img src="assets/retrieval/retrieved2.gif" alt="Open Drawer Example 1"
+                                        style="width: 32%; border-radius:8px; background:#eee;">
+                                </div>
+                                <div class="card-caption">
+                                    <strong>Instruction:</strong> Open the red drawer<br>
+                                    Example retrieved subtrajectories by Robometer. Note that, this task requires 2-arm
+                                    coordination to open the drawer, with one arm pushing down on the drawer and the
+                                    other arm pulling down on the drawer handle.
+                                </div>
+                            </div>
+                        </div>
+                        <div class="column is-4">
+                            <div class="result-card">
+                                <video controls muted playsinline autoplay loop preload="metadata"
+                                    style="border-radius:8px 8px 0 0;">
+                                    <source src="assets/retrieval/open_drawer.mp4" type="video/mp4">
+                                </video>
+                                <div class="card-caption"><b>$\pi_{0.5}$ LoRA-finetuned on Robometer-retrieved data.</b>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div><!-- end .exp-tabs -->
+        </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════════════
+     DEMO – HUGGING FACE SPACE
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-light-alt" id="demo">
+        <div class="container">
+            <h2 class="section-heading">Robometer Demo</h2>
+            <div class="section-divider"></div>
+            <p
+                style="text-align:center; color:#555; margin-bottom:1.5rem; max-width:600px; margin-left:auto; margin-right:auto;">
+                Try the reward model evaluation UI below, or separate visit in a new tab at <a
+                    href="https://robometer-rewardeval-ui.hf.space"
+                    target="_blank">https://robometer-rewardeval-ui.hf.space</a>.
+            </p>
+            <div style="width:100%; border-radius:12px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,.12);">
+                <iframe src="https://robometer-rewardeval-ui.hf.space" frameborder="0" width="100%" height="550"
+                    title="Robometer / Reward Eval Demo" style="display:block; min-height:550px;"></iframe>
+            </div>
+        </div>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════════════════
+     LOW-RANK FINETUNING
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-white-alt" id="finetuning">
+        <div class="container">
+            <h2 class="section-heading">Low-rank Finetuning of Robometer</h2>
+            <div class="section-divider"></div>
+
+            <p
+                style="color:#555;margin-bottom:1.5rem;max-width:640px;margin-left:auto;margin-right:auto;text-align:center;">
+                Robometer serves as a strong initialization for domain-specific reward fine-tuning: practitioners can
+                adapt it to new tasks or embodiments with limited data and compute (e.g., LoRA with a single GPU)
+                instead of training a reward model from scratch. We demonstrate this on <a
+                    href="https://huggingface.co/datasets/MINT-SJTU/RoboFAC-dataset" target="_blank"
+                    rel="noopener">RoboFAC</a>; fine-tuning from Robometer substantially outperforms fine-tuning the
+                base VLM across reward and ranking metrics.
+            </p>
+
+            <div class="results-table" style="margin-bottom:1.5rem; overflow-x:auto;">
+                <table class="table is-fullwidth is-bordered is-hoverable">
+                    <thead>
+                        <tr>
+                            <th>Method</th>
+                            <th>VOC $r$ ↑</th>
+                            <th>Kendall $\tau$ ↑</th>
+                            <th>Succ-Fail Diff ↑</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Robometer-4B (Zero-shot)</td>
+                            <td>0.652</td>
+                            <td>0.436</td>
+                            <td>0.141</td>
+                        </tr>
+                        <tr>
+                            <td>Qwen3-VL (LoRA)</td>
+                            <td>0.701</td>
+                            <td>0.067</td>
+                            <td>0.005</td>
+                        </tr>
+                        <tr>
+                            <td>Qwen3-VL (Full FT)</td>
+                            <td>0.727</td>
+                            <td>0.102</td>
+                            <td>0.008</td>
+                        </tr>
+                        <tr>
+                            <td>Robometer-4B (LoRA)</td>
+                            <td>0.875</td>
+                            <td>0.786</td>
+                            <td>0.271</td>
+                        </tr>
+                        <tr class="ours">
+                            <td><strong>Robometer-4B (Full FT)</strong></td>
+                            <td class="best"><strong>0.884</strong></td>
+                            <td class="best"><strong>0.802</strong></td>
+                            <td class="best"><strong>0.302</strong></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════════════════
+     BIBTEX
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-white-alt" id="bibtex">
+        <div class="container" style="max-width:780px;">
+            <h2 class="section-heading">BibTeX</h2>
+            <div class="section-divider"></div>
+            <div style="position:relative;">
+                <div class="bibtex-box" id="bibtex-content">@inproceedings{liang2026robometer,
+                    title = {Robometer: Scaling General-Purpose Robotic Reward Models via Trajectory Comparisons},
+                    author={Anthony Liang and Yigit Korkmaz and Jiahui Zhang and Minyoung Hwang and Abrar Anwar and
+                    Sidhant Kaushik and Aditya Shah and Alex S. Huang and Luke Zettlemoyer and Dieter Fox and Yu Xiang
+                    and Anqi Li and Andreea Bobu and Abhishek Gupta and Stephen Tu and Erdem Biyik and Jesse Zhang},
+                    year={2026},
+                    booktitle={Robotics: Science and Systems 2026},
+                    }</div>
+                <button class="button is-small bibtex-copy-btn" onclick="copyBibtex()" title="Copy BibTeX">
+                    <span class="icon"><i class="fas fa-copy"></i></span>
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════════════
+     FOOTER
+════════════════════════════════════════════════════════════ -->
+    <footer class="footer">
+        <div class="container has-text-centered">
+            <p style="margin-top:0.5rem;font-size:0.85rem;">
+                Website template adapted from
+                <a href="https://opendrivelab.com/kai0-rl/" target="_blank">RISE</a>.
+            </p>
+        </div>
+    </footer>
+
+    <!-- ════════════════════════════════════════════════════════════
+     JAVASCRIPT
+════════════════════════════════════════════════════════════ -->
+    <script>
+        /* Navbar burger */
+        document.querySelector('.navbar-burger').addEventListener('click', function () {
+            this.classList.toggle('is-active');
+            document.getElementById('navMenu').classList.toggle('is-active');
+        });
+
+        /* Close mobile menu when a nav link is clicked */
+        document.querySelectorAll('.navbar-end .navbar-item[href^="#"]').forEach(function (link) {
+            link.addEventListener('click', function () {
+                var burger = document.querySelector('.navbar-burger');
+                var menu = document.getElementById('navMenu');
+                if (burger && burger.classList.contains('is-active')) {
+                    burger.classList.remove('is-active');
+                    menu.classList.remove('is-active');
+                }
+            });
+        });
+
+        /* Experiment tabs */
+        document.querySelectorAll('#exp-tab-list li').forEach(function (li) {
+            li.addEventListener('click', function () {
+                /* deactivate all tabs and hide all panels */
+                document.querySelectorAll('#exp-tab-list li').forEach(function (el) { el.classList.remove('is-active'); });
+                document.querySelectorAll('.tab-content').forEach(function (el) { el.style.display = 'none'; });
+                /* activate clicked tab */
+                this.classList.add('is-active');
+                document.getElementById('tab-' + this.dataset.tab).style.display = 'block';
+            });
+        });
+
+        /* Toggle full per-dataset eval tables */
+        (function () {
+            var btn = document.getElementById('toggle-full-eval');
+            var panel = document.getElementById('full-eval-panels');
+            if (btn && panel) {
+                btn.addEventListener('click', function () {
+                    var isOpen = panel.style.display === 'block';
+                    panel.style.display = isOpen ? 'none' : 'block';
+                    btn.textContent = isOpen ? 'Show full per-dataset results' : 'Hide full per-dataset results';
+                    btn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+                });
+            }
+        })();
+
+        /* Offline eval tabs (VOC+Ranking, RoboRewardBench, Preference Accuracy) */
+        document.querySelectorAll('#offline-eval-tab-list li').forEach(function (li) {
+            li.addEventListener('click', function () {
+                document.querySelectorAll('#offline-eval-tab-list li').forEach(function (el) { el.classList.remove('is-active'); });
+                document.querySelectorAll('.offline-eval-tab-panel').forEach(function (el) { el.classList.remove('is-active'); });
+                this.classList.add('is-active');
+                document.getElementById('offline-tab-' + this.dataset.offlineTab).classList.add('is-active');
+            });
+        });
+
+        /* Eval split tabs (RBM-EVAL-ID / OOD) */
+        document.querySelectorAll('#eval-split-tab-list li').forEach(function (li) {
+            li.addEventListener('click', function () {
+                document.querySelectorAll('#eval-split-tab-list li').forEach(function (el) { el.classList.remove('is-active'); });
+                document.querySelectorAll('.eval-tab-panel').forEach(function (el) { el.classList.remove('is-active'); });
+                this.classList.add('is-active');
+                document.getElementById('eval-panel-' + this.dataset.evalTab).classList.add('is-active');
+            });
+        });
+
+        /* Online RL sub-tabs */
+        document.querySelectorAll('#online-rl-sub-tab-list li').forEach(function (li) {
+            li.addEventListener('click', function () {
+                document.querySelectorAll('#online-rl-sub-tab-list li').forEach(function (el) { el.classList.remove('is-active'); });
+                document.querySelectorAll('#tab-online-rl .sub-tab-content').forEach(function (el) { el.classList.remove('is-active'); });
+                this.classList.add('is-active');
+                document.getElementById('subtab-' + this.dataset.subtab).classList.add('is-active');
+            });
+        });
+
+        /* Teaser video: start loading and try play when ready (helps autoplay) */
+        (function () {
+            var video = document.getElementById('teaser-video');
+            if (video) {
+                function tryPlay() {
+                    var p = video.play();
+                    if (p && p.catch) p.catch(function () { });
+                }
+                video.addEventListener('canplay', tryPlay, { once: true });
+                video.addEventListener('loadeddata', tryPlay, { once: true });
+                if (video.readyState >= 2) tryPlay();
+            }
+        })();
+
+        /* Navbar: transparent over video / first screen, white only when well past hero */
+        (function () {
+            var navbar = document.querySelector('.navbar');
+            var hero = document.getElementById('hero-video');
+            if (!navbar || !hero) return;
+            var HERO_ZONE = 1.2; /* treat first 1.2 viewports as “hero zone” – navbar stays transparent */
+            function updateNavbar() {
+                var scrollY = window.scrollY || document.documentElement.scrollTop;
+                var viewportH = window.innerHeight;
+                var heroRect = hero.getBoundingClientRect();
+                var inHeroZone = scrollY <= 0 || scrollY < viewportH * HERO_ZONE || heroRect.bottom > 0;
+                if (inHeroZone) {
+                    navbar.classList.add('navbar-over-video');
+                } else {
+                    navbar.classList.remove('navbar-over-video');
+                }
+            }
+            updateNavbar();
+            window.addEventListener('scroll', updateNavbar, { passive: true });
+            window.addEventListener('resize', updateNavbar);
+        })();
+
+        /* Scroll spy: highlight active navbar item based on visible section */
+        (function () {
+            var navLinks = document.querySelectorAll('.navbar-end .navbar-item[href^="#"]');
+            if (!navLinks.length) return;
+            var sections = [];
+            navLinks.forEach(function (link) {
+                var id = link.getAttribute('href').slice(1);
+                var el = document.getElementById(id);
+                if (el) sections.push({ id: id, el: el, link: link });
+            });
+
+            function updateActiveNav() {
+                var scrollY = window.scrollY || document.documentElement.scrollTop;
+                var offset = 80;
+                var active = null;
+                for (var i = sections.length - 1; i >= 0; i--) {
+                    if (sections[i].el.getBoundingClientRect().top <= offset) {
+                        active = sections[i];
+                        break;
+                    }
+                }
+                navLinks.forEach(function (link) { link.classList.remove('is-active-section'); });
+                if (active) {
+                    active.link.classList.add('is-active-section');
+                    if (history.replaceState && location.hash !== '#' + active.id) {
+                        history.replaceState(null, '', '#' + active.id);
+                    }
+                } else if (history.replaceState && location.hash) {
+                    history.replaceState(null, '', location.pathname + location.search);
+                }
+            }
+
+            updateActiveNav();
+            window.addEventListener('scroll', updateActiveNav, { passive: true });
+            window.addEventListener('resize', updateActiveNav);
+        })();
+
+        /* Hero text fades out as user scrolls down (RISE-style) */
+        (function () {
+            var hero = document.getElementById('hero-video');
+            var heroBody = hero ? hero.querySelector('.hero-body') : null;
+            var scrollBtn = document.getElementById('scroll-indicator-btn');
+            if (!hero || !heroBody) return;
+            function updateHeroFade() {
+                var rect = hero.getBoundingClientRect();
+                var opacity = Math.max(0, Math.min(1, rect.bottom / window.innerHeight));
+                heroBody.style.opacity = opacity;
+                if (scrollBtn) scrollBtn.style.opacity = opacity;
+            }
+            updateHeroFade();
+            window.addEventListener('scroll', updateHeroFade, { passive: true });
+            window.addEventListener('resize', updateHeroFade);
+        })();
+
+        /* Scroll button: smooth scroll without changing URL (avoids #method in shared links) */
+        (function () {
+            var btn = document.getElementById('scroll-indicator-btn');
+            var target = document.getElementById('at-a-glance');
+            if (btn && target) {
+                btn.addEventListener('click', function () {
+                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                });
+            }
+        })();
+
+        /* Page progress bar: fill by scroll (USC red) */
+        (function () {
+            var fill = document.getElementById('page-progress-fill');
+            if (!fill) return;
+            function updateProgress() {
+                var scrollTop = window.scrollY || document.documentElement.scrollTop;
+                var scrollHeight = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+                var pct = scrollHeight > 0 ? Math.min(100, (scrollTop / scrollHeight) * 100) : 0;
+                fill.style.width = pct + '%';
+            }
+            updateProgress();
+            window.addEventListener('scroll', updateProgress, { passive: true });
+            window.addEventListener('resize', updateProgress);
+        })();
+
+        /* BibTeX copy */
+        function copyBibtex() {
+            var text = document.getElementById('bibtex-content').innerText;
+            navigator.clipboard.writeText(text).then(function () {
+                var btn = document.querySelector('.bibtex-copy-btn');
+                btn.innerHTML = '<span class="icon"><i class="fas fa-check"></i></span>';
+                setTimeout(function () {
+                    btn.innerHTML = '<span class="icon"><i class="fas fa-copy"></i></span>';
+                }, 2000);
+            });
+        }
+    </script>
+
+</body>
+
+</html>
