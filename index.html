@@ -975,227 +975,50 @@
             <br>
             <h3 class="title is-4" style="color:#1a1a2e;">Specific Contributions</h3>
             <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
-                <strong>Training Rewards on Different Expertise Data</strong><br />
-                Robometer enables scalable training of rewards on both (1) reward-labeled / expert demonstrations and
-                (2) reward-unlabeled, suboptimal trajectories.
-                This enables well-calibrated, dense rewards usable zero-shot for policy learning.
+                <strong>GameBoyWorlds Framework</strong><br />
+                A Gymnasium compatible set of environments that allow agents to play 24 unique GameBoy titles, including
+                releases from classic franchises such as Pok&eacute;mon and Legend of Zelda. Titles include more obscure
+                ROM hacks (i.e. fan made games), which are considerably less exposed to frontier Language Models during
+                their training. With provided harnesses and documentation on how to track customized metrics, create
+                custom tasks etc, we hope GameBoyWorlds will prove a useful resource for work on game playing embodied
+                agents.
             </div>
             <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
-                <strong>RBM-1M Dataset</strong><br />
-                We release RBM-1M, a large-scale reward-learning dataset comprising over one million trajectories
-                spanning diverse robot embodiments and tasks, including substantial suboptimal and failure data.
+                <strong>Task Execution Benchmark</strong><br />
+                A collection of 1200 natural language tasks with reliable success identification, allowing us to
+                benchmark modern agents on game playing. We find that even the most powerful model XXX, YYY
+                (placeholder).
             </div>
             <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
-                <strong>Downstream Applications</strong><br />
-                Robometer significantly improves robot learning performance across a diverse set of downstream
-                applications, including model-free online RL, model-based online RL, offline RL, failure detection, and
-                data retrieval for IL.
+                <strong>Self Improving Agent Pipeline</strong><br />
+                A pipeline for self improving agents that use curiosity based exploration and self assessment to
+                autonomously acquire skills. We show that agents improve their task success rates without any human
+                demonstrations or game-specific reward engineering.
             </div>
         </div>
 
     </section>
 
     <!-- ════════════════════════════════════════════════════════════
-     ABSTRACT
+     DEMO – HUGGING FACE SPACE
 ════════════════════════════════════════════════════════════ -->
-    <!--<section class="section is-white-alt" id="abstract">
-  <div class="container" style="max-width:860px;">
-    <h2 class="section-heading">Abstract</h2>
-    <div class="section-divider"></div>
-    <div class="abstract-box">
-      General-purpose robot reward models are typically trained to predict absolute task progress from expert demonstrations,
-      providing only local, frame-level supervision. While effective for expert demonstrations, this paradigm scales poorly
-      to large-scale real-world robotics datasets where failed and suboptimal trajectories are abundant, and assigning dense
-      progress labels is ambiguous or ill-defined. We introduce <strong>Robometer</strong>, a scalable reward modeling
-      framework that combines intra-trajectory progress supervision with inter-trajectory preference supervision.
-      Robometer is trained with a dual objective: a <em>frame-level progress loss</em> that anchors reward magnitude on
-      expert data, and a <em>trajectory-comparison preference loss</em> that imposes global ordering constraints across
-      trajectories of the same task, enabling effective learning from suboptimal and failed trajectories. To support this
-      formulation at scale, we curate <strong>RBM-1M</strong>, a large-scale reward-learning dataset comprising over one
-      million trajectories spanning diverse robot embodiments and tasks, including substantial suboptimal and failure data.
-      Across benchmarks and real-world evaluations, Robometer learns more generalizable reward functions than prior methods
-      and improves robot learning performance across a diverse set of downstream applications.
-    </div>
-  </div>
-</section> -->
-
-    <!-- ════════════════════════════════════════════════════════════
-     METHOD
-════════════════════════════════════════════════════════════ -->
-    <section class="section is-white-alt" id="method">
+    <section class="section is-light-alt" id="gameboyworlds">
         <div class="container">
-            <h2 class="section-heading">Method</h2>
+            <h2 class="section-heading">GameBoyWorlds</h2>
             <div class="section-divider"></div>
-
-            <!-- Architecture overview -->
-            <div class="columns is-vcentered" style="margin-bottom:2rem;">
-                <div class="columns-item column is-7">
-                    <img src="assets/images/robometer_method_figure.png" alt="Robometer method overview"
-                        style="width:100%; display:block; border-radius:8px;">
-                </div>
-                <div class="column is-5">
-                    <h3 class="title is-4" style="color:#1a1a2e;">Dual-Objective Training</h3>
-                    <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
-                        <strong>Frame-Level Progress and Success Prediction</strong><br />
-                        Anchors the magnitude of predicted rewards by regressing per-frame progress and success values
-                        on expert demonstration data,
-                        providing dense supervision at the intra-trajectory level.
-                    </div>
-                    <div class="highlight-box is-success-light">
-                        <strong>Trajectory-Comparison Preference Prediction</strong><br />
-                        Imposes global ordering constraints across pairs of trajectories of the same task, enabling
-                        robust learning
-                        from suboptimal and failed data via a preference comparison objective.
-                    </div>
-                </div>
+            <p
+                style="text-align:center; color:#555; margin-bottom:1.5rem; max-width:600px; margin-left:auto; margin-right:auto;">
+                Try the reward model evaluation UI below, or separate visit in a new tab at <a
+                    href="https://robometer-rewardeval-ui.hf.space"
+                    target="_blank">https://robometer-rewardeval-ui.hf.space</a>.
+            </p>
+            <div style="width:100%; border-radius:12px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,.12);">
+                <iframe src="https://robometer-rewardeval-ui.hf.space" frameborder="0" width="100%" height="550"
+                    title="Robometer / Reward Eval Demo" style="display:block; min-height:550px;"></iframe>
             </div>
-
-            <div style="margin-bottom:2rem;">
-                <div style="display: flex; justify-content: center;">
-                    <img src="assets/images/robometer_training_objectives.jpeg"
-                        alt="Robometer Training Objectives and Types"
-                        style="width:100%; display:block; border-radius:8px;">
-                </div>
-                <h3 class="title is-4" style="color:#1a1a2e; margin-top:1.7rem;">Model Training Inputs and Objectives
-                </h3>
-                <div class="columns">
-                    <div class="column">
-                        <div class="highlight-box is-info-light" style="height:100%; margin-bottom:0;">
-                            <strong>Different Expertise</strong><br />
-                            We pair together expert and suboptimal trajectories of the same task, training per-frame
-                            progress/success prediction on the expert trajectory and training the model to prefer the
-                            expert trajectory.
-                        </div>
-                    </div>
-                    <div class="column">
-                        <div class="highlight-box is-warning-light" style="height:100%; margin-bottom:0;">
-                            <strong>Different Tasks</strong><br />
-                            We pair trajectories of different tasks together, training the model to prefer the video
-                            corresponding to the correct input language instruction.
-                            We can train per-frame progress/success on both types of trajectories.
-                        </div>
-                    </div>
-                    <div class="column">
-                        <div class="highlight-box is-success-light" style="height:100%; margin-bottom:0;">
-                            <strong>Augmented Trajectory</strong><br />
-                            We also augment a given trajectory to simulate failures, for example by using <a
-                                href="https://rewind-reward.github.io/">video rewind</a>.
-                            The model is trained to prefer the original, unaugmented trajectory, and per-frame
-                            progress/success prediction can occur on either trajectory.
-                        </div>
-                    </div>
-                </div>
-            </div>
-
         </div>
     </section>
 
-    <!-- ════════════════════════════════════════════════════════════
-     DATASET — RBM-1M
-════════════════════════════════════════════════════════════ -->
-    <section class="section is-light-alt" id="submissions">
-        <div class="container">
-            <h2 class="section-heading">Submissions</h2>
-            <div class="section-divider"></div>
-
-            <div class="columns is-multiline is-centered" style="margin-bottom:1.5rem;">
-                <!-- Stats cards -->
-                <div class="column is-3 has-text-centered">
-                    <div style="background:#eef3ff;border-radius:12px;padding:1.5rem;">
-                        <p style="font-size:2.2rem;font-weight:700;color:#3273dc;">1M+</p>
-                        <p style="color:#555;">Trajectories</p>
-                    </div>
-                </div>
-                <div class="column is-3 has-text-centered">
-                    <div style="background:#eef3ff;border-radius:12px;padding:1.5rem;">
-                        <p style="font-size:2.2rem;font-weight:700;color:#3273dc;">21</p>
-                        <p style="color:#555;">Robot Embodiments</p>
-                    </div>
-                </div>
-                <!--<div class="column is-3 has-text-centered">
-        <div style="background:#eef3ff;border-radius:12px;padding:1.5rem;">
-          <p style="font-size:2.2rem;font-weight:700;color:#3273dc;">XXX+</p>
-          <p style="color:#555;">Tasks</p>
-        </div>
-      </div>-->
-                <div class="column is-3 has-text-centered">
-                    <div style="background:#eef3ff;border-radius:12px;padding:1.5rem;">
-                        <p style="font-size:2.2rem;font-weight:700;color:#3273dc;">140,000+</p>
-                        <p style="color:#555;">Trajs. from Mixed Expertise Datasets</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Dataset figure -->
-            <div class="columns is-vcentered" style="align-items: stretch;">
-                <div class="column is-4" style="display: flex; flex-direction: column; height: 100%;">
-                    <div class="result-card"
-                        style="margin-bottom:2rem; height:100%; display: flex; flex-direction: column; justify-content: center;">
-                        <img src="assets/images/rbm_1m_pie_chart.jpeg" alt="RBM-1M statistics"
-                            style="width:100%; display:block; margin:0 auto;">
-                        <div class="card-caption" style="font-size:0.97rem;"><strong>Distribution of different
-                                trajectory types in RBM-1M.</strong></div>
-                    </div>
-                </div>
-                <div class="column is-8" style="display: flex; flex-direction: column; height: 100%;">
-                    <div class="result-card"
-                        style="margin-bottom:2rem; height:100%; display:flex; flex-direction:column; justify-content:center;">
-                        <div
-                            style="margin-top:2.5rem; display: flex; gap: 0; justify-content: center; align-items: flex-end; flex-wrap: nowrap;">
-                            <div
-                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
-                                <img src="assets/example_trajs/example_1.gif" alt="Example Trajectory 1"
-                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
-                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#444;">Expert</div> -->
-                            </div>
-                            <div
-                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
-                                <img src="assets/example_trajs/example_2.gif" alt="Example Trajectory 2"
-                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
-                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#444;">Suboptimal</div> -->
-                            </div>
-                            <div
-                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
-                                <img src="assets/example_trajs/example_3.gif" alt="Example Trajectory 3"
-                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
-                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#444;">Suboptimal</div> -->
-                            </div>
-                            <div
-                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
-                                <img src="assets/example_trajs/example_4.gif" alt="Example Trajectory 4"
-                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
-                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#d24343;">Failed</div> -->
-                            </div>
-                            <div
-                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
-                                <img src="assets/example_trajs/example_5.gif" alt="Example Trajectory 5"
-                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
-                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#444;">Expert</div> -->
-                            </div>
-                            <div
-                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
-                                <img src="assets/example_trajs/example_6.gif" alt="Example Trajectory 6"
-                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
-                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#d24343;">Failed</div> -->
-                            </div>
-                        </div>
-                        <div class="card-caption" style="font-size:0.97rem;"><strong>Example trajectories from
-                                RBM-1M.</strong>
-                            Dataset composition across robot embodiments, tasks, and trajectory quality levels.
-                            Suboptimal and failure data
-                            constitute a substantial fraction, enabling the preference-based learning component of
-                            Robometer.
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <!-- <p class="fig-caption">
-      <strong>Figure 3 — RBM-1M.</strong>
-      Dataset composition across robot embodiments, tasks, and trajectory quality levels. Suboptimal and failure data
-      constitute a substantial fraction, enabling the preference-based learning component of Robometer.
-    </p> -->
-        </div>
-    </section>
 
     <!-- ════════════════════════════════════════════════════════════
      PEARSON'S CORRELATION (REWARD MODEL EVALUATION)
@@ -1982,6 +1805,208 @@
     </section>
 
     <!-- ════════════════════════════════════════════════════════════
+     DATASET — RBM-1M
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-light-alt" id="submissions">
+        <div class="container">
+            <h2 class="section-heading">Submissions</h2>
+            <div class="section-divider"></div>
+
+            <div class="columns is-multiline is-centered" style="margin-bottom:1.5rem;">
+                <!-- Stats cards -->
+                <div class="column is-3 has-text-centered">
+                    <div style="background:#eef3ff;border-radius:12px;padding:1.5rem;">
+                        <p style="font-size:2.2rem;font-weight:700;color:#3273dc;">1M+</p>
+                        <p style="color:#555;">Trajectories</p>
+                    </div>
+                </div>
+                <div class="column is-3 has-text-centered">
+                    <div style="background:#eef3ff;border-radius:12px;padding:1.5rem;">
+                        <p style="font-size:2.2rem;font-weight:700;color:#3273dc;">21</p>
+                        <p style="color:#555;">Robot Embodiments</p>
+                    </div>
+                </div>
+                <!--<div class="column is-3 has-text-centered">
+        <div style="background:#eef3ff;border-radius:12px;padding:1.5rem;">
+          <p style="font-size:2.2rem;font-weight:700;color:#3273dc;">XXX+</p>
+          <p style="color:#555;">Tasks</p>
+        </div>
+      </div>-->
+                <div class="column is-3 has-text-centered">
+                    <div style="background:#eef3ff;border-radius:12px;padding:1.5rem;">
+                        <p style="font-size:2.2rem;font-weight:700;color:#3273dc;">140,000+</p>
+                        <p style="color:#555;">Trajs. from Mixed Expertise Datasets</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dataset figure -->
+            <div class="columns is-vcentered" style="align-items: stretch;">
+                <div class="column is-4" style="display: flex; flex-direction: column; height: 100%;">
+                    <div class="result-card"
+                        style="margin-bottom:2rem; height:100%; display: flex; flex-direction: column; justify-content: center;">
+                        <img src="assets/images/rbm_1m_pie_chart.jpeg" alt="RBM-1M statistics"
+                            style="width:100%; display:block; margin:0 auto;">
+                        <div class="card-caption" style="font-size:0.97rem;"><strong>Distribution of different
+                                trajectory types in RBM-1M.</strong></div>
+                    </div>
+                </div>
+                <div class="column is-8" style="display: flex; flex-direction: column; height: 100%;">
+                    <div class="result-card"
+                        style="margin-bottom:2rem; height:100%; display:flex; flex-direction:column; justify-content:center;">
+                        <div
+                            style="margin-top:2.5rem; display: flex; gap: 0; justify-content: center; align-items: flex-end; flex-wrap: nowrap;">
+                            <div
+                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
+                                <img src="assets/example_trajs/example_1.gif" alt="Example Trajectory 1"
+                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
+                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#444;">Expert</div> -->
+                            </div>
+                            <div
+                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
+                                <img src="assets/example_trajs/example_2.gif" alt="Example Trajectory 2"
+                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
+                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#444;">Suboptimal</div> -->
+                            </div>
+                            <div
+                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
+                                <img src="assets/example_trajs/example_3.gif" alt="Example Trajectory 3"
+                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
+                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#444;">Suboptimal</div> -->
+                            </div>
+                            <div
+                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
+                                <img src="assets/example_trajs/example_4.gif" alt="Example Trajectory 4"
+                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
+                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#d24343;">Failed</div> -->
+                            </div>
+                            <div
+                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
+                                <img src="assets/example_trajs/example_5.gif" alt="Example Trajectory 5"
+                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
+                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#444;">Expert</div> -->
+                            </div>
+                            <div
+                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
+                                <img src="assets/example_trajs/example_6.gif" alt="Example Trajectory 6"
+                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
+                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#d24343;">Failed</div> -->
+                            </div>
+                        </div>
+                        <div class="card-caption" style="font-size:0.97rem;"><strong>Example trajectories from
+                                RBM-1M.</strong>
+                            Dataset composition across robot embodiments, tasks, and trajectory quality levels.
+                            Suboptimal and failure data
+                            constitute a substantial fraction, enabling the preference-based learning component of
+                            Robometer.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- <p class="fig-caption">
+      <strong>Figure 3 — RBM-1M.</strong>
+      Dataset composition across robot embodiments, tasks, and trajectory quality levels. Suboptimal and failure data
+      constitute a substantial fraction, enabling the preference-based learning component of Robometer.
+    </p> -->
+        </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════════════
+     ABSTRACT
+════════════════════════════════════════════════════════════ -->
+    <!--<section class="section is-white-alt" id="abstract">
+  <div class="container" style="max-width:860px;">
+    <h2 class="section-heading">Abstract</h2>
+    <div class="section-divider"></div>
+    <div class="abstract-box">
+      General-purpose robot reward models are typically trained to predict absolute task progress from expert demonstrations,
+      providing only local, frame-level supervision. While effective for expert demonstrations, this paradigm scales poorly
+      to large-scale real-world robotics datasets where failed and suboptimal trajectories are abundant, and assigning dense
+      progress labels is ambiguous or ill-defined. We introduce <strong>Robometer</strong>, a scalable reward modeling
+      framework that combines intra-trajectory progress supervision with inter-trajectory preference supervision.
+      Robometer is trained with a dual objective: a <em>frame-level progress loss</em> that anchors reward magnitude on
+      expert data, and a <em>trajectory-comparison preference loss</em> that imposes global ordering constraints across
+      trajectories of the same task, enabling effective learning from suboptimal and failed trajectories. To support this
+      formulation at scale, we curate <strong>RBM-1M</strong>, a large-scale reward-learning dataset comprising over one
+      million trajectories spanning diverse robot embodiments and tasks, including substantial suboptimal and failure data.
+      Across benchmarks and real-world evaluations, Robometer learns more generalizable reward functions than prior methods
+      and improves robot learning performance across a diverse set of downstream applications.
+    </div>
+  </div>
+</section> -->
+
+    <!-- ════════════════════════════════════════════════════════════
+     METHOD
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-white-alt" id="method">
+        <div class="container">
+            <h2 class="section-heading">Method</h2>
+            <div class="section-divider"></div>
+
+            <!-- Architecture overview -->
+            <div class="columns is-vcentered" style="margin-bottom:2rem;">
+                <div class="columns-item column is-7">
+                    <img src="assets/images/robometer_method_figure.png" alt="Robometer method overview"
+                        style="width:100%; display:block; border-radius:8px;">
+                </div>
+                <div class="column is-5">
+                    <h3 class="title is-4" style="color:#1a1a2e;">Dual-Objective Training</h3>
+                    <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
+                        <strong>Frame-Level Progress and Success Prediction</strong><br />
+                        Anchors the magnitude of predicted rewards by regressing per-frame progress and success values
+                        on expert demonstration data,
+                        providing dense supervision at the intra-trajectory level.
+                    </div>
+                    <div class="highlight-box is-success-light">
+                        <strong>Trajectory-Comparison Preference Prediction</strong><br />
+                        Imposes global ordering constraints across pairs of trajectories of the same task, enabling
+                        robust learning
+                        from suboptimal and failed data via a preference comparison objective.
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-bottom:2rem;">
+                <div style="display: flex; justify-content: center;">
+                    <img src="assets/images/robometer_training_objectives.jpeg"
+                        alt="Robometer Training Objectives and Types"
+                        style="width:100%; display:block; border-radius:8px;">
+                </div>
+                <h3 class="title is-4" style="color:#1a1a2e; margin-top:1.7rem;">Model Training Inputs and Objectives
+                </h3>
+                <div class="columns">
+                    <div class="column">
+                        <div class="highlight-box is-info-light" style="height:100%; margin-bottom:0;">
+                            <strong>Different Expertise</strong><br />
+                            We pair together expert and suboptimal trajectories of the same task, training per-frame
+                            progress/success prediction on the expert trajectory and training the model to prefer the
+                            expert trajectory.
+                        </div>
+                    </div>
+                    <div class="column">
+                        <div class="highlight-box is-warning-light" style="height:100%; margin-bottom:0;">
+                            <strong>Different Tasks</strong><br />
+                            We pair trajectories of different tasks together, training the model to prefer the video
+                            corresponding to the correct input language instruction.
+                            We can train per-frame progress/success on both types of trajectories.
+                        </div>
+                    </div>
+                    <div class="column">
+                        <div class="highlight-box is-success-light" style="height:100%; margin-bottom:0;">
+                            <strong>Augmented Trajectory</strong><br />
+                            We also augment a given trajectory to simulate failures, for example by using <a
+                                href="https://rewind-reward.github.io/">video rewind</a>.
+                            The model is trained to prefer the original, unaugmented trajectory, and per-frame
+                            progress/success prediction can occur on either trajectory.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════════════
      EXPERIMENTS
 ════════════════════════════════════════════════════════════ -->
     <section class="section is-light-alt" id="results">
@@ -2538,27 +2563,6 @@
     </section>
 
     <!-- ════════════════════════════════════════════════════════════
-     DEMO – HUGGING FACE SPACE
-════════════════════════════════════════════════════════════ -->
-    <section class="section is-light-alt" id="gameboyworlds">
-        <div class="container">
-            <h2 class="section-heading">GameBoyWorlds</h2>
-            <div class="section-divider"></div>
-            <p
-                style="text-align:center; color:#555; margin-bottom:1.5rem; max-width:600px; margin-left:auto; margin-right:auto;">
-                Try the reward model evaluation UI below, or separate visit in a new tab at <a
-                    href="https://robometer-rewardeval-ui.hf.space"
-                    target="_blank">https://robometer-rewardeval-ui.hf.space</a>.
-            </p>
-            <div style="width:100%; border-radius:12px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,.12);">
-                <iframe src="https://robometer-rewardeval-ui.hf.space" frameborder="0" width="100%" height="550"
-                    title="Robometer / Reward Eval Demo" style="display:block; min-height:550px;"></iframe>
-            </div>
-        </div>
-    </section>
-
-
-    <!-- ════════════════════════════════════════════════════════════
      LOW-RANK FINETUNING
 ════════════════════════════════════════════════════════════ -->
     <section class="section is-white-alt" id="finetuning">
@@ -2654,7 +2658,7 @@
         <div class="container has-text-centered">
             <p style="margin-top:0.5rem;font-size:0.85rem;">
                 Website template adapted from
-                <a href="https://opendrivelab.com/kai0-rl/" target="_blank">RISE</a>.
+                <a href="https://robometer.github.io/" target="_blank">Robometer</a>.
             </p>
         </div>
     </footer>
