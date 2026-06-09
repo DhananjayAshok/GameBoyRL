@@ -1,6 +1,6 @@
 source scripts/core/utils.sh
 max_steps=2
-games=("runes_of_virtue_1" "runes_of_virtue_2")
+games=("harvest_moon_1" "harvest_moon_2" "harvest_moon_3")
 
 models=(
     "gpt-4o-mini"

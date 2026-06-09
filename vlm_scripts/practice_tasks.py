@@ -61,8 +61,10 @@ from tqdm import tqdm
 
 from gameboy_worlds import get_environment
 from execution.registry import AVAILABLE_EXECUTORS
+from execution.report import EnvironmentStepRecord
 from execution.supervisor import SimpleCheckerSupervisor
 from utils import log_info, log_error
+from vlm_scripts.attempt_tasks import _derive_hint
 
 
 def _format_guidance(guidance_dict: dict) -> str:
@@ -166,6 +168,7 @@ def practice_tasks_cmd(
     overwrite = obj["overwrite"]
     verbose = obj["verbose"]
     base_seed = parameters["random_seed"]
+    max_new_tokens = obj["max_new_tokens"]
 
     executor_class = AVAILABLE_EXECUTORS[executor_name]
 
@@ -178,6 +181,8 @@ def practice_tasks_cmd(
     csv_path = os.path.join(out_dir, "results.csv")
     checkpoint_path = os.path.join(out_dir, "checkpoint.json")
 
+
+    #overwrite = True # TODO: Remove
     if os.path.exists(csv_path) and not overwrite and False:
         log_info(f"Skipping practice — output already exists at {csv_path}. Use --overwrite to rerun.")
         return
@@ -220,9 +225,13 @@ def practice_tasks_cmd(
 
             np.random.seed(_episode_seed(base_seed, group_idx, attempt))
             env.reset()
+            random_actions = []
             for _ in range(n_random_actions):
-                env.step(env.action_space.sample())
-
+                random_actions.append(env.action_space.sample())
+            
+            # first try: 
+            for action in random_actions:
+                env.step(action)
             supervisor = SimpleCheckerSupervisor(
                 task=task_str,
                 executor_class=executor_class,
@@ -245,6 +254,17 @@ def practice_tasks_cmd(
             )
 
             result = supervisor.evaluate()
+
+            failed = (not result.get("success")) if not score_mode else (result.get("score", 0) < 6)
+            if failed:
+                env_steps = [s for s in result["steps"] if isinstance(s, EnvironmentStepRecord)]
+                derived_hint = _derive_hint(env_steps, task_str, game, supervisor._checker_vlm, max_new_tokens)
+                supervisor._env.reset()
+                for action in random_actions:
+                    supervisor._env.step(action)
+                hint_str = f"{guidance_str}\nSpecific hint: {derived_hint}" if guidance_str else f"Specific hint: {derived_hint}"
+                supervisor._hint = hint_str
+                result = supervisor.evaluate()
 
             if verbose:
                 print(f"  Attempt {attempt}: {'success' if result.get('success') else 'failure'} | score={result.get('score', float('nan')):.3f}")
