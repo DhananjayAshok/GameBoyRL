@@ -857,6 +857,7 @@ def load_special_model(model, model_kind, model_kwargs):
 
 def load_model_into_store(model_name, model_kind, model_kwargs) -> None:
     remove_from_huggingface_model_store(model_name, verbose=False)
+    model_kwargs.setdefault("torch_dtype", "auto")
     log_info(
         f"Loading model {model_name} of kind {model_kind} into HuggingFace model store with kwargs {model_kwargs}"
     )

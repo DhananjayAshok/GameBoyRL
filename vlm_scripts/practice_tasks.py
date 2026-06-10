@@ -182,8 +182,7 @@ def practice_tasks_cmd(
     checkpoint_path = os.path.join(out_dir, "checkpoint.json")
 
 
-    #overwrite = True # TODO: Remove
-    if os.path.exists(csv_path) and not overwrite and False:
+    if os.path.exists(csv_path) and not overwrite:
         log_info(f"Skipping practice — output already exists at {csv_path}. Use --overwrite to rerun.")
         return
 
@@ -228,8 +227,8 @@ def practice_tasks_cmd(
             random_actions = []
             for _ in range(n_random_actions):
                 random_actions.append(env.action_space.sample())
-            
-            # first try: 
+
+            # first try:
             for action in random_actions:
                 env.step(action)
             supervisor = SimpleCheckerSupervisor(
