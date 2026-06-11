@@ -655,7 +655,7 @@ You are playing a GameBoy game. The current screen is shown in the image.
 [ACTION_LIST]
 
 [TOOLS_BLOCK][HISTORY_SECTION]Reason about the best next action, then respond in exactly this format:
-Reasoning: <your reasoning>
+Reasoning: <your reasoning, specifically reason over your history as well. If you see the [no change] message on the action that you are trying, then you almost certainly have slightly misperceived the screen position of the player relative to the objects. In that case, reason about what else you can try instead of just repeating the same action.>
 [ACTION_FORMAT]
 [STOP]"""
 
