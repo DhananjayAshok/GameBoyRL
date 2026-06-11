@@ -1,4 +1,5 @@
 random_seed: 42
+default_max_queries_per_minute: 60 # Fallback rate limit (queries/minute) for API models whose name isn't in _RATE_LIMITS in utils/lm_inference.py
 figure_skip_show: true
 results_dir: "results" # Path to the directory where results will be saved, meant for lightweight files, plots and logs
 WANDB_PROJECT: "GameBoyWorlds" # This is more for bash than for within python. Will set the wandb logger to the right project

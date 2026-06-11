@@ -10,3 +10,6 @@
 	path = llm-utils
 	url = https://github.com/DhananjayAshok/llm-utils
 	branch = app
+[submodule "vllm"]
+	path = vllm
+	url = https://github.com/vllm-project/vllm
