@@ -15,11 +15,12 @@ Called by scripts/vlm/infer_guidance.sh (via vlm.py infer_guidance). Use --help 
 import json
 import os
 import pickle
+from concurrent.futures import ThreadPoolExecutor
 import click
 import numpy as np
 from tqdm import tqdm
 
-from utils import log_info, log_warn, log_error, VLM, parse_key_value
+from utils import log_info, log_warn, log_error, VLM, parse_key_value, HuggingFaceModel
 from vlm_scripts.infer_tasks import save_frames
 
 # ---------------------------------------------------------------------------
@@ -198,8 +199,14 @@ def infer_guidance_for_trajectory(
     show_default=True,
     help="Max frames per slice when chunking the trajectory.",
 )
+@click.option(
+    "--max_concurrency",
+    default=8,
+    show_default=True,
+    help="Max concurrent infer_guidance_for_trajectory pipelines (across groups). Forced to 1 for --verbose or a huggingface vlm_kind.",
+)
 @click.pass_obj
-def infer_guidance_cmd(obj, trajectory_path, max_obs_at_once):
+def infer_guidance_cmd(obj, trajectory_path, max_obs_at_once, max_concurrency):
     """Generate gold step-by-step guidance for each inferred task group."""
     max_new_tokens = obj["max_new_tokens"]
     vlm_kind = obj["vlm_kind"]
@@ -254,43 +261,59 @@ def infer_guidance_cmd(obj, trajectory_path, max_obs_at_once):
     else:
         guidance_output = {}
 
-    for group_idx in tqdm(sorted(task_map.keys()), desc="Generating guidance"):
-        if group_idx in guidance_output:
-            continue
+    # infer_guidance_for_trajectory pipelines are independent across groups, so
+    # submit them all to one shared pool. --verbose runs breakpoint()-style
+    # debugging and HuggingFaceModel isn't safe for concurrent generate() calls —
+    # both fall back to max_workers=1, which processes submitted jobs one at a
+    # time in submission order (i.e. identical to the old sequential loop).
+    effective_workers = (
+        1 if (verbose or isinstance(vlm._vlm, HuggingFaceModel)) else max_concurrency
+    )
 
-        task = task_map[group_idx]
-        trajectories = traj_map.get(group_idx)
-        if not trajectories:
-            print(f"Warning: no trajectories for group {group_idx}, skipping.")
-            continue
+    with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+        pending = []
+        for group_idx in sorted(task_map.keys()):
+            if group_idx in guidance_output:
+                continue
 
-        # Use the first available trajectory as the representative example.
-        # infer_tasks.py stores a list of trajectories; attempt_tasks.py stores a single tuple.
-        trajectory = trajectories[0] if isinstance(trajectories, list) else trajectories
-        _, _, _, _, init_state = trajectory
-        guidance = infer_guidance_for_trajectory(
-            trajectory,
-            task,
-            vlm,
-            game,
-            max_new_tokens,
-            max_obs_at_once=max_obs_at_once,
-            verbose=verbose,
-        )
-        if guidance is None:
-            print(f"Warning: could not generate guidance for group {group_idx}.")
-            continue
+            task = task_map[group_idx]
+            trajectories = traj_map.get(group_idx)
+            if not trajectories:
+                print(f"Warning: no trajectories for group {group_idx}, skipping.")
+                continue
 
-        goal_condition = guidance.pop("goal_condition", "")
-        guidance_output[group_idx] = {
-            "task": task,
-            "init_state": init_state,
-            "goal_condition": goal_condition,
-            "guidance": guidance,
-        }
+            # Use the first available trajectory as the representative example.
+            # infer_tasks.py stores a list of trajectories; attempt_tasks.py stores a single tuple.
+            trajectory = trajectories[0] if isinstance(trajectories, list) else trajectories
+            _, _, _, _, init_state = trajectory
+            future = executor.submit(
+                infer_guidance_for_trajectory,
+                trajectory,
+                task,
+                vlm,
+                game,
+                max_new_tokens,
+                max_obs_at_once=max_obs_at_once,
+                verbose=verbose,
+            )
+            pending.append((group_idx, task, init_state, future))
 
-        with open(checkpoint_path, "w") as f:
-            json.dump(guidance_output, f, indent=2)
+        for group_idx, task, init_state, future in tqdm(pending, desc="Generating guidance"):
+            guidance = future.result()
+            if guidance is None:
+                print(f"Warning: could not generate guidance for group {group_idx}.")
+                continue
+
+            goal_condition = guidance.pop("goal_condition", "")
+            guidance_output[group_idx] = {
+                "task": task,
+                "init_state": init_state,
+                "goal_condition": goal_condition,
+                "guidance": guidance,
+            }
+
+            with open(checkpoint_path, "w") as f:
+                json.dump(guidance_output, f, indent=2)
 
     with open(out_json, "w") as f:
         json.dump(guidance_output, f, indent=2)
