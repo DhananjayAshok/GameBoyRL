@@ -32,6 +32,7 @@ from PIL import Image
 
 from utils import load_parameters, log_info
 from utils.vlm import VLM
+from utils.lm_inference import parse_key_value
 from show_trajectories import plot_transitions
 
 SAVE_FRAMES_DIR = "save_frames"
@@ -132,31 +133,6 @@ Task: <single distilled imperative task string>
 # ---------------------------------------------------------------------------
 
 
-def _parse_key(text: str, key: str) -> str | None:
-    """Return the value after 'key:' on the matching line, stripping [stop]. Case-insensitive.
-    Returns None if the key is not found or the value is empty."""
-    text = text.lower()
-    # if there is only one response: , then only get the stuff after
-    if text.count("response:") == 1:
-        text = text.split("response:")[1].strip()
-    key = key.lower()
-    n_keys = text.count(f"{key}:")
-    if n_keys == 0:
-        n_key_mentions = text.count(key)
-        if n_key_mentions == 1:
-            return text.split(key)[1].splitlines()[0].strip().replace("[stop]", "")
-        else:
-            return None
-    elif n_keys == 1:
-        return text.split(f"{key}:")[1].splitlines()[0].strip().replace("[stop]", "")
-    else:  # see if maybe only one of them starts with key, and then return that
-        for line in text.splitlines():
-            stripped = line.strip()
-            if stripped.startswith(key + ":"):
-                value = stripped[len(key) + 1 :].strip()
-                value = value.replace("[stop]", "").strip()
-                return value if value else None
-
 
 def _parse_bullet_list(text: str) -> list[str]:
     """Return all '- ...' bullet lines before [stop]. Case-insensitive."""
@@ -181,11 +157,11 @@ def _parse_infer_block(
     if stop_idx != -1:
         text = text[:stop_idx]
 
-    task = _parse_key(text, "Task")
+    task = parse_key_value(text, "Task")
     if task is None or "no task" in task:
         return None
-    start_str = _parse_key(text, "Start")
-    end_str = _parse_key(text, "End")
+    start_str = parse_key_value(text, "Start")
+    end_str = parse_key_value(text, "End")
     try:
         start = int(start_str) - 1 + window_offset
     except (TypeError, ValueError):
@@ -249,8 +225,8 @@ def describe_pairwise(
                     high_level_actions=[action_window[i]],
                 )
                 print(f"DESCRIBE output (pair {i}→{i+1}):\n{describe_output}\n---")
-            frame_descs[i] = _parse_key(describe_output, "Initial Frame Description") or ""
-            diffs[i] = _parse_key(describe_output, "Differences") or ""
+            frame_descs[i] = parse_key_value(describe_output, "Initial Frame Description") or ""
+            diffs[i] = parse_key_value(describe_output, "Differences") or ""
 
     desc_lines = []
     for i in range(k - 1):
@@ -324,7 +300,7 @@ def infer_task(
             f"Warning: infer_task failed to parse Task block from INFER stage. Output was:\n{infer_output}"
         )
         return None
-    task_description = _parse_key(infer_output, "Visual Description")
+    task_description = parse_key_value(infer_output, "Visual Description")
 
     # --- Stage 3: REFINE (text only) ---
     refine_prompt = REFINE_PROMPT.replace("[CANDIDATE_TASK]", parsed_block["task"])
@@ -334,7 +310,7 @@ def infer_task(
     ).lower()
     if verbose:
         print(f"REFINE output:\n{refine_output}\n---")
-    refined_task = _parse_key(refine_output, "Task")
+    refined_task = parse_key_value(refine_output, "Task")
     if refined_task is None:
         refined_task = (
             refine_output.lower().split("[stop]")[0].strip()
@@ -416,7 +392,7 @@ def infer_group_tasks(
         texts=distill_prompt,
         max_new_tokens=max_new_tokens,
     ).lower()
-    distilled_task = _parse_key(distill_output, "Task")
+    distilled_task = parse_key_value(distill_output, "Task")
     if distilled_task is None:
         distilled_task = all_tasks[0]
     return distilled_task, used_trajectories

@@ -10,6 +10,7 @@ from execution.executor import Executor
 from execution.report import EnvironmentStepRecord, ExecutorReport
 from utils import load_parameters
 from utils.vlm import VLM
+from utils.lm_inference import parse_key_value
 
 
 class Supervisor(ABC):
@@ -85,19 +86,10 @@ class Supervisor(ABC):
 # ---------------------------------------------------------------------------
 
 
-def _parse_checker_key(text: str, key: str) -> Optional[str]:
-    """Return the value after 'Key:' on the first matching line, stripping [STOP]."""
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.lower().startswith(key.lower() + ":"):
-            value = stripped[len(key) + 1:].strip()
-            return value.replace("[STOP]", "").replace("[stop]", "").strip() or None
-    return None
-
 
 def _parse_checker_int(text: str, key: str, lo: int, hi: int) -> int:
     """Extract an integer in [lo, hi] from 'Key: value'. Falls back to lo on parse failure."""
-    raw = _parse_checker_key(text, key) or ""
+    raw = parse_key_value(text, key) or ""
     for token in raw.split():
         try:
             v = int(token)
@@ -253,7 +245,7 @@ Score: <integer from 1 to 10>
                 images=all_frames,
                 max_new_tokens=self._checker_max_new_tokens,
             )
-            return _parse_checker_key(output, "Description") or output.strip()
+            return parse_key_value(output, "Description") or output.strip()
 
         segment_ranges = []
         segment_prompts = []
@@ -279,7 +271,7 @@ Score: <integer from 1 to 10>
 
         segment_descriptions = []
         for (start, end), output in zip(segment_ranges, outputs):
-            desc = _parse_checker_key(output, "Description") or output.strip()
+            desc = parse_key_value(output, "Description") or output.strip()
             segment_descriptions.append(f"Frames {start + 1}-{end}: {desc}")
 
         consolidate_prompt = (
@@ -291,7 +283,7 @@ Score: <integer from 1 to 10>
             texts=consolidate_prompt,
             max_new_tokens=self._checker_max_new_tokens,
         )
-        return _parse_checker_key(output, "Description") or output.strip()
+        return parse_key_value(output, "Description") or output.strip()
 
     def process_executor_return(self, report: ExecutorReport) -> dict:
         self._last_report = report
@@ -333,14 +325,14 @@ Score: <integer from 1 to 10>
             max_new_tokens=self._checker_max_new_tokens,
         )
 
-        reasoning = _parse_checker_key(judge_output, "Reasoning") or ""
+        reasoning = parse_key_value(judge_output, "Reasoning") or ""
         executor_meta = {"vlm_call_log": report.vlm_call_log, "steps": report.steps}
 
         if self._score_mode:
             score = _parse_checker_int(judge_output, "Score", lo=1, hi=10)
             return {"score": score, "description": description, "reasoning": reasoning, **executor_meta}
         else:
-            success_str = _parse_checker_key(judge_output, "Success") or ""
+            success_str = parse_key_value(judge_output, "Success") or ""
             success = success_str.strip().lower().startswith("yes")
             return {"success": success, "description": description, "reasoning": reasoning, **executor_meta}
 
@@ -564,7 +556,7 @@ Distilled:
                 images=all_frames,
                 max_new_tokens=self._max_new_tokens,
             )
-            description = _parse_checker_key(describe_output, "Description") or describe_output.strip()
+            description = parse_key_value(describe_output, "Description") or describe_output.strip()
         else:
             description = "No environment steps were taken."
 
@@ -581,7 +573,7 @@ Distilled:
                 images=lookback_frames,
                 max_new_tokens=self._max_new_tokens,
             )
-            reached = (_parse_checker_key(judge_output, "Reached") or "").strip().lower().startswith("yes")
+            reached = (parse_key_value(judge_output, "Reached") or "").strip().lower().startswith("yes")
 
         # Insights — lookback frames
         if lookback_frames:

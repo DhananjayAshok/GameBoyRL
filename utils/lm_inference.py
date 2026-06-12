@@ -1341,3 +1341,53 @@ def infer_model_kind(model: str, error_out: bool = False) -> Optional[str]:
             f"Could not infer model class for {model}. Specify `model_kind` as one of: {SPECIAL_MODEL_KINDS}"
         )
     return None
+
+
+def parse_key_value(text: str, key: str) -> Optional[str]:
+    """
+    Return the value following ``"Key:"`` on the matching line of ``text``.
+
+    The key is matched case-insensitively; the returned value preserves its
+    original case. A trailing ``[STOP]``/``[stop]`` marker is stripped.
+
+    If ``text`` contains exactly one ``"response:"`` occurrence, only the text
+    after it is searched (avoids matching mentions of ``key`` in a preceding
+    "Reasoning:" section). If no ``"key:"`` line is found but ``key`` (without
+    a colon) appears exactly once, the rest of that occurrence's line is
+    returned instead.
+
+    :param text: The text to search.
+    :type text: str
+    :param key: The key to search for.
+    :type key: str
+    :return: The extracted value, or None if not found or empty.
+    :rtype: Optional[str]
+    """
+    key_lower = key.lower()
+    marker = f"{key_lower}:"
+
+    def clean(value: str) -> Optional[str]:
+        value = value.strip()
+        stop_idx = value.lower().find("[stop]")
+        if stop_idx != -1:
+            value = value[:stop_idx]
+        value = value.strip()
+        return value or None
+
+    text_lower = text.lower()
+    if text_lower.count("response:") == 1:
+        idx = text_lower.index("response:") + len("response:")
+        text = text[idx:].strip()
+        text_lower = text.lower()
+
+    for line, line_lower in zip(text.splitlines(), text_lower.splitlines()):
+        idx = line_lower.find(marker)
+        if idx != -1:
+            return clean(line[idx + len(marker):])
+
+    if text_lower.count(key_lower) == 1:
+        idx = text_lower.index(key_lower)
+        rest_of_line = text[idx + len(key):].splitlines()
+        return clean(rest_of_line[0]) if rest_of_line else None
+
+    return None

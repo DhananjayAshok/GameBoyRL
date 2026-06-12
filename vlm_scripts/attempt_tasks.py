@@ -78,6 +78,7 @@ from execution.report import EnvironmentStepRecord
 from execution.supervisor import SimpleCheckerSupervisor
 from utils import log_info, log_error
 from utils.vlm import VLM
+from utils.lm_inference import parse_key_value
 
 
 CRITIQUE_SLICE_PROMPT = """You are analysing a segment of a failed attempt to complete a task in a game of [GAME].
@@ -108,15 +109,6 @@ Respond in exactly this format:
 Critique: <what went wrong overall>
 Hint: <one or two sentence hint for a better approach>
 [STOP]"""
-
-
-def _parse_hint(text: str) -> str | None:
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.lower().startswith("hint:"):
-            value = stripped[len("hint:"):].strip()
-            return value.replace("[STOP]", "").replace("[stop]", "").strip() or None
-    return None
 
 
 def _derive_hint(
@@ -186,7 +178,7 @@ def _derive_hint(
         .replace("[PRIOR_HINT_BLOCK]", prior_block)
     )
     output = vlm.infer(texts=consolidate_prompt, max_new_tokens=max_new_tokens)
-    return _parse_hint(output) or output.strip()
+    return parse_key_value(output, "hint") or output.strip()
 
 
 def _reconstruct_trajectory(env_steps: list, init_state: str) -> tuple:
