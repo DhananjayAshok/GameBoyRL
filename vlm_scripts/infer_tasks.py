@@ -25,12 +25,13 @@ Output: trajectory_annotation.json  +  trajectory_annotation.pkl
 import json
 import os
 import pickle
+from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 import numpy as np
 import click
 from PIL import Image
 
-from utils import load_parameters, log_info, VLM, parse_key_value
+from utils import load_parameters, log_info, VLM, parse_key_value, HuggingFaceModel
 from show_trajectories import plot_transitions
 
 SAVE_FRAMES_DIR = "save_frames"
@@ -342,47 +343,18 @@ def infer_task(
     }
 
 
-def infer_group_tasks(
-    group: list,
-    vlm: VLM,
-    game: str,
-    max_new_tokens: int,
-    lookback: int = 5,
-    max_trajectories_per_group: int = 3,
-    verbose: bool = False,
-    describe_pairs: bool = False,
-) -> tuple[str, list] | None:
-    """
-    Run infer_task on a small sample of trajectories in the group, then distill to a single task string.
-    Returns (distilled_task, used_trajectories), or None if no tasks could be inferred.
-    """
-    all_tasks = []
-    used_trajectories = []
+def _select_group_trajectories(group: list, max_trajectories_per_group: int) -> list:
+    """Pick up to max_trajectories_per_group trajectories from a group."""
     use_traj_idxes = list(range(len(group)))
     if len(group) > max_trajectories_per_group:
         use_traj_idxes = list(
             np.random.choice(use_traj_idxes, max_trajectories_per_group, replace=False)
         )
-    for traj_idx in tqdm(
-        use_traj_idxes, leave=False, total=len(use_traj_idxes), desc="Trajectories"
-    ):
-        trajectory = group[traj_idx]
-        result = infer_task(
-            trajectory,
-            vlm,
-            game,
-            max_new_tokens,
-            lookback,
-            verbose=verbose,
-            describe_pairs=describe_pairs,
-        )
-        if result is not None:
-            all_tasks.append(result["task"]["task"])
-            used_trajectories.append(trajectory)
+    return [group[traj_idx] for traj_idx in use_traj_idxes]
 
-    if not all_tasks:
-        return None
 
+def _distill_tasks(all_tasks: list[str], vlm: VLM, game: str, max_new_tokens: int) -> str:
+    """Distill a list of candidate task strings for a group into a single task string."""
     distill_prompt = DISTILL_PROMPT.replace("[GAME]", game).replace(
         "[CANDIDATE_LIST]", "\n".join(f"- {t}" for t in all_tasks)
     )
@@ -393,7 +365,7 @@ def infer_group_tasks(
     distilled_task = parse_key_value(distill_output, "Task")
     if distilled_task is None:
         distilled_task = all_tasks[0]
-    return distilled_task, used_trajectories
+    return distilled_task
 
 
 # ---------------------------------------------------------------------------
@@ -430,9 +402,15 @@ def infer_group_tasks(
     default=False,
     help="Run pairwise DESCRIBE stage before INFER.",
 )
+@click.option(
+    "--max_concurrency",
+    default=8,
+    show_default=True,
+    help="Max concurrent infer_task pipelines (across groups and trajectories). Forced to 1 for --verbose or a huggingface vlm_kind.",
+)
 @click.pass_obj
 def infer_task_cmd(
-    obj, trajectory_path, run_name, lookback, max_trajectories_per_group, describe_pairs
+    obj, trajectory_path, run_name, lookback, max_trajectories_per_group, describe_pairs, max_concurrency
 ):
     """Infer task strings for each trajectory group."""
     max_new_tokens = obj["max_new_tokens"]
@@ -477,35 +455,59 @@ def infer_task_cmd(
     with open(trajectory_path, "rb") as f:
         grouped_trajectories = pickle.load(f)
 
-    for group_idx, group in tqdm(
-        enumerate(grouped_trajectories),
-        desc="Processing groups",
-        total=len(grouped_trajectories),
-    ):
-        if group_idx in trajectory_output:
-            continue
-        result = infer_group_tasks(
-            group,
-            vlm,
-            game,
-            max_new_tokens,
-            lookback,
-            max_trajectories_per_group,
-            verbose=obj["verbose"],
-            describe_pairs=describe_pairs,
-        )
-        if result is None:
-            print(
-                f"Warning: skipping group {group_idx} — could not infer any task strings."
-            )
-            continue
-        distilled_task, used_trajectories = result
-        trajectory_output[group_idx] = distilled_task
-        trajectory_data_output[group_idx] = used_trajectories
-        with open(checkpoint_path, "w") as f:
-            json.dump(trajectory_output, f, indent=2)
-        with open(pkl_checkpoint_path, "wb") as f:
-            pickle.dump(trajectory_data_output, f)
+    # infer_task pipelines are independent across groups and across trajectories
+    # within a group, so submit them all to one shared pool. --verbose runs
+    # infer_task's print/save_frames/breakpoint debugging path, and HuggingFaceModel
+    # isn't safe for concurrent generate() calls — both fall back to max_workers=1,
+    # which processes submitted jobs one at a time in submission order (i.e.
+    # identical to the old sequential loop).
+    effective_workers = (
+        1 if (obj["verbose"] or isinstance(vlm._vlm, HuggingFaceModel)) else max_concurrency
+    )
+
+    with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+        pending = []
+        for group_idx, group in enumerate(grouped_trajectories):
+            if group_idx in trajectory_output:
+                continue
+            trajectories = _select_group_trajectories(group, max_trajectories_per_group)
+            futures = [
+                executor.submit(
+                    infer_task,
+                    trajectory,
+                    vlm,
+                    game,
+                    max_new_tokens,
+                    lookback,
+                    verbose=obj["verbose"],
+                    describe_pairs=describe_pairs,
+                )
+                for trajectory in trajectories
+            ]
+            pending.append((group_idx, trajectories, futures))
+
+        for group_idx, trajectories, futures in tqdm(pending, desc="Processing groups"):
+            all_tasks = []
+            used_trajectories = []
+            for trajectory, future in zip(trajectories, futures):
+                result = future.result()
+                if result is not None:
+                    all_tasks.append(result["task"]["task"])
+                    used_trajectories.append(trajectory)
+
+            if not all_tasks:
+                print(
+                    f"Warning: skipping group {group_idx} — could not infer any task strings."
+                )
+                continue
+
+            distilled_task = _distill_tasks(all_tasks, vlm, game, max_new_tokens)
+            trajectory_output[group_idx] = distilled_task
+            trajectory_data_output[group_idx] = used_trajectories
+            with open(checkpoint_path, "w") as f:
+                json.dump(trajectory_output, f, indent=2)
+            with open(pkl_checkpoint_path, "wb") as f:
+                pickle.dump(trajectory_data_output, f)
 
     with open(traj_path, "w") as f:
         json.dump(trajectory_output, f, indent=2)

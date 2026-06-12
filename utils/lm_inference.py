@@ -538,40 +538,33 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
     def get_encoded_images(self, images: list[Image.Image]) -> list[str]:
         """Encodes images to base64 strings for OpenAI API input.
 
+        Uses a fresh per-call cache directory (rather than one shared per
+        model instance) so concurrent calls from different threads on the
+        same model instance don't race on each other's cached files.
+
         :param images: List of images in Pillow Image format.
         :type images: list[Image.Image]
         :return: List of base64 encoded image strings.
         :rtype: list[str]
         """
-        cache_dir = self.clear_encoded_image_cache()
-        encoded_images = []
-        for i, img in enumerate(images):
-            img_path = os.path.join(cache_dir, f"image_{i}.jpg")
-            if img.mode in ("RGBA", "P", "LA"):
-                img = img.convert("RGB")
-            img.save(img_path, format="JPEG")
-            with open(img_path, "rb") as image_file:
-                encoded_images.append(
-                    base64.b64encode(image_file.read()).decode("utf-8")
-                )
-        self.clear_encoded_image_cache(make=False)
-        return encoded_images
-
-    def clear_encoded_image_cache(self, make=True) -> str:
-        """
-        VLM based API models save to a cache for image processing. Clears this cache.
-
-        :param make: Whether to create the cache directory after clearing. Default True.
-        :type make: bool
-        :returns: The path to the cache directory for encoded images.
-        :rtype: str
-        """
-        cache_dir = os.path.join(self.parameters["tmp_dir"], "api_image_cache", self.unique_id)
-        if os.path.exists(cache_dir):
+        cache_dir = os.path.join(
+            self.parameters["tmp_dir"], "api_image_cache", self.unique_id, str(uuid.uuid4())
+        )
+        os.makedirs(cache_dir)
+        try:
+            encoded_images = []
+            for i, img in enumerate(images):
+                img_path = os.path.join(cache_dir, f"image_{i}.jpg")
+                if img.mode in ("RGBA", "P", "LA"):
+                    img = img.convert("RGB")
+                img.save(img_path, format="JPEG")
+                with open(img_path, "rb") as image_file:
+                    encoded_images.append(
+                        base64.b64encode(image_file.read()).decode("utf-8")
+                    )
+        finally:
             shutil.rmtree(cache_dir)
-        if make:
-            os.makedirs(cache_dir)
-        return cache_dir
+        return encoded_images
 
     @abstractmethod
     def get_image_input_dict(self, image: str) -> dict:
