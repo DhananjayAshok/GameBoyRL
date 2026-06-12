@@ -7,10 +7,10 @@ from PIL import Image
 from utils.lm_inference import (
     OpenAIModel,
     OpenRouterModel,
-    HuggingFaceModel,
     AnthropicModel,
     vLLMModel,
 )
+from utils.huggingface_inference import HuggingFaceModel
 
 
 def convert_numpy_greyscale_to_pillow(arr: np.ndarray) -> Image:
