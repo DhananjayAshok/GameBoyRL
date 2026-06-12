@@ -2,7 +2,7 @@
 Called by scripts/vlm/propose_zeroshot.sh and scripts/vlm/propose_all_zeroshot.sh (via vlm.py propose_tasks_zeroshot).
 Use --help for CLI options.
 
-Input: a single init_state name (str) and the game environment
+Input: one or more init_state names (--init_states, comma-separated) and the game environment
     - The first frame and action space are loaded live from the environment via get_first_frame_and_actions.
     - Optional prior tasks (--extra) are loaded from:
         - 'zeroshot':  parameters["storage_dir"]/proposed_tasks/$game/$model/zeroshot/zeroshot_tasks.jsonl
@@ -185,7 +185,7 @@ def _propose_for_init_state(
 
 
 @click.command(name="propose_tasks_zeroshot")
-@click.option("--init_state", required=True, help="Comma-separated name(s) of the init state(s) to load")
+@click.option("--init_states", required=True, help="Comma-separated name(s) of the init state(s) to load")
 @click.option(
     "--extra",
     type=click.Choice([None, "zeroshot", "curiosity", "zeroshot_with_curiosity"], case_sensitive=False),
@@ -210,7 +210,7 @@ def _propose_for_init_state(
     help="Max concurrent propose pipelines (across init_states). Forced to 1 for --verbose or a huggingface vlm_kind.",
 )
 @click.pass_obj
-def propose_tasks_zeroshot(obj, init_state, extra, extra_k, run_name, max_concurrency):
+def propose_tasks_zeroshot(obj, init_states, extra, extra_k, run_name, max_concurrency):
     """Zero-shot VLM task proposal from the initial frame of each given init_state."""
     parameters = obj["parameters"]
     game = obj["game"]
@@ -238,10 +238,10 @@ def propose_tasks_zeroshot(obj, init_state, extra, extra_k, run_name, max_concur
     else:
         df = pd.DataFrame([], columns=["init_state", "tasks"])
 
-    init_states = [s.strip() for s in init_state.split(",") if s.strip()]
+    init_state_list = [s.strip() for s in init_states.split(",") if s.strip()]
     done = set(df["init_state"].values)
     jobs = []
-    for state in init_states:
+    for state in init_state_list:
         if state in done:
             if not overwrite:
                 log_info(
