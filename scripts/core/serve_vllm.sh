@@ -1,4 +1,22 @@
 #!/bin/bash
+#
+# Usage: 
+#   bash scripts/serve_vllm.sh [VLLM_ARGS...]
+#
+# Description:
+#   A blocking wrapper around 'vllm serve'. It launches the server in the 
+#   background, transparently forwards all command-line arguments to vLLM, 
+#   and holds the terminal execution until the server health check passes 
+#   or the process crashes.
+#
+# Examples:
+#   bash scripts/serve_vllm.sh --model facebook/opt-125m
+#   bash scripts/serve_vllm.sh --model meta-llama/Meta-Llama-3-8B-Instruct --port 8085 --tensor-parallel-size 2
+#
+# Outputs:
+#   vllm.pid         - Stores the active background process ID (used by stop_vllm.sh)
+#   vllm_server.log  - Standard output and error logs from the server
+#
 
 PORT=8000
 LOG_FILE="vllm_server.log"

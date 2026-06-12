@@ -1,4 +1,17 @@
 #!/bin/bash
+#
+# Usage:
+#   bash scripts/stop_vllm.sh
+#
+# Description:
+#   Gracefully shuts down the background vLLM server initiated by serve_vllm.sh.
+#   It reads the process ID from 'vllm.pid', issues a SIGTERM to allow proper 
+#   VRAM release, and monitors the exit. Falls back to a hard SIGKILL if the 
+#   grace period expires.
+#
+# Inputs:
+#   vllm.pid         - Expected file containing the target process ID.
+#
 
 # Configuration
 TIMEOUT=15  # Max seconds to wait for a graceful shutdown
