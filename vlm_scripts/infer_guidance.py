@@ -116,7 +116,9 @@ def infer_guidance_for_trajectory(
     observations, actions, high_level_actions, rewards, init_state = trajectory
     total = len(observations)
 
-    slice_descriptions = []
+    slice_ranges = []
+    slice_prompts = []
+    slice_images = []
     for start in range(0, total, max_obs_at_once):
         end = min(start + max_obs_at_once, total)
         frames = list(observations[start:end])
@@ -133,21 +135,27 @@ def infer_guidance_for_trajectory(
         if verbose:
             print(f"SLICE prompt (frames {start}-{end - 1} / {total}):\n{prompt}\n---")
 
-        output = vlm.infer(texts=prompt, images=frames, max_new_tokens=max_new_tokens)
+        slice_ranges.append((start, end))
+        slice_prompts.append(prompt)
+        slice_images.append(frames)
 
-        if verbose:
-            print(f"SLICE output:\n{output}\n---")
+    slice_descriptions = []
+    if slice_prompts:
+        outputs = vlm.infer(texts=slice_prompts, images=slice_images, max_new_tokens=max_new_tokens)
+        for (start, end), output in zip(slice_ranges, outputs):
+            if verbose:
+                print(f"SLICE output:\n{output}\n---")
 
-        parsed = _parse_guidance(output)
-        if parsed is None:
-            print(f"Warning: failed to parse guidance for frames {start}-{end - 1}, skipping slice.")
-            continue
+            parsed = _parse_guidance(output)
+            if parsed is None:
+                print(f"Warning: failed to parse guidance for frames {start}-{end - 1}, skipping slice.")
+                continue
 
-        slice_descriptions.append(
-            f"Frames {start}-{end - 1} / {total}:\n"
-            f"Summary: {parsed['summary']}\n"
-            f"Steps:\n" + "\n".join(f"- {s}" for s in parsed["steps"])
-        )
+            slice_descriptions.append(
+                f"Frames {start}-{end - 1} / {total}:\n"
+                f"Summary: {parsed['summary']}\n"
+                f"Steps:\n" + "\n".join(f"- {s}" for s in parsed["steps"])
+            )
 
     if not slice_descriptions:
         return None

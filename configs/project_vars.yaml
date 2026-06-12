@@ -3,6 +3,7 @@ default_max_queries_per_minute: 60 # Fallback rate limit (queries/minute) for AP
 max_batch_size_api: 32 # Default max batch size for API-backed models (OpenAI, Anthropic, OpenRouter, etc.) - caps concurrent in-flight requests per infer() chunk. Can be overridden by individual calls to infer().
 max_batch_size_vllm: 32 # Default max batch size for vLLM-served models - caps concurrent in-flight requests sent to the vLLM server per infer() chunk. Can be overridden by individual calls to infer().
 max_batch_size_huggingface: 32 # Default max batch size for local HuggingFace models - the number of samples run through the model in a single forward pass. Can be overridden by individual calls to infer().
+vLLM_base_url: "http://localhost:8000/v1/"
 figure_skip_show: true
 results_dir: "results" # Path to the directory where results will be saved, meant for lightweight files, plots and logs
 WANDB_PROJECT: "GameBoyWorlds" # This is more for bash than for within python. Will set the wandb logger to the right project

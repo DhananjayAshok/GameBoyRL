@@ -140,10 +140,11 @@ def _derive_hint(
         for i, step in enumerate(env_steps)
     ]
 
-    segment_summaries = []
+    segment_ranges = []
+    segment_prompts = []
+    segment_images = []
     for start in range(0, total, max_frames_per_slice):
         end = min(start + max_frames_per_slice, total)
-        slice_frames = frames[start:end]
         slice_actions = "\n".join(action_lines_all[start:end]) or "  (no actions taken)"
         prompt = (
             CRITIQUE_SLICE_PROMPT
@@ -154,7 +155,14 @@ def _derive_hint(
             .replace("[TOTAL]", str(total))
             .replace("[ACTION_SEQUENCE]", slice_actions)
         )
-        output = vlm.infer(texts=prompt, images=slice_frames, max_new_tokens=max_new_tokens)
+        segment_ranges.append((start, end))
+        segment_prompts.append(prompt)
+        segment_images.append(frames[start:end])
+
+    outputs = vlm.infer(texts=segment_prompts, images=segment_images, max_new_tokens=max_new_tokens)
+
+    segment_summaries = []
+    for (start, end), output in zip(segment_ranges, outputs):
         stop_idx = output.lower().find("[stop]")
         if stop_idx != -1:
             output = output[:stop_idx]

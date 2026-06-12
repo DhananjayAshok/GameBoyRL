@@ -9,6 +9,7 @@ from utils.lm_inference import (
     OpenRouterModel,
     HuggingFaceModel,
     AnthropicModel,
+    vLLMModel,
 )
 
 
@@ -71,6 +72,8 @@ class VLM:
             self._vlm = HuggingFaceModel(model=self._model_name, model_kind="vlm")
         elif self._vlm_kind == "anthropic":
             self._vlm = AnthropicModel(model=self._model_name)
+        elif self._vlm_kind == "vllm":
+            self._vlm = vLLMModel(model=self._model_name)
         else:
             raise ValueError(f"Invalid VLM kind: {self._vlm_kind}")
 

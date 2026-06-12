@@ -255,7 +255,9 @@ Score: <integer from 1 to 10>
             )
             return _parse_checker_key(output, "Description") or output.strip()
 
-        segment_descriptions = []
+        segment_ranges = []
+        segment_prompts = []
+        segment_images = []
         for start in range(0, total, slice_size):
             end = min(start + slice_size, total)
             prompt = (
@@ -265,11 +267,18 @@ Score: <integer from 1 to 10>
                 .replace("[END_IDX]", str(end))
                 .replace("[TOTAL]", str(total))
             )
-            output = self._checker_vlm.infer(
-                texts=prompt,
-                images=all_frames[start:end],
-                max_new_tokens=self._checker_max_new_tokens,
-            )
+            segment_ranges.append((start, end))
+            segment_prompts.append(prompt)
+            segment_images.append(all_frames[start:end])
+
+        outputs = self._checker_vlm.infer(
+            texts=segment_prompts,
+            images=segment_images,
+            max_new_tokens=self._checker_max_new_tokens,
+        )
+
+        segment_descriptions = []
+        for (start, end), output in zip(segment_ranges, outputs):
             desc = _parse_checker_key(output, "Description") or output.strip()
             segment_descriptions.append(f"Frames {start + 1}-{end}: {desc}")
 

@@ -233,21 +233,24 @@ def describe_pairwise(
     frame_descs = {}
     diffs = {}
     describe_prompt_template = DESCRIBE_PROMPT.replace("[GAME]", game)
-    for i in range(k - 1):
-        describe_output = vlm.infer(
-            texts=describe_prompt_template,
-            images=[window[i], window[i + 1]],
+    pair_indices = list(range(k - 1))
+    if pair_indices:
+        describe_outputs = vlm.infer(
+            texts=[describe_prompt_template for _ in pair_indices],
+            images=[[window[i], window[i + 1]] for i in pair_indices],
             max_new_tokens=max_new_tokens,
-        ).lower()
-        if verbose:
-            save_frames(
-                [window[i], window[i + 1]],
-                f"describe_pair_{i}",
-                high_level_actions=[action_window[i]],
-            )
-            print(f"DESCRIBE output (pair {i}→{i+1}):\n{describe_output}\n---")
-        frame_descs[i] = _parse_key(describe_output, "Initial Frame Description") or ""
-        diffs[i] = _parse_key(describe_output, "Differences") or ""
+        )
+        for i, describe_output in zip(pair_indices, describe_outputs):
+            describe_output = describe_output.lower()
+            if verbose:
+                save_frames(
+                    [window[i], window[i + 1]],
+                    f"describe_pair_{i}",
+                    high_level_actions=[action_window[i]],
+                )
+                print(f"DESCRIBE output (pair {i}→{i+1}):\n{describe_output}\n---")
+            frame_descs[i] = _parse_key(describe_output, "Initial Frame Description") or ""
+            diffs[i] = _parse_key(describe_output, "Differences") or ""
 
     desc_lines = []
     for i in range(k - 1):
