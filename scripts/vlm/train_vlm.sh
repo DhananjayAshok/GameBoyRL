@@ -10,7 +10,7 @@ source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 # These should be specific to this script and not shared across scripts (that is handled below).
 declare -A ARGS
 ARGS["batch_size"]="4"
-ARGS["num_train_epochs"]="50"
+ARGS["num_train_epochs"]="20"
 ARGS["lora_rank"]="32"
 ARGS["lora_alpha"]="32"
 ARGS["learning_rate"]="2e-4"
@@ -116,7 +116,7 @@ fi
 
 
 
-bash scripts/core/llm-utils.sh python train.py || exit 1 --training_kind sft --modality vlm --model_name ${ARGS["model_name"]} \
+bash scripts/core/llm-utils.sh python train.py --training_kind sft --modality vlm --model_name ${ARGS["model_name"]} \
         --output_dir $storage_dir/models/${ARGS["run_name"]}/$model_save_name \
         --train_file ${ARGS["train_file"]}  \
         --run_name vlm-sft-${ARGS["run_name"]}-$model_save_name \
@@ -130,4 +130,4 @@ bash scripts/core/llm-utils.sh python train.py || exit 1 --training_kind sft --m
         --lora_r ${ARGS["lora_rank"]} \
         --lora_alpha ${ARGS["lora_alpha"]} \
         --learning_rate ${ARGS["learning_rate"]} \
-        --weight_decay ${ARGS["weight_decay"]} $overwrite_flag $push_to_hub_flag \
+        --weight_decay ${ARGS["weight_decay"]} $overwrite_flag $push_to_hub_flag || exit 1

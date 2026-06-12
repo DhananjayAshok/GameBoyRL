@@ -74,12 +74,9 @@ case "${ARGS["extra"]}" in
 esac
 
 if [[ "$_attempt_only" == "false" ]]; then
-    IFS=',' read -ra init_states_arr <<< "${TRAIN_STATES[$game]}"
-    for init_state in "${init_states_arr[@]}"; do
-        ARGS["init_state"]=$init_state
-        propose_flags=$(args_to_flags_subset ARGS PROPOSE_ZEROSHOT_ARG_KEYS)
-        bash scripts/vlm/propose_zeroshot.sh $propose_flags || exit 1
-    done
+    ARGS["init_states"]="${TRAIN_STATES[$game]}"
+    propose_flags=$(args_to_flags_subset ARGS PROPOSE_ZEROSHOT_ARG_KEYS)
+    bash scripts/vlm/propose_zeroshot.sh $propose_flags || exit 1
 fi
 
 if [[ "$_propose_only" == "false" ]]; then

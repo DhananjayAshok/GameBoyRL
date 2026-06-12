@@ -76,7 +76,7 @@ done
 game="${ARGS["game"]}"
 model_name="${ARGS["model_name"]}"
 vlm_kind="${ARGS["vlm_kind"]}"
-init_state="${ARGS["init_state"]}"
+init_states="${ARGS["init_states"]}"
 max_new_tokens="${ARGS["max_new_tokens"]}"
 extra="${ARGS["extra"]}"
 extra_k="${ARGS["extra_k"]}"
@@ -101,4 +101,4 @@ fi
 
 python vlm.py --game $game --model_name $model_name --vlm_kind $vlm_kind \
     --max_new_tokens $max_new_tokens $overwrite_flag $verbose_flag \
-    propose_tasks_zeroshot --init_state $init_state --run_name "${ARGS["run_name"]}" $extra_flag
+    propose_tasks_zeroshot --init_states $init_states --run_name "${ARGS["run_name"]}" $extra_flag

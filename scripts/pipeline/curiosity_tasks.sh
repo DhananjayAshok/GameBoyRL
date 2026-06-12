@@ -61,7 +61,7 @@ _do_guidance=false
 [[ "${ARGS["do_guidance_and_practice"]}" == "true" || "${ARGS["do_guidance_and_practice"]}" == "yes" || "${ARGS["do_guidance_and_practice"]}" == "y" || "${ARGS["do_guidance_and_practice"]}" == "t" ]] && _do_guidance=true
 
 create_flags=$(args_to_flags_subset ARGS CREATE_TRAJ_ARG_KEYS)
-echo bash scripts/rl/create_traj.sh $create_flags || exit 1
+bash scripts/rl/create_traj.sh $create_flags || exit 1
 
 init_state_group="${ARGS["init_state_group"]}"
 if [[ "$init_state_group" == "none" ]]; then

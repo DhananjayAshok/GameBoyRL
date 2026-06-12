@@ -50,9 +50,6 @@ for key in "${!ARGS[@]}"; do
 done
 
 game="${ARGS["game"]}"
-IFS=',' read -ra init_states_arr <<< "${TRAIN_STATES[$game]}"
-for init_state in "${init_states_arr[@]}"; do
-    ARGS["init_state"]=$init_state
-    arg_string=$(args_to_flags_subset ARGS PROPOSE_ZEROSHOT_ARG_KEYS)
-    bash scripts/vlm/propose_zeroshot.sh $arg_string || exit 1
-done
+ARGS["init_states"]="${TRAIN_STATES[$game]}"
+arg_string=$(args_to_flags_subset ARGS PROPOSE_ZEROSHOT_ARG_KEYS)
+bash scripts/vlm/propose_zeroshot.sh $arg_string || exit 1
