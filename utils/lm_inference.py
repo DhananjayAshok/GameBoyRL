@@ -13,6 +13,56 @@ import os
 from abc import ABC, abstractmethod
 import uuid
 
+
+def parse_key_value(text: str, key: str) -> Optional[str]:
+    """
+    Return the value following ``"Key:"`` on the matching line of ``text``.
+
+    The key is matched case-insensitively; the returned value preserves its
+    original case. A trailing ``[STOP]``/``[stop]`` marker is stripped.
+
+    If ``text`` contains exactly one ``"response:"`` occurrence, only the text
+    after it is searched (avoids matching mentions of ``key`` in a preceding
+    "Reasoning:" section). If no ``"key:"`` line is found but ``key`` (without
+    a colon) appears exactly once, the rest of that occurrence's line is
+    returned instead.
+
+    :param text: The text to search.
+    :type text: str
+    :param key: The key to search for.
+    :type key: str
+    :return: The extracted value, or None if not found or empty.
+    :rtype: Optional[str]
+    """
+    key_lower = key.lower()
+    marker = f"{key_lower}:"
+
+    def clean(value: str) -> Optional[str]:
+        value = value.strip()
+        stop_idx = value.lower().find("[stop]")
+        if stop_idx != -1:
+            value = value[:stop_idx]
+        value = value.strip()
+        return value or None
+
+    text_lower = text.lower()
+    if text_lower.count("response:") == 1: # sometimes API models do this. 
+        idx = text_lower.index("response:") + len("response:")
+        text = text[idx:].strip()
+        text_lower = text.lower()
+
+    for line, line_lower in zip(text.splitlines(), text_lower.splitlines()):
+        idx = line_lower.find(marker)
+        if idx != -1:
+            return clean(line[idx + len(marker):])
+
+    if text_lower.count(key_lower) == 1:
+        idx = text_lower.index(key_lower)
+        rest_of_line = text[idx + len(key):].splitlines()
+        return clean(rest_of_line[0]) if rest_of_line else None
+
+    return None
+
 MIN_QUERIES_PER_MINUTE = 1
 
 # Placeholder per-model rate limits (queries per minute). All currently set to
@@ -58,7 +108,7 @@ def get_max_queries_per_minute(model: str, parameters: dict[str, Any]) -> int:
     else:
         if len(matches) > 1:
             for match in matches:
-                if match == model:
+                if match == model.split("/")[-1]:
                     return _RATE_LIMITS[match]
             log_error(
                 f"Multiple matches found in _RATE_LIMITS for model {model}: {matches}. "
@@ -688,6 +738,7 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
                 f"(got temperature=None); otherwise all sequences would be identical.",
                 parameters=self.parameters,
             )
+
         outputs = asyncio.run(self._do_infer_async(inputs, max_new_tokens, temperature, stop_strings, num_return_sequences))
         return outputs
 
@@ -1003,6 +1054,7 @@ class vLLMModel(OpenAIAPIModel):
         self,
         model: str,
         api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
         parameters: dict[str, Any] = None,
     ) -> None:
         """
@@ -1012,11 +1064,14 @@ class vLLMModel(OpenAIAPIModel):
         :type model: str
         :param api_key: The API key for the vLLM server, if required.
         :type api_key: str or None
+        :param base_url: The base url at which the endpoint is accessible, if not default.
+        :type base_url: str
         :param parameters: Loaded parameters dict. If None, loads from config.
         :type parameters: dict[str, Any] or None
         """
         parameters = load_parameters(parameters)
-        base_url = parameters["vLLM_base_url"]
+        if base_url is None:
+            base_url = parameters["vLLM_base_url"]
         super().__init__(
             model=model,
             base_url=base_url,
@@ -1063,53 +1118,3 @@ class OpenRouterModel(OpenAIAPIModel):
             max_queries_per_minute=max_queries_per_minute,
             parameters=parameters,
         )
-
-
-def parse_key_value(text: str, key: str) -> Optional[str]:
-    """
-    Return the value following ``"Key:"`` on the matching line of ``text``.
-
-    The key is matched case-insensitively; the returned value preserves its
-    original case. A trailing ``[STOP]``/``[stop]`` marker is stripped.
-
-    If ``text`` contains exactly one ``"response:"`` occurrence, only the text
-    after it is searched (avoids matching mentions of ``key`` in a preceding
-    "Reasoning:" section). If no ``"key:"`` line is found but ``key`` (without
-    a colon) appears exactly once, the rest of that occurrence's line is
-    returned instead.
-
-    :param text: The text to search.
-    :type text: str
-    :param key: The key to search for.
-    :type key: str
-    :return: The extracted value, or None if not found or empty.
-    :rtype: Optional[str]
-    """
-    key_lower = key.lower()
-    marker = f"{key_lower}:"
-
-    def clean(value: str) -> Optional[str]:
-        value = value.strip()
-        stop_idx = value.lower().find("[stop]")
-        if stop_idx != -1:
-            value = value[:stop_idx]
-        value = value.strip()
-        return value or None
-
-    text_lower = text.lower()
-    if text_lower.count("response:") == 1:
-        idx = text_lower.index("response:") + len("response:")
-        text = text[idx:].strip()
-        text_lower = text.lower()
-
-    for line, line_lower in zip(text.splitlines(), text_lower.splitlines()):
-        idx = line_lower.find(marker)
-        if idx != -1:
-            return clean(line[idx + len(marker):])
-
-    if text_lower.count(key_lower) == 1:
-        idx = text_lower.index(key_lower)
-        rest_of_line = text[idx + len(key):].splitlines()
-        return clean(rest_of_line[0]) if rest_of_line else None
-
-    return None

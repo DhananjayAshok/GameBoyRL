@@ -19,8 +19,8 @@ import click
 import numpy as np
 from tqdm import tqdm
 
-from utils import log_info, log_warn, log_error, VLM
-from vlm_scripts.infer_tasks import _parse_key, save_frames
+from utils import log_info, log_warn, log_error, VLM, parse_key_value
+from vlm_scripts.infer_tasks import save_frames
 
 # ---------------------------------------------------------------------------
 # Prompts
@@ -78,8 +78,8 @@ def _parse_guidance(text: str) -> dict | None:
     if stop_idx != -1:
         text_lower = text_lower[:stop_idx]
 
-    summary = _parse_key(text_lower, "Summary") or ""
-    goal_condition = _parse_key(text_lower, "Goal condition") or ""
+    summary = parse_key_value(text_lower, "Summary") or ""
+    goal_condition = parse_key_value(text_lower, "Goal condition") or ""
 
     steps = []
     in_steps = False
