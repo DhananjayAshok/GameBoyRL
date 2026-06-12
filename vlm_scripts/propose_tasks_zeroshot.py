@@ -21,11 +21,14 @@ Output: JSONL file, one JSON object per line, one line per init_state
 
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import click
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
-from utils import load_parameters, log_info, log_warn, log_error, VLM
+from utils import load_parameters, log_info, log_warn, log_error, VLM, HuggingFaceModel
 from gameboy_worlds import get_environment
 
 PROPOSE_PROMPT = """You are observing the initial frame of a game of [GAME].
@@ -69,13 +72,16 @@ def get_first_frame_and_actions(
         headless=True,
         save_video=False,
     )
-    obs, info = env.reset()
-    first_frame = info["core"]["current_frame"]
-    action_string = env.get_action_strings(return_all=True)
-    verbalized_string = ""
-    for high_level_action, string in action_string.items():
-        verbalized_string += f"- {string}\n"
-    return (first_frame, verbalized_string)
+    try:
+        obs, info = env.reset()
+        first_frame = info["core"]["current_frame"]
+        action_string = env.get_action_strings(return_all=True)
+        verbalized_string = ""
+        for high_level_action, string in action_string.items():
+            verbalized_string += f"- {string}\n"
+        return (first_frame, verbalized_string)
+    finally:
+        env.close()
 
 
 def get_extra_context(
@@ -131,8 +137,55 @@ def _parse_task_list(text: str) -> list[str]:
     return tasks
 
 
+def _propose_for_init_state(
+    init_state: str,
+    game: str,
+    outdir: str,
+    extra,
+    extra_k: int,
+    run_name: str,
+    vlm: VLM,
+    max_new_tokens: int,
+    verbose: bool,
+    parameters: dict,
+) -> list[str]:
+    """Propose tasks from the initial frame of a single init_state."""
+    first_frame, action_space_str = get_first_frame_and_actions(init_state, game)
+    prior_tasks = get_extra_context(outdir, init_state, extra, run_name, parameters)
+    if prior_tasks and len(prior_tasks) > extra_k:
+        prior_tasks = list(np.random.choice(prior_tasks, size=extra_k, replace=False))
+
+    extra_context_str = ""
+    if prior_tasks:
+        prior_list = "\n".join(f"- {t}" for t in prior_tasks)
+        extra_context_str = EXTRA_CONTEXT_PROMPT.replace("[PRIOR_TASKS]", prior_list)
+
+    prompt = (
+        PROPOSE_PROMPT.replace("[GAME]", game)
+        .replace("[ACTION_SPACE]", action_space_str)
+        .replace("[EXTRA_CONTEXT]", extra_context_str)
+    )
+
+    if verbose:
+        print(f"PROPOSE prompt for '{init_state}':\n{prompt}\n---")
+
+    output = vlm.infer(
+        texts=prompt, images=[first_frame], max_new_tokens=max_new_tokens
+    ).lower()
+
+    if verbose:
+        print(f"PROPOSE output for '{init_state}':\n{output}\n---")
+
+    tasks = _parse_task_list(output)
+    if not tasks:
+        print(
+            f"Warning: no tasks parsed from VLM output for init_state '{init_state}'."
+        )
+    return tasks
+
+
 @click.command(name="propose_tasks_zeroshot")
-@click.option("--init_state", required=True, help="Name of the init state to load")
+@click.option("--init_state", required=True, help="Comma-separated name(s) of the init state(s) to load")
 @click.option(
     "--extra",
     type=click.Choice([None, "zeroshot", "curiosity", "zeroshot_with_curiosity"], case_sensitive=False),
@@ -150,15 +203,22 @@ def _parse_task_list(text: str) -> list[str]:
     default="all",
     help="run_name used when infer_tasks was run, to locate the curiosity annotation.",
 )
+@click.option(
+    "--max_concurrency",
+    default=8,
+    show_default=True,
+    help="Max concurrent propose pipelines (across init_states). Forced to 1 for --verbose or a huggingface vlm_kind.",
+)
 @click.pass_obj
-def propose_tasks_zeroshot(obj, init_state, extra, extra_k, run_name):
-    """Zero-shot VLM task proposal from a single initial frame."""
+def propose_tasks_zeroshot(obj, init_state, extra, extra_k, run_name, max_concurrency):
+    """Zero-shot VLM task proposal from the initial frame of each given init_state."""
     parameters = obj["parameters"]
     game = obj["game"]
     model_name = obj["model_name"]
     vlm_kind = obj["vlm_kind"]
     max_new_tokens = obj["max_new_tokens"]
     verbose = obj["verbose"]
+    overwrite = obj["overwrite"]
     model_save_name = model_name.split("/")[-1]
     outdir = parameters["storage_dir"] + f"/proposed_tasks/{game}/{model_save_name}/"
     os.makedirs(outdir, exist_ok=True)
@@ -172,62 +232,63 @@ def propose_tasks_zeroshot(obj, init_state, extra, extra_k, run_name):
     elif extra == "zeroshot_with_curiosity":
         outpath = outdir + "zeroshot/zeroshot_tasks_prior_zeroshot_with_curiosity"
     out_path = outpath + ".jsonl"
+
     if os.path.exists(out_path):
         df = pd.read_json(out_path, lines=True)
-        if init_state in df["init_state"].values:
-            if not obj["overwrite"]:
-                log_info(
-                    f"Skipping — output already exists for initial state {init_state} at {out_path}. Use --overwrite to rerun."
-                )
-                return
-            else:
-                log_warn(
-                    f"Overwriting existing output for initial state {init_state} at {out_path}."
-                )
-                df = df[df["init_state"] != init_state].reset_index(drop=True)
     else:
-        columns = ["init_state", "tasks"]
-        data = []
-        df = pd.DataFrame(data, columns=columns)
+        df = pd.DataFrame([], columns=["init_state", "tasks"])
+
+    init_states = [s.strip() for s in init_state.split(",") if s.strip()]
+    done = set(df["init_state"].values)
+    jobs = []
+    for state in init_states:
+        if state in done:
+            if not overwrite:
+                log_info(
+                    f"Skipping — output already exists for initial state {state} at {out_path}. Use --overwrite to rerun."
+                )
+                continue
+            log_warn(
+                f"Overwriting existing output for initial state {state} at {out_path}."
+            )
+            df = df[df["init_state"] != state].reset_index(drop=True)
+        jobs.append(state)
+
+    if not jobs:
+        return
 
     vlm = VLM(model_name, vlm_kind)
 
-    first_frame, action_space_str = get_first_frame_and_actions(
-        init_state, game
-    )
-    prior_tasks = get_extra_context(outdir, init_state, extra, run_name, parameters)
-    if prior_tasks and len(prior_tasks) > extra_k:
-        prior_tasks = list(np.random.choice(prior_tasks, size=extra_k, replace=False))
-
-    extra_context_str = ""
-    if prior_tasks:
-        prior_list = "\n".join(f"- {t}" for t in prior_tasks)
-        extra_context_str = EXTRA_CONTEXT_PROMPT.replace("[PRIOR_TASKS]", prior_list)
-
-    prompt = (
-        PROPOSE_PROMPT.replace("[GAME]", game)
-        .replace("[ACTION_SPACE]", action_space_str)
-        .replace("[EXTRA_CONTEXT]", extra_context_str)
+    # propose pipelines are independent across init_states, so submit them all to
+    # one shared pool. --verbose interleaves prompt/output prints and
+    # HuggingFaceModel isn't safe for concurrent generate() calls — both fall
+    # back to max_workers=1, which processes jobs one at a time in submission
+    # order (i.e. identical to the old sequential loop).
+    effective_workers = (
+        1 if (verbose or isinstance(vlm._vlm, HuggingFaceModel)) else max_concurrency
     )
 
-    if verbose:
-        print(f"PROPOSE prompt:\n{prompt}\n---")
+    with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+        future_to_state = {
+            executor.submit(
+                _propose_for_init_state,
+                state,
+                game,
+                outdir,
+                extra,
+                extra_k,
+                run_name,
+                vlm,
+                max_new_tokens,
+                verbose,
+                parameters,
+            ): state
+            for state in jobs
+        }
 
-    images = [first_frame]
-    output = vlm.infer(
-        texts=prompt, images=images, max_new_tokens=max_new_tokens
-    ).lower()
-
-    if verbose:
-        print(f"PROPOSE output:\n{output}\n---")
-
-    tasks = _parse_task_list(output)
-    if not tasks:
-        print(
-            f"Warning: no tasks parsed from VLM output for init_state '{init_state}'."
-        )
-
-    new_row = {"init_state": init_state, "tasks": tasks}
-    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-    df.to_json(out_path, orient="records", lines=True)
-    log_info(f"Saved proposed tasks for init_state '{init_state}' to {out_path}.")
+        for future in tqdm(as_completed(future_to_state), total=len(future_to_state), desc="Proposing tasks"):
+            state = future_to_state[future]
+            tasks = future.result()
+            df = pd.concat([df, pd.DataFrame([{"init_state": state, "tasks": tasks}])], ignore_index=True)
+            df.to_json(out_path, orient="records", lines=True)
+            log_info(f"Saved proposed tasks for init_state '{state}' to {out_path}.")

@@ -65,6 +65,7 @@ Checkpointing
 import json
 import os
 import pickle
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 
@@ -76,7 +77,7 @@ from gameboy_worlds import get_environment
 from execution.registry import AVAILABLE_EXECUTORS
 from execution.report import EnvironmentStepRecord
 from execution.supervisor import SimpleCheckerSupervisor
-from utils import log_info, log_error, VLM, parse_key_value
+from utils import log_info, log_error, VLM, parse_key_value, HuggingFaceModel
 
 
 CRITIQUE_SLICE_PROMPT = """You are analysing a segment of a failed attempt to complete a task in a game of [GAME].
@@ -196,6 +197,100 @@ def _reconstruct_trajectory(env_steps: list, init_state: str) -> tuple:
     return (observations, actions, high_level_actions, rewards, init_state)
 
 
+def _attempt_task(
+    group_idx: str,
+    init_state: str,
+    task_str: str,
+    game: str,
+    model_name: str,
+    vlm_kind: str,
+    executor_class,
+    max_steps: int,
+    max_tool_calls: int,
+    lookback: int,
+    controller_variant: str,
+    max_attempts: int,
+    checker_max_new_tokens: int,
+    max_new_tokens: int,
+    critique_vlm: VLM,
+    parameters: dict,
+    verbose: bool,
+) -> tuple[dict, tuple | None]:
+    """Run all attempts for one (init_state, task) pair in its own env, then close it."""
+    env = get_environment(
+        game=game,
+        controller_variant=controller_variant,
+        environment_variant="default",
+        init_state=init_state,
+        max_steps=max_steps,
+        headless=True,
+        save_video=False,
+    )
+
+    hint = ""
+    result = None
+    trajectory = None
+
+    if verbose:
+        print(f"Task [{group_idx}]: {task_str}")
+
+    try:
+        for attempt in range(max_attempts):
+            env.reset()
+
+            if verbose:
+                print(f"  Attempt {attempt + 1}/{max_attempts}" + (f" | hint: {hint}" if hint else ""))
+
+            supervisor = SimpleCheckerSupervisor(
+                task=task_str,
+                executor_class=executor_class,
+                env=env,
+                game=game,
+                max_steps=max_steps,
+                max_tool_calls=max_tool_calls,
+                evaluation_lookback=lookback,
+                allow_self_termination=True,
+                score_mode=False,
+                checker_vlm_model=model_name,
+                checker_vlm_kind=vlm_kind,
+                checker_max_new_tokens=checker_max_new_tokens,
+                parameters=parameters,
+                vlm_model=model_name,
+                vlm_kind=vlm_kind,
+                hint=hint or None,
+            )
+            result = supervisor.evaluate()
+            env_steps = [
+                s for s in result["steps"] if isinstance(s, EnvironmentStepRecord)
+            ]
+            trajectory = _reconstruct_trajectory(env_steps, init_state)
+
+            if verbose:
+                print(f"  Result: {'success' if result['success'] else 'failure'} | {result.get('description', '')}")
+
+            if result["success"]:
+                break
+
+            if attempt < max_attempts - 1:
+                hint = _derive_hint(
+                    env_steps, task_str, game, critique_vlm, max_new_tokens, hint
+                )
+                if verbose:
+                    print(f"  Derived hint: {hint}")
+    finally:
+        env.close()
+
+    result_record = {
+        "init_state": init_state,
+        "task_string": task_str,
+        "success": result["success"],
+        "description": result.get("description", ""),
+        "reasoning": result.get("reasoning", ""),
+        "n_tries": attempt + 1,
+    }
+    return result_record, trajectory
+
+
 @click.command(name="attempt_tasks")
 @click.option(
     "--tasks_path",
@@ -246,9 +341,15 @@ def _reconstruct_trajectory(env_steps: list, init_state: str) -> tuple:
     show_default=True,
     help="Token budget for each checker VLM call.",
 )
+@click.option(
+    "--max_concurrency",
+    default=8,
+    show_default=True,
+    help="Max concurrent (init_state, task) attempt pipelines. Forced to 1 for --verbose or a huggingface vlm_kind.",
+)
 @click.pass_obj
 def attempt_tasks_cmd(
-    obj, tasks_path, executor_name, max_steps, max_tool_calls, lookback, controller_variant, max_attempts, checker_max_new_tokens
+    obj, tasks_path, executor_name, max_steps, max_tool_calls, lookback, controller_variant, max_attempts, checker_max_new_tokens, max_concurrency
 ):
     """Attempt each proposed task with a VLM executor and check for success."""
     parameters = obj["parameters"]
@@ -290,89 +391,54 @@ def attempt_tasks_cmd(
     with open(tasks_path, "r") as f:
         lines = [json.loads(line) for line in f if line.strip()]
 
-    for line_number, record in tqdm(
-        enumerate(lines), total=len(lines), desc="init_states"
-    ):
+    jobs = []
+    for line_number, record in enumerate(lines):
         init_state = record["init_state"]
         tasks = record.get("tasks", [])
-        if not tasks:
-            continue
-
-        env = get_environment(
-            game=game,
-            controller_variant=controller_variant,
-            environment_variant="default",
-            init_state=init_state,
-            max_steps=max_steps,
-            headless=True,
-            save_video=False,
-        )
-
-        for task_index, task_str in tqdm(
-            enumerate(tasks), total=len(tasks), desc="tasks", leave=False
-        ):
+        for task_index, task_str in enumerate(tasks):
             group_idx = f"{line_number}_{task_index}"
             if group_idx in results and not overwrite:
                 continue
+            jobs.append((group_idx, init_state, task_str))
 
-            hint = ""
-            result = None
-            trajectory = None
+    # (init_state, task) attempt pipelines each create and close their own env,
+    # so they're independent and can run concurrently. --verbose runs interleaved
+    # print debugging and HuggingFaceModel isn't safe for concurrent generate()
+    # calls — both fall back to max_workers=1, which processes jobs one at a time
+    # in submission order (i.e. identical to the old sequential loop).
+    effective_workers = (
+        1 if (verbose or isinstance(critique_vlm._vlm, HuggingFaceModel)) else max_concurrency
+    )
 
-            if verbose:
-                print(f"Task [{group_idx}]: {task_str}")
+    with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+        future_to_group = {
+            executor.submit(
+                _attempt_task,
+                group_idx,
+                init_state,
+                task_str,
+                game,
+                model_name,
+                vlm_kind,
+                executor_class,
+                max_steps,
+                max_tool_calls,
+                lookback,
+                controller_variant,
+                max_attempts,
+                checker_max_new_tokens,
+                max_new_tokens,
+                critique_vlm,
+                parameters,
+                verbose,
+            ): group_idx
+            for group_idx, init_state, task_str in jobs
+        }
 
-            for attempt in range(max_attempts):
-                env.reset()
-
-                if verbose:
-                    print(f"  Attempt {attempt + 1}/{max_attempts}" + (f" | hint: {hint}" if hint else ""))
-
-                supervisor = SimpleCheckerSupervisor(
-                    task=task_str,
-                    executor_class=executor_class,
-                    env=env,
-                    game=game,
-                    max_steps=max_steps,
-                    max_tool_calls=max_tool_calls,
-                    evaluation_lookback=lookback,
-                    allow_self_termination=True,
-                    score_mode=False,
-                    checker_vlm_model=model_name,
-                    checker_vlm_kind=vlm_kind,
-                    checker_max_new_tokens=checker_max_new_tokens,
-                    parameters=parameters,
-                    vlm_model=model_name,
-                    vlm_kind=vlm_kind,
-                    hint=hint or None,
-                )
-                result = supervisor.evaluate()
-                env_steps = [
-                    s for s in result["steps"] if isinstance(s, EnvironmentStepRecord)
-                ]
-                trajectory = _reconstruct_trajectory(env_steps, init_state)
-
-                if verbose:
-                    print(f"  Result: {'success' if result['success'] else 'failure'} | {result.get('description', '')}")
-
-                if result["success"]:
-                    break
-
-                if attempt < max_attempts - 1:
-                    hint = _derive_hint(
-                        env_steps, task_str, game, critique_vlm, max_new_tokens, hint
-                    )
-                    if verbose:
-                        print(f"  Derived hint: {hint}")
-
-            results[group_idx] = {
-                "init_state": init_state,
-                "task_string": task_str,
-                "success": result["success"],
-                "description": result.get("description", ""),
-                "reasoning": result.get("reasoning", ""),
-                "n_tries": attempt + 1,
-            }
+        for future in tqdm(as_completed(future_to_group), total=len(future_to_group), desc="Attempting tasks"):
+            group_idx = future_to_group[future]
+            result_record, trajectory = future.result()
+            results[group_idx] = result_record
             trajectories[group_idx] = trajectory
 
             with open(checkpoint_json, "w") as f:

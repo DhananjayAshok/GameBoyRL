@@ -15,7 +15,7 @@ Called by scripts/vlm/infer_guidance.sh (via vlm.py infer_guidance). Use --help 
 import json
 import os
 import pickle
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import click
 import numpy as np
 from tqdm import tqdm
@@ -271,7 +271,7 @@ def infer_guidance_cmd(obj, trajectory_path, max_obs_at_once, max_concurrency):
     )
 
     with ThreadPoolExecutor(max_workers=effective_workers) as executor:
-        pending = []
+        future_info = {}
         for group_idx in sorted(task_map.keys()):
             if group_idx in guidance_output:
                 continue
@@ -296,9 +296,10 @@ def infer_guidance_cmd(obj, trajectory_path, max_obs_at_once, max_concurrency):
                 max_obs_at_once=max_obs_at_once,
                 verbose=verbose,
             )
-            pending.append((group_idx, task, init_state, future))
+            future_info[future] = (group_idx, task, init_state)
 
-        for group_idx, task, init_state, future in tqdm(pending, desc="Generating guidance"):
+        for future in tqdm(as_completed(future_info), total=len(future_info), desc="Generating guidance"):
+            group_idx, task, init_state = future_info[future]
             guidance = future.result()
             if guidance is None:
                 print(f"Warning: could not generate guidance for group {group_idx}.")
