@@ -1,6 +1,8 @@
-from openai import OpenAI
-from anthropic import Anthropic
+from openai import AsyncOpenAI
+from anthropic import AsyncAnthropic
 from time import sleep, perf_counter
+import asyncio
+import random
 from typing import Optional, Any, Union
 from utils.parameter_handling import load_parameters
 from utils.log_handling import log_info, log_warn, log_error
@@ -57,15 +59,25 @@ def get_max_queries_per_minute(model: str, parameters: dict[str, Any]) -> int:
     :rtype: int
     """
     matches = [key for key in _RATE_LIMITS if key in model or model in key]
-    if matches:
-        best = max(matches, key=len)
-        return _RATE_LIMITS[best]
-    log_warn(
-        f"Model {model} not found in _RATE_LIMITS (no exact or substring match). "
-        f"Using default_max_queries_per_minute from project parameters.",
-        parameters=parameters,
-    )
-    return parameters["default_max_queries_per_minute"]
+    if not matches:
+        log_warn(
+            f"Model {model} not found in _RATE_LIMITS (no exact or substring match). "
+            f"Using default_max_queries_per_minute from project parameters.",
+            parameters=parameters,
+        )
+        return parameters["default_max_queries_per_minute"]
+    else:
+        if len(matches) > 1:
+            for match in matches:
+                if match == model:
+                    return _RATE_LIMITS[match]
+            log_error(
+                f"Multiple matches found in _RATE_LIMITS for model {model}: {matches}. "
+                f"Please disambiguate by adding a more specific key to _RATE_LIMITS.",
+                parameters=parameters,
+            )
+        else:
+            return _RATE_LIMITS[matches[0]]
 
 
 class RateLimitedAPIBase:
@@ -91,7 +103,7 @@ class RateLimitedAPIBase:
         self.last_query_time = 0
         self.seconds_to_wait = 60 / self.max_queries_per_minute
         self.unique_id = str(uuid.uuid4())
-        if self.max_queries_per_minute < MIN_QUERIES_PER_MINUTE:
+        if 0 <= self.max_queries_per_minute < MIN_QUERIES_PER_MINUTE:
             log_error(
                 f"max_queries_per_minute must be at least {MIN_QUERIES_PER_MINUTE}, "
                 f"but got {self.max_queries_per_minute}.",
@@ -112,9 +124,9 @@ class RateLimitedAPIBase:
 
 class OpenAICompatibleAPIBase(RateLimitedAPIBase):
     """
-    Mixin that extends ``RateLimitedAPIBase`` with an OpenAI-compatible client.
+    Mixin that extends ``RateLimitedAPIBase`` with an OpenAI-compatible async client.
 
-    Initializes ``self.client = OpenAI(base_url=base_url, api_key=api_key)``
+    Initializes ``self.async_client = AsyncOpenAI(base_url=base_url, api_key=api_key)``
     after the rate-limiting state is set up. Shared by all OpenAI-compatible
     models (``OpenAIAPIModel`` and its subclasses) to avoid repeating client
     creation in every subclass.
@@ -134,7 +146,7 @@ class OpenAICompatibleAPIBase(RateLimitedAPIBase):
             max_queries_per_minute=max_queries_per_minute,
             parameters=parameters,
         )
-        self.client = OpenAI(base_url=base_url, api_key=api_key)
+        self.async_client = AsyncOpenAI(base_url=base_url, api_key=api_key)
 
 
 class InferenceModel(ABC):
@@ -181,45 +193,24 @@ class InferenceModel(ABC):
         :return: Cleaned output string with content after ``[STOP]`` removed.
         :rtype: str
         """
-        if "[STOP]" in output_text:
-            output_text = output_text.split("[STOP]")[0]
+        output_text = output_text.split("[STOP]")[0]
         return output_text.strip()
 
-    def infer(
+    def _standardize_format(
         self,
         texts: Union[str, list[str]],
-        max_new_tokens: int,
         images: Union[list[Image.Image], list[list[Image.Image]]] = None,
-        temperature: Optional[float] = None,
-        stop_strings: list[str] = None,
-        num_return_sequences: int = 1,
-    ) -> Union[str, list[str], list[list[str]]]:
+    ) -> tuple[list[str], list[list[Image.Image]], bool]:
         """
-        Run inference on a batch of text prompts with associated images.
-
-        If a single string is passed, a single string is returned. If a list is passed, a list is returned.
-
-        When ``num_return_sequences > 1``, each item is itself a list of
-        ``num_return_sequences`` output strings.
+        Validates and standardizes the format of ``texts`` and ``images`` inputs as per do_infer's expectations. 
 
         :param texts: A single text prompt or a list of text prompts.
         :type texts: str or list[str]
-        :param max_new_tokens: Maximum number of tokens to generate per response.
-        :type max_new_tokens: int
         :param images: A list of PIL Images (when ``texts`` is a single string) or a list of lists
             of PIL Images (when ``texts`` is a list). If None, no images are passed.
         :type images: list[Image.Image] or list[list[Image.Image]] or None
-        :param temperature: Sampling temperature. None means model default.
-        :type temperature: Optional[float]
-        :param stop_strings: Additional stop strings. ``"[STOP]"`` is always included.
-        :type stop_strings: list[str] or None
-        :param num_return_sequences: Number of independent sequences to return per prompt.
-        :type num_return_sequences: int
-        :return: A single output string if ``texts`` was a string and ``num_return_sequences == 1``;
-            a list of output strings if ``texts`` was a list and ``num_return_sequences == 1``;
-            a list of ``num_return_sequences`` strings if ``texts`` was a string and
-            ``num_return_sequences > 1``; or a list of such lists otherwise.
-        :rtype: str or list[str] or list[list[str]]
+        :return: A tuple of (standardized_texts, standardized_images, passed_in_str) where standardized_texts is a list of strings and standardized_images is a list of lists of PIL Images both formatted for input to do_infer. passed_in_str is a boolean indicating whether the original input was a single string (True) or a list of strings (False), which can be used to determine the appropriate output format in infer().
+        :rtype: tuple[list[str], list[list[Image.Image]], bool]
         """
         passed_in_str = isinstance(texts, str)
         if passed_in_str:
@@ -273,7 +264,63 @@ class InferenceModel(ABC):
                 )
         else:
             images = [[] for _ in texts]
-        results = self.do_infer(texts, images, max_new_tokens, temperature=temperature, stop_strings=stop_strings, num_return_sequences=num_return_sequences)
+        return texts, images, passed_in_str
+
+    def infer(
+        self,
+        texts: Union[str, list[str]],
+        max_new_tokens: int,
+        images: Union[list[Image.Image], list[list[Image.Image]]] = None,
+        temperature: Optional[float] = None,
+        stop_strings: list[str] = None,
+        num_return_sequences: int = 1,
+        batch_size: int = None
+    ) -> Union[str, list[str], list[list[str]]]:
+        """
+        Run inference on a batch of text prompts with associated images.
+
+        If a single string is passed, a single string is returned. If a list is passed, a list is returned.
+
+        When ``num_return_sequences > 1``, each item is itself a list of
+        ``num_return_sequences`` output strings.
+
+        :param texts: A single text prompt or a list of text prompts.
+        :type texts: str or list[str]
+        :param max_new_tokens: Maximum number of tokens to generate per response.
+        :type max_new_tokens: int
+        :param images: A list of PIL Images (when ``texts`` is a single string) or a list of lists
+            of PIL Images (when ``texts`` is a list). If None, no images are passed.
+        :type images: list[Image.Image] or list[list[Image.Image]] or None
+        :param temperature: Sampling temperature. None means model default.
+        :type temperature: Optional[float]
+        :param stop_strings: Additional stop strings. ``"[STOP]"`` is always included.
+        :type stop_strings: list[str] or None
+        :param num_return_sequences: Number of independent sequences to return per prompt.
+        :type num_return_sequences: int
+        :param batch_size: Number of samples to process in a single batch. If None, defaults to
+            ``max_batch_size_vllm``, ``max_batch_size_huggingface``, or ``max_batch_size_api`` from
+            project parameters, depending on the concrete model class.
+        :return: A single output string if ``texts`` was a string and ``num_return_sequences == 1``;
+            a list of output strings if ``texts`` was a list and ``num_return_sequences == 1``;
+            a list of ``num_return_sequences`` strings if ``texts`` was a string and
+            ``num_return_sequences > 1``; or a list of such lists otherwise.
+        :rtype: str or list[str] or list[list[str]]
+        """
+        texts, images, passed_in_str = self._standardize_format(texts, images)
+        parameters = self.parameters if hasattr(self, "parameters") else load_parameters()
+        if batch_size is None:
+            if isinstance(self, vLLMModel):
+                batch_size = parameters["max_batch_size_vllm"]
+            elif isinstance(self, HuggingFaceModel):
+                batch_size = parameters["max_batch_size_huggingface"]
+            else:
+                batch_size = parameters["max_batch_size_api"]
+        results = []
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i : i + batch_size]
+            batch_images = images[i : i + batch_size]
+            batch_results = self.do_infer(batch_texts, batch_images, max_new_tokens, temperature=temperature, stop_strings=stop_strings, num_return_sequences=num_return_sequences)
+            results.extend(batch_results)
         if num_return_sequences == 1:
             if passed_in_str:
                 return results[0][0]
@@ -292,8 +339,15 @@ class InferenceModel(ABC):
         max_new_tokens: int,
         temperature: Optional[float] = None,
         stop_strings: list[str] = None,
-    ) -> str:
-        """Run inference on a pre-formatted chat messages list. Returns a single string."""
+        num_return_sequences: int = 1,
+    ) -> Union[str, list[str]]:
+        """
+        Run inference on a pre-formatted chat messages list.
+
+        :return: A single output string if ``num_return_sequences == 1``, else a list of
+            ``num_return_sequences`` output strings.
+        :rtype: str or list[str]
+        """
         pass
 
     def partial_temperature(
@@ -315,8 +369,8 @@ class InferenceModel(ABC):
         i.e. deterministic) with the truncated output plus ``switch_phrase`` appended
         to the prompt, to obtain a deterministic final answer.
 
-        :param texts: A single text prompt. Lists are not supported.
-        :type texts: str
+        :param texts: A single text prompt or a list of text prompts.
+        :type texts: str or list[str]
         :param max_new_tokens: Maximum number of tokens to generate per response.
         :type max_new_tokens: int
         :param switch_phrase: Phrase marking the boundary between "thinking" and "answer".
@@ -333,9 +387,8 @@ class InferenceModel(ABC):
             or a list of such results when ``num_return_sequences > 1``.
         :rtype: str or None or list
         """
-        if isinstance(texts, list):
-            log_error("partial_temperature expects a single text input, not a list.")
-
+        texts, images, passed_in_str = self._standardize_format(texts, images)
+        asked_for_single_sequence = num_return_sequences == 1
         first_outputs = self.infer(
             texts,
             max_new_tokens,
@@ -345,28 +398,65 @@ class InferenceModel(ABC):
             num_return_sequences=num_return_sequences,
         )
 
-        first_outputs_list = [first_outputs] if num_return_sequences == 1 else first_outputs
+    
+        first_outputs_list = [first_outputs] if asked_for_single_sequence else first_outputs # always a doubly nested list. 
+        next_batch_text = []
+        next_batch_images = []
+        next_batch_output_so_fars = []
+        next_batch_mapping = {}
+        largest_max_tokens = 5
+        for og_batch_i, batch_outputs in enumerate(first_outputs_list):
+            for return_seq_i, output in enumerate(batch_outputs):
+                if switch_phrase not in output:
+                    continue
+                output_so_far = output.split(switch_phrase)[0]
+                n_tokens_estimated = len(output_so_far.split())
+                largest_max_tokens = max(largest_max_tokens, max_new_tokens - n_tokens_estimated)
+                second_prompt = texts[og_batch_i] + "\nHere is what you said: " + output_so_far + "\n" + switch_phrase + " "
+                next_batch_idx = len(next_batch_text)
+                next_batch_mapping[(og_batch_i, return_seq_i)] = next_batch_idx
+                next_batch_text.append(second_prompt)
+                next_batch_images.append(images[og_batch_i])
+                next_batch_output_so_fars.append(output_so_far)
 
+        if len(next_batch_text) == 0:
+            if asked_for_single_sequence:
+                if passed_in_str:
+                    return None
+                else:
+                    return [None for _ in texts]
+            else:
+                if passed_in_str:
+                    return [None for _ in range(num_return_sequences)]
+                else:
+                    return [[None for _ in range(num_return_sequences)] for _ in texts]
+        second_output = self.infer(
+            next_batch_text,
+            largest_max_tokens,
+            images=next_batch_images,
+            temperature=None,
+            stop_strings=stop_strings,
+            num_return_sequences=1,
+        )
+        for i, output in enumerate(second_output):
+            second_output[i] = next_batch_output_so_fars[i] + "\n" + switch_phrase + " " + output.lstrip(switch_phrase).lstrip()
+        
         results = []
-        for output in first_outputs_list:
-            if switch_phrase not in output:
-                results.append(None)
-                continue
-            output_so_far = output.split(switch_phrase)[0]
-            n_tokens_estimated = len(output_so_far.split())
-            second_max_tokens = max(1, max_new_tokens - n_tokens_estimated)
-            second_prompt = texts + "\nHere is what you said: " + output_so_far + "\n" + switch_phrase
-            second_output = self.infer(
-                second_prompt,
-                second_max_tokens,
-                images=images,
-                temperature=None,
-                stop_strings=stop_strings,
-                num_return_sequences=1,
-            )
-            results.append(output_so_far + "\n" + switch_phrase + " " + second_output)
-
-        if num_return_sequences == 1:
+        for og_batch_i in range(len(first_outputs_list)):
+            n_return_seqs = len(first_outputs_list[og_batch_i])
+            batch_results = []
+            for return_seq_i in range(n_return_seqs):
+                if (og_batch_i, return_seq_i) in next_batch_mapping:
+                    #breakpoint()
+                    target_i = next_batch_mapping[(og_batch_i, return_seq_i)]
+                    batch_results.append(second_output[target_i])
+                else:
+                    batch_results.append(None)
+            results.append(batch_results)                
+        for i, result in enumerate(results):
+            if passed_in_str:
+                results[i] = result[0]
+        if asked_for_single_sequence:
             return results[0]
         return results
 
@@ -455,9 +545,9 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         pass
 
     @abstractmethod
-    def query_client(self, messages: list[dict], max_new_tokens: int, temperature: Optional[float] = None, stop_strings: list[str] = None, num_return_sequences: int = 1) -> Any:
+    async def query_client(self, messages: list[dict], max_new_tokens: int, temperature: Optional[float] = None, stop_strings: list[str] = None, num_return_sequences: int = 1) -> Any:
         """
-        Send messages to the API client and return the raw response.
+        Send messages to the API client (asynchronously) and return the raw response.
 
         :param messages: A list of message dicts formatted for the API.
         :type messages: list[dict]
@@ -495,6 +585,7 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         :return: List of cleaned output strings, one per sequence.
         :rtype: list[str]
         """
+        
         return [self.get_output_final(t) for t in self.get_output_texts(response)]
 
     def get_output(self, response: Any) -> str:
@@ -514,10 +605,51 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         max_new_tokens: int,
         temperature: Optional[float] = None,
         stop_strings: list[str] = None,
-    ) -> str:
+        num_return_sequences: int = 1,
+    ) -> Union[str, list[str]]:
+        if num_return_sequences > 1 and temperature is None:
+            log_error(
+                f"num_return_sequences={num_return_sequences} requires temperature to be set "
+                f"(got temperature=None); otherwise all sequences would be identical.",
+                parameters=self.parameters,
+            )
+        outputs = asyncio.run(self._infer_messages_async(messages, max_new_tokens, temperature, stop_strings, num_return_sequences))
+        if num_return_sequences == 1:
+            return outputs[0]
+        return outputs
+
+    async def _infer_messages_async(
+        self,
+        messages: list[dict],
+        max_new_tokens: int,
+        temperature: Optional[float],
+        stop_strings: list[str],
+        num_return_sequences: int,
+    ) -> list[str]:
+        """
+        Issue the request(s) for a single chat messages list and return ``num_return_sequences``
+        output strings.
+
+        A single ``self.wait()`` paces this call relative to the last request issued;
+        all ``num_return_sequences`` requests (if multiple) are then fired concurrently.
+        Per-request rate-limit errors are handled by ``query_client``'s retry/backoff.
+        """
         self.wait()
-        response = self.query_client(messages, max_new_tokens, temperature=temperature, stop_strings=stop_strings)
-        return self.get_output(response)
+        if self.SUPPORTS_NATIVE_N:
+            response = await self.query_client(messages, max_new_tokens, temperature=temperature, stop_strings=stop_strings, num_return_sequences=num_return_sequences)
+            outputs = self.get_outputs(response)
+            if len(outputs) != num_return_sequences:
+                log_error(
+                    f"Expected {num_return_sequences} outputs but got {len(outputs)}. Response was: {response}",
+                    parameters=self.parameters,
+                )
+            return outputs
+        else:
+            async def query_one() -> str:
+                response = await self.query_client(messages, max_new_tokens, temperature=temperature, stop_strings=stop_strings)
+                return self.get_output(response)
+
+            return list(await asyncio.gather(*(query_one() for _ in range(num_return_sequences))))
 
     def do_infer(
         self,
@@ -566,25 +698,49 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
                 parameters=self.parameters,
             )
 
-        self.wait()
-        outputs = []
-        for (
-            input_message
-        ) in (
-            inputs
-        ):  # there is no pricing advantage for batch_size > 1, so just do them sequentially to allow the caller of this function to pass lists of any size.
-            if self.SUPPORTS_NATIVE_N:
-                response = self.query_client([input_message], max_new_tokens, temperature=temperature, stop_strings=stop_strings, num_return_sequences=num_return_sequences)
-                outputs.append(self.get_outputs(response))
-            else:
-                seq_outputs = []
-                for seq_idx in range(num_return_sequences):
-                    if seq_idx > 0:
-                        self.wait()
-                    response = self.query_client([input_message], max_new_tokens, temperature=temperature, stop_strings=stop_strings)
-                    seq_outputs.extend(self.get_outputs(response))
-                outputs.append(seq_outputs)
+        print("Length of inputs: ", len(inputs), " asking for num_return_sequences: ", num_return_sequences)
+        outputs = asyncio.run(self._do_infer_async(inputs, max_new_tokens, temperature, stop_strings, num_return_sequences))
+        print(f"Post-processed outputs: {outputs}")
         return outputs
+
+    async def _do_infer_async(
+        self,
+        inputs: list[dict],
+        max_new_tokens: int,
+        temperature: Optional[float],
+        stop_strings: list[str],
+        num_return_sequences: int,
+    ) -> list[list[str]]:
+        """
+        Issue one query per input message concurrently and return outputs shaped
+        ``[batch, num_return_sequences]``.
+
+        A single ``self.wait()`` paces the start of this batch relative to the last
+        request issued; all requests within the batch are then fired concurrently.
+        Per-request rate-limit errors are handled by ``query_client``'s retry/backoff.
+        """
+        self.wait()
+        if self.SUPPORTS_NATIVE_N:
+            async def query_one(input_message: dict) -> list[str]:
+                response = await self.query_client(
+                    [input_message], max_new_tokens, temperature=temperature, stop_strings=stop_strings, num_return_sequences=num_return_sequences
+                )
+                seq_outputs = self.get_outputs(response)
+                if len(seq_outputs) != num_return_sequences:
+                    log_error(
+                        f"Expected {num_return_sequences} outputs but got {len(seq_outputs)}. Response was: {response}",
+                        parameters=self.parameters,
+                    )
+                return seq_outputs
+
+            return list(await asyncio.gather(*(query_one(input_message) for input_message in inputs)))
+        else:
+            async def query_one(input_message: dict) -> str:
+                response = await self.query_client([input_message], max_new_tokens, temperature=temperature, stop_strings=stop_strings)
+                return self.get_output(response)
+
+            flat = await asyncio.gather(*(query_one(input_message) for input_message in inputs for _ in range(num_return_sequences)))
+            return [list(flat[i * num_return_sequences : (i + 1) * num_return_sequences]) for i in range(len(inputs))]
 
 
 class OpenAIAPIModel(OpenAICompatibleAPIBase, APIModel):
@@ -641,9 +797,9 @@ class OpenAIAPIModel(OpenAICompatibleAPIBase, APIModel):
             "image_url": {"url": f"data:image/jpeg;base64,{image}"},
         }
 
-    def query_client(self, messages: list[dict], max_new_tokens: int, temperature: Optional[float] = None, stop_strings: list[str] = None, num_return_sequences: int = 1) -> Any:
+    async def query_client(self, messages: list[dict], max_new_tokens: int, temperature: Optional[float] = None, stop_strings: list[str] = None, num_return_sequences: int = 1) -> Any:
         """
-        Send a message to the OpenAI chat completions endpoint.
+        Send a message to the OpenAI chat completions endpoint (asynchronously).
 
         :param messages: A list containing the formatted user message dict.
         :type messages: list[dict]
@@ -666,7 +822,7 @@ class OpenAIAPIModel(OpenAICompatibleAPIBase, APIModel):
         last_error = None
         for attempt in range(max_tries):
             try:
-                response = self.client.chat.completions.create(**kwargs)
+                response = await self.async_client.chat.completions.create(**kwargs)
                 if response is None or not getattr(response, "choices", None):
                     raise ValueError(f"API returned an invalid response (None/missing/empty choices): {response}")
                 return response
@@ -674,10 +830,11 @@ class OpenAIAPIModel(OpenAICompatibleAPIBase, APIModel):
                 last_error = e
                 log_warn(f"OpenAI API call failed on attempt {attempt+1}/{max_tries} with error: {e}")
                 if attempt < max_tries - 1:
-                    # exponential backoff with time_to_wait between attempts
-                    backoff_time = self.seconds_to_wait * (2 ** attempt)
+                    # exponential backoff with time_to_wait between attempts, plus jitter so
+                    # concurrent coroutines retrying after the same failure don't all collide
+                    backoff_time = self.seconds_to_wait * (2 ** attempt) * random.uniform(1.0, 1.5)
                     log_info(f"Waiting for {backoff_time:.2f} seconds before retrying...")
-                    sleep(backoff_time)
+                    await asyncio.sleep(backoff_time)
         raise RuntimeError(f"OpenAI API call failed after {max_tries} attempts. Last error: {last_error}") from last_error
 
     def get_output_texts(self, response: Any) -> list[str]:
@@ -770,7 +927,7 @@ class AnthropicModel(APIModel):
             max_queries_per_minute=max_queries_per_minute,
             parameters=parameters,
         )
-        self.client = Anthropic(api_key=api_key)
+        self.async_client = AsyncAnthropic(api_key=api_key)
 
     def get_image_input_dict(self, image: str) -> dict:
         """
@@ -790,9 +947,9 @@ class AnthropicModel(APIModel):
             },
         }
 
-    def query_client(self, messages: list[dict], max_new_tokens: int, temperature: Optional[float] = None, stop_strings: list[str] = None, num_return_sequences: int = 1) -> Any:
+    async def query_client(self, messages: list[dict], max_new_tokens: int, temperature: Optional[float] = None, stop_strings: list[str] = None, num_return_sequences: int = 1) -> Any:
         """
-        Send a message to the Anthropic messages endpoint.
+        Send a message to the Anthropic messages endpoint (asynchronously).
 
         :param messages: A list containing the formatted user message dict.
         :type messages: list[dict]
@@ -816,7 +973,7 @@ class AnthropicModel(APIModel):
         last_error = None
         for attempt in range(max_tries):
             try:
-                response = self.client.messages.create(**kwargs)
+                response = await self.async_client.messages.create(**kwargs)
                 if response is None or not getattr(response, "content", None):
                     raise ValueError(f"API returned an invalid response (None/missing/empty content): {response}")
                 return response
@@ -824,10 +981,11 @@ class AnthropicModel(APIModel):
                 last_error = e
                 log_warn(f"Anthropic API call failed on attempt {attempt+1}/{max_tries} with error: {e}")
                 if attempt < max_tries - 1:
-                    # exponential backoff with time_to_wait between attempts
-                    backoff_time = self.seconds_to_wait * (2 ** attempt)
+                    # exponential backoff with time_to_wait between attempts, plus jitter so
+                    # concurrent coroutines retrying after the same failure don't all collide
+                    backoff_time = self.seconds_to_wait * (2 ** attempt) * random.uniform(1.0, 1.5)
                     log_info(f"Waiting for {backoff_time:.2f} seconds before retrying...")
-                    sleep(backoff_time)
+                    await asyncio.sleep(backoff_time)
         raise RuntimeError(f"Anthropic API call failed after {max_tries} attempts. Last error: {last_error}") from last_error
 
     def get_output_texts(self, response: Any) -> list[str]:
@@ -857,7 +1015,6 @@ class vLLMModel(OpenAIAPIModel):
         self,
         model: str,
         api_key: Optional[str] = None,
-        max_queries_per_minute: int = 60,
         parameters: dict[str, Any] = None,
     ) -> None:
         """
@@ -867,8 +1024,6 @@ class vLLMModel(OpenAIAPIModel):
         :type model: str
         :param api_key: The API key for the vLLM server, if required.
         :type api_key: str or None
-        :param max_queries_per_minute: Maximum number of queries allowed per minute.
-        :type max_queries_per_minute: int
         :param parameters: Loaded parameters dict. If None, loads from config.
         :type parameters: dict[str, Any] or None
         """
@@ -878,7 +1033,7 @@ class vLLMModel(OpenAIAPIModel):
             model=model,
             base_url=base_url,
             api_key=api_key,
-            max_queries_per_minute=max_queries_per_minute,
+            max_queries_per_minute=-1,
             parameters=parameters,
         )
 
@@ -1053,13 +1208,17 @@ class HuggingFaceModel(InferenceModel):
         max_new_tokens: int,
         temperature: Optional[float] = None,
         stop_strings: list[str] = None,
-    ) -> str:
+        num_return_sequences: int = 1,
+    ) -> Union[str, list[str]]:
         if self.is_defunct:
             log_error(
                 f"Cannot run inference on defunct model.",
                 parameters=self.parameters,
             )
-        return self._generate([messages], max_new_tokens, temperature=temperature, stop_strings=stop_strings)[0]
+        outputs = self._generate([messages], max_new_tokens, temperature=temperature, stop_strings=stop_strings, num_return_sequences=num_return_sequences)
+        if num_return_sequences == 1:
+            return outputs[0]
+        return outputs
 
 
 @dataclass

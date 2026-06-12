@@ -61,12 +61,12 @@ This script creates a Python 3.12 virtual environment at `env_dir` using `uv`, s
 <summary>Manual alternative</summary>
 
 ```bash
-uv venv /path/to/env --python 3.12
-ln -s /path/to/env setup/.venv
-cd setup && uv sync && cd ..
-source setup/.venv/bin/activate
-python configs/create_env_file.py
-python GameBoyWorlds/configs/create_env_file.py
+uv venv /path/to/env --python 3.12          # create the virtual environment
+ln -s /path/to/env setup/.venv              # symlink so scripts can find it at setup/.venv
+cd setup && uv sync && cd ..                # install dependencies from setup/pyproject.toml
+source setup/.venv/bin/activate             # activate the environment
+python configs/create_env_file.py           # generate config.env for this repo
+python GameBoyWorlds/configs/create_env_file.py  # generate config.env for GameBoyWorlds
 ```
 </details>
 
@@ -82,9 +82,9 @@ This script creates a separate Python 3.12 environment for the `llm-utils` submo
 <summary>Manual alternative</summary>
 
 ```bash
-uv venv /path/to/llm-env --python 3.12
-ln -s /path/to/llm-env llm-utils/setup/.venv
-cd llm-utils/setup && uv sync
+uv venv /path/to/llm-env --python 3.12          # create a separate environment for llm-utils
+ln -s /path/to/llm-env llm-utils/setup/.venv    # symlink so llm-utils scripts can find it
+cd llm-utils/setup && uv sync                   # install llm-utils dependencies
 ```
 </details>
 
@@ -118,13 +118,6 @@ Pull the project data from the HuggingFace Hub:
 
 ```bash
 python sync_data.py main setup_sync
-```
-
-## 5. Test
-
-```bash
-bash scripts/core_rl/default_rl.sh test
-bash runs/benchmark_openrouter.sh test
 ```
 
 ---
