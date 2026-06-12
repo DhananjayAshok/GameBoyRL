@@ -112,24 +112,13 @@ class VLM:
         if images is not None:
             treated_images = get_converted_image_list(images)
             images = treated_images
-        if n_outputs == 1:
-            return self._vlm.infer(
-                texts=texts, images=images, max_new_tokens=max_new_tokens, temperature=temperature
-            )
-        # n_outputs > 1: call independently n times and collect results
-        results = []
-        for _ in range(n_outputs):
-            result = self._vlm.infer(
-                texts=texts, images=images, max_new_tokens=max_new_tokens, temperature=temperature
-            )
-            results.append(result)
-        # results is list[str] (if texts was str) or list[list[str]] (if texts was list)
-        # transpose so outer index is output-index, inner is sample-index
-        if isinstance(texts, str):
-            return results  # list of n_outputs strings
-        else:
-            # results[i] is a list[str] for sample i; transpose to list[list[str]] indexed by output
-            return [list(col) for col in zip(*results)]
+        return self._vlm.infer(
+            texts=texts,
+            images=images,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            num_return_sequences=n_outputs,
+        )
 
 
 class NamedVLM(VLM, ABC):
