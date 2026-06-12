@@ -21,8 +21,7 @@ import numpy as np
 import click
 from PIL import Image, ImageDraw, ImageFont
 
-from utils import load_parameters
-from utils.vlm import VLM, convert_numpy_greyscale_to_pillow
+from utils import load_parameters, VLM, convert_numpy_greyscale_to_pillow
 
 
 try:

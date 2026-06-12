@@ -30,9 +30,7 @@ import numpy as np
 import click
 from PIL import Image
 
-from utils import load_parameters, log_info
-from utils.vlm import VLM
-from utils.lm_inference import parse_key_value
+from utils import load_parameters, log_info, VLM, parse_key_value
 from show_trajectories import plot_transitions
 
 SAVE_FRAMES_DIR = "save_frames"

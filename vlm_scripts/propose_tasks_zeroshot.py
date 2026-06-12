@@ -25,8 +25,7 @@ import click
 import numpy as np
 import pandas as pd
 
-from utils import load_parameters, log_info, log_warn, log_error
-from utils.vlm import VLM
+from utils import load_parameters, log_info, log_warn, log_error, VLM
 from gameboy_worlds import get_environment
 
 PROPOSE_PROMPT = """You are observing the initial frame of a game of [GAME].

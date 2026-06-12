@@ -42,8 +42,7 @@ from gameboy_worlds.interface.action import LowLevelAction
 
 from execution.executor_action import ExecutorAction
 from execution.report import EnvironmentStepRecord, ExecutorReport, SimpleReport, ToolCallRecord, VLMCallRecord
-from utils import load_parameters, log_info
-from utils.vlm import ExecutorVLM
+from utils import load_parameters, log_info, ExecutorVLM
 
 MAX_CONSECUTIVE_INVALID = 10
 DEBUG_ON_INVALID = False

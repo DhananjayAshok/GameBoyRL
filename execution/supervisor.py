@@ -8,9 +8,7 @@ from gameboy_worlds.interface import Environment
 
 from execution.executor import Executor
 from execution.report import EnvironmentStepRecord, ExecutorReport
-from utils import load_parameters
-from utils.vlm import VLM
-from utils.lm_inference import parse_key_value
+from utils import load_parameters, VLM, parse_key_value
 
 
 class Supervisor(ABC):

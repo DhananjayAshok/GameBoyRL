@@ -76,9 +76,7 @@ from gameboy_worlds import get_environment
 from execution.registry import AVAILABLE_EXECUTORS
 from execution.report import EnvironmentStepRecord
 from execution.supervisor import SimpleCheckerSupervisor
-from utils import log_info, log_error
-from utils.vlm import VLM
-from utils.lm_inference import parse_key_value
+from utils import log_info, log_error, VLM, parse_key_value
 
 
 CRITIQUE_SLICE_PROMPT = """You are analysing a segment of a failed attempt to complete a task in a game of [GAME].

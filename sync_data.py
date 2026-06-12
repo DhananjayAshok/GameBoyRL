@@ -3,8 +3,7 @@ CLI for syncing project data with the Hugging Face Hub. Supports creating datase
 downloading a repo snapshot to the local sync directory, and uploading the sync directory
 to the Hub. Use --help for CLI options.
 """
-from utils.parameter_handling import load_parameters, compute_secondary_parameters
-from utils import log_error, log_info, log_warn
+from utils import load_parameters, compute_secondary_parameters, log_error, log_info, log_warn
 import click
 from huggingface_hub import HfApi
 import os

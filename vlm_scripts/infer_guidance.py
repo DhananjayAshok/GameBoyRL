@@ -19,8 +19,7 @@ import click
 import numpy as np
 from tqdm import tqdm
 
-from utils import log_info, log_warn, log_error
-from utils.vlm import VLM
+from utils import log_info, log_warn, log_error, VLM
 from vlm_scripts.infer_tasks import _parse_key, save_frames
 
 # ---------------------------------------------------------------------------
