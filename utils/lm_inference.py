@@ -697,10 +697,7 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
                 f"(got temperature=None); otherwise all sequences would be identical.",
                 parameters=self.parameters,
             )
-
-        print("Length of inputs: ", len(inputs), " asking for num_return_sequences: ", num_return_sequences)
         outputs = asyncio.run(self._do_infer_async(inputs, max_new_tokens, temperature, stop_strings, num_return_sequences))
-        print(f"Post-processed outputs: {outputs}")
         return outputs
 
     async def _do_infer_async(
