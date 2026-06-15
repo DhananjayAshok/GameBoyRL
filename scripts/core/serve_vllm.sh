@@ -21,7 +21,7 @@ module load gcc/13.3.0 cuda/12.6.3
 export TRITON_CACHE_DIR=/dev/shm/${USER}_triton_cache/
 PORT=8000
 LOG_FILE="vllm_server.log"
-TIMEOUT=300
+TIMEOUT=900 # 15 minutes timeout for server startup  
 
 # Extract the port if provided in the args, otherwise fallback to 8000
 ARGS=("$@")

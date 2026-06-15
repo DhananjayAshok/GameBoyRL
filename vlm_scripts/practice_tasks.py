@@ -9,15 +9,19 @@ Format: {group_idx: {task, init_state, goal_condition, guidance}}
 
 Processing
 ----------
-For each group_idx:
-  1. Create one environment for the group's init_state.
-  2. For each attempt in range(n_attempts):
-       a. Seed numpy with (base_seed + hash(group_idx) + attempt) for reproducibility.
-       b. Reset env, then take n_random_actions random low-level steps to perturb start state.
-       c. Run SimpleCheckerSupervisor with task, guidance (formatted string), and goal_condition.
-          Score mode is a click option.
-       d. Save the vlm_call_log from the result to a per-episode pickle.
-  3. No hint derivation between attempts — each is independent.
+Each (group_idx, attempt) pair is an independent episode (no hint derivation
+between attempts), so all of them are flattened into one job pool:
+  1. Create a fresh environment for the group's init_state.
+  2. Reset with seed=(base_seed + hash(group_idx) + attempt) for reproducibility.
+  3. Take n_random_actions random low-level steps to perturb the start state.
+  4. Run SimpleCheckerSupervisor with task, guidance (formatted string), and
+     goal_condition. Score mode is a click option.
+  5. On failure, derive a hint, replay the perturbation, and retry once.
+  6. Save the vlm_call_log from the result to a per-episode pickle.
+
+Jobs run on a thread pool (--max_concurrency). Forced to 1 worker when
+--verbose (so prints/breakpoints stay sequential) or when the VLM backend is
+a local HuggingFace model (not safe for concurrent generate() calls).
 
 CLI options
 -----------
@@ -30,6 +34,7 @@ CLI options
   --lookback          Frames passed to checker VLM (default: 8)
   --executor          Executor class short name (default: simple)
   --controller_variant  (default: low_level)
+  --max_concurrency   Max concurrent episodes (default: 8)
 
 Output
 ------
@@ -42,20 +47,27 @@ Directory: same directory as guidance_path, under a "practice/" subfolder.
     Columns: group_idx, attempt, task_string, success, score
     success is NaN when score_mode=True.
     score   is NaN when score_mode=False.
+    Rows are sorted by (group_idx, attempt) order from guidance_path,
+    regardless of completion order.
 
 Checkpointing
 -------------
-  practice/checkpoint.json — list of completed result rows.
+  practice/checkpoint.json — list of completed result rows, written
+  atomically (tmp file + rename) after each completed episode.
   On startup: load completed rows, skip already-done (group_idx, attempt) pairs.
   On completion: write final CSV, delete checkpoint.
+
+  Episodes that raise an exception are logged and skipped (not added to the
+  checkpoint), so they are retried on the next run.
 """
 
 import json
 import os
 import pickle
+import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import click
-import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
@@ -63,7 +75,7 @@ from gameboy_worlds import get_environment
 from execution.registry import AVAILABLE_EXECUTORS
 from execution.report import EnvironmentStepRecord
 from execution.supervisor import SimpleCheckerSupervisor
-from utils import log_info, log_error
+from utils import log_info, log_error, VLM, HuggingFaceModel
 from vlm_scripts.attempt_tasks import _derive_hint
 
 
@@ -82,6 +94,116 @@ def _format_guidance(guidance_dict: dict) -> str:
 
 def _episode_seed(base_seed: int, group_idx: str, attempt: int) -> int:
     return base_seed + hash(group_idx) % (2**16) + attempt
+
+
+def _practice_episode(
+    group_idx: str,
+    attempt: int,
+    record: dict,
+    guidance_str: str,
+    game: str,
+    model_name: str,
+    vlm_kind: str,
+    executor_class,
+    max_steps: int,
+    n_random_actions: int,
+    max_tool_calls: int,
+    lookback: int,
+    controller_variant: str,
+    score_mode: bool,
+    checker_max_new_tokens: int,
+    max_new_tokens: int,
+    base_seed: int,
+    parameters: dict,
+    verbose: bool,
+):
+    """Run one independent (group_idx, attempt) practice episode in its own env.
+
+    Returns (row_dict, vlm_call_log) on success, or None if the episode raised
+    (logged, and left for retry on the next run).
+    """
+    task_str = record["task"]
+    init_state = record["init_state"]
+    goal_condition = record.get("goal_condition", "") or None
+
+    try:
+        env = get_environment(
+            game=game,
+            controller_variant=controller_variant,
+            environment_variant="default",
+            init_state=init_state,
+            max_steps=max_steps + n_random_actions + 50,  # extra buffer for random actions and potential overshooting
+            headless=True,
+            save_video=False,
+        )
+    except Exception:
+        log_info(f"[{group_idx}_{attempt}] env creation failed:\n{traceback.format_exc()}", parameters)
+        return None
+
+    try:
+        if verbose:
+            print(f"Group [{group_idx}] attempt {attempt} task: {task_str}")
+            if guidance_str:
+                print(f"  Guidance: {guidance_str}")
+
+        env.reset(seed=_episode_seed(base_seed, group_idx, attempt))
+        random_actions = [env.action_space.sample() for _ in range(n_random_actions)]
+
+        for action in random_actions:
+            env.step(action)
+
+        supervisor = SimpleCheckerSupervisor(
+            task=task_str,
+            executor_class=executor_class,
+            env=env,
+            game=game,
+            max_steps=max_steps,
+            max_tool_calls=max_tool_calls,
+            evaluation_lookback=lookback,
+            allow_self_termination=False,
+            score_mode=score_mode,
+            guidance=guidance_str or None,
+            hint=guidance_str or None,
+            goal_condition=goal_condition,
+            checker_vlm_model=model_name,
+            checker_vlm_kind=vlm_kind,
+            checker_max_new_tokens=checker_max_new_tokens,
+            parameters=parameters,
+            vlm_model=model_name,
+            vlm_kind=vlm_kind,
+        )
+
+        result = supervisor.evaluate()
+
+        failed = (not result.get("success")) if not score_mode else (result.get("score", 0) < 6)
+        if failed:
+            env_steps = [s for s in result["steps"] if isinstance(s, EnvironmentStepRecord)]
+            derived_hint = _derive_hint(env_steps, task_str, game, supervisor._checker_vlm, max_new_tokens)
+            supervisor._env.reset()
+            for action in random_actions:
+                supervisor._env.step(action)
+            hint_str = f"{guidance_str}\nSpecific hint: {derived_hint}" if guidance_str else f"Specific hint: {derived_hint}"
+            supervisor._hint = hint_str
+            result = supervisor.evaluate()
+
+        if verbose:
+            print(f"  Attempt {attempt}: {'success' if result.get('success') else 'failure'} | score={result.get('score', float('nan')):.3f}")
+            print(str(supervisor._last_report))
+            breakpoint()
+
+        row = {
+            "group_idx": group_idx,
+            "attempt": attempt,
+            "task_string": task_str,
+            "success": result.get("success", float("nan")),
+            "score": result.get("score", float("nan")),
+        }
+        return row, result["vlm_call_log"]
+    except Exception:
+        log_info(f"[{group_idx}_{attempt}] episode failed:\n{traceback.format_exc()}", parameters)
+        return None
+    finally:
+        env.close()
 
 
 @click.command(name="practice_tasks")
@@ -146,6 +268,12 @@ def _episode_seed(base_seed: int, group_idx: str, attempt: int) -> int:
     show_default=True,
     help="Token budget for each checker VLM call.",
 )
+@click.option(
+    "--max_concurrency",
+    default=8,
+    show_default=True,
+    help="Max concurrent practice episodes. Forced to 1 for --verbose or a huggingface vlm_kind.",
+)
 @click.pass_obj
 def practice_tasks_cmd(
     obj,
@@ -159,6 +287,7 @@ def practice_tasks_cmd(
     executor_name,
     controller_variant,
     checker_max_new_tokens,
+    max_concurrency,
 ):
     """Run repeated supervised practice attempts on inferred tasks."""
     parameters = obj["parameters"]
@@ -171,6 +300,7 @@ def practice_tasks_cmd(
     max_new_tokens = obj["max_new_tokens"]
 
     executor_class = AVAILABLE_EXECUTORS[executor_name]
+    vlm = VLM(model_name, vlm_kind)
 
     if not os.path.exists(guidance_path):
         log_error(f"guidance_path '{guidance_path}' does not exist.", parameters)
@@ -181,7 +311,6 @@ def practice_tasks_cmd(
     csv_path = os.path.join(out_dir, "results.csv")
     checkpoint_path = os.path.join(out_dir, "checkpoint.json")
 
-
     if os.path.exists(csv_path) and not overwrite:
         log_info(f"Skipping practice — output already exists at {csv_path}. Use --overwrite to rerun.")
         return
@@ -190,98 +319,72 @@ def practice_tasks_cmd(
         with open(checkpoint_path, "r") as f:
             rows = json.load(f)
         done = {(r["group_idx"], r["attempt"]) for r in rows}
-        log_info(f"Resuming from checkpoint — {len(rows)} episodes already done.", parameters)
     else:
         rows = []
         done = set()
+
     with open(guidance_path, "r") as f:
         guidance_data = {str(k): v for k, v in json.load(f).items()}
 
-    for group_idx, record in tqdm(guidance_data.items(), desc="groups"):
-        task_str = record["task"]
-        init_state = record["init_state"]
-        goal_condition = record.get("goal_condition", "") or None
-        guidance_str = _format_guidance(record.get("guidance", {}))
+    guidance_strs = {g: _format_guidance(rec.get("guidance", {})) for g, rec in guidance_data.items()}
 
-        if verbose:
-            print(f"Group [{group_idx}] task: {task_str}")
-            if guidance_str:
-                print(f"  Guidance: {guidance_str}")
+    all_jobs = [(g, a) for g in guidance_data for a in range(n_attempts)]
+    jobs = [j for j in all_jobs if j not in done]
+    log_info(f"{len(done)}/{len(all_jobs)} episodes already done — running {len(jobs)}.", parameters)
 
-        env = get_environment(
-            game=game,
-            controller_variant=controller_variant,
-            environment_variant="default",
-            init_state=init_state,
-            max_steps=max_steps + n_random_actions + 50, # extra buffer for random actions and potential overshooting
-            headless=True,
-            save_video=False,
-        )
+    # Each (group_idx, attempt) episode owns its own env, so they're independent
+    # and can run concurrently. --verbose runs interleaved print/breakpoint
+    # debugging and HuggingFaceModel isn't safe for concurrent generate() calls —
+    # both fall back to max_workers=1, which processes jobs one at a time in
+    # submission order (i.e. identical to a sequential loop).
+    effective_workers = 1 if (verbose or isinstance(vlm._vlm, HuggingFaceModel)) else max_concurrency
 
-        for attempt in tqdm(range(n_attempts), desc="practicing", leave=False):
-            if (group_idx, attempt) in done:
+    with ThreadPoolExecutor(max_workers=effective_workers) as pool:
+        future_to_job = {
+            pool.submit(
+                _practice_episode,
+                group_idx,
+                attempt,
+                guidance_data[group_idx],
+                guidance_strs[group_idx],
+                game,
+                model_name,
+                vlm_kind,
+                executor_class,
+                max_steps,
+                n_random_actions,
+                max_tool_calls,
+                lookback,
+                controller_variant,
+                score_mode,
+                checker_max_new_tokens,
+                max_new_tokens,
+                base_seed,
+                parameters,
+                verbose,
+            ): (group_idx, attempt)
+            for group_idx, attempt in jobs
+        }
+
+        for future in tqdm(as_completed(future_to_job), total=len(future_to_job), desc="practicing"):
+            outcome = future.result()
+            if outcome is None:
                 continue
+            row, vlm_call_log = outcome
 
-            np.random.seed(_episode_seed(base_seed, group_idx, attempt))
-            env.reset()
-            random_actions = []
-            for _ in range(n_random_actions):
-                random_actions.append(env.action_space.sample())
-
-            # first try:
-            for action in random_actions:
-                env.step(action)
-            supervisor = SimpleCheckerSupervisor(
-                task=task_str,
-                executor_class=executor_class,
-                env=env,
-                game=game,
-                max_steps=max_steps,
-                max_tool_calls=max_tool_calls,
-                evaluation_lookback=lookback,
-                allow_self_termination=False,
-                score_mode=score_mode,
-                guidance=guidance_str or None,
-                hint=guidance_str or None,
-                goal_condition=goal_condition,
-                checker_vlm_model=model_name,
-                checker_vlm_kind=vlm_kind,
-                checker_max_new_tokens=checker_max_new_tokens,
-                parameters=parameters,
-                vlm_model=model_name,
-                vlm_kind=vlm_kind,
-            )
-
-            result = supervisor.evaluate()
-
-            failed = (not result.get("success")) if not score_mode else (result.get("score", 0) < 6)
-            if failed:
-                env_steps = [s for s in result["steps"] if isinstance(s, EnvironmentStepRecord)]
-                derived_hint = _derive_hint(env_steps, task_str, game, supervisor._checker_vlm, max_new_tokens)
-                supervisor._env.reset()
-                for action in random_actions:
-                    supervisor._env.step(action)
-                hint_str = f"{guidance_str}\nSpecific hint: {derived_hint}" if guidance_str else f"Specific hint: {derived_hint}"
-                supervisor._hint = hint_str
-                result = supervisor.evaluate()
-
-            if verbose:
-                print(f"  Attempt {attempt}: {'success' if result.get('success') else 'failure'} | score={result.get('score', float('nan')):.3f}")
-
-            pkl_name = f"{group_idx}_{attempt}.pkl"
+            pkl_name = f"{row['group_idx']}_{row['attempt']}.pkl"
             with open(os.path.join(out_dir, pkl_name), "wb") as f:
-                pickle.dump(result["vlm_call_log"], f)
+                pickle.dump(vlm_call_log, f)
 
-            rows.append({
-                "group_idx": group_idx,
-                "attempt": attempt,
-                "task_string": task_str,
-                "success": result.get("success", float("nan")),
-                "score": result.get("score", float("nan")),
-            })
+            rows.append(row)
 
-            with open(checkpoint_path, "w") as f:
+            tmp_path = checkpoint_path + ".tmp"
+            with open(tmp_path, "w") as f:
                 json.dump(rows, f, indent=2)
+            os.replace(tmp_path, checkpoint_path)
+
+    group_order = {g: i for i, g in enumerate(guidance_data)}
+    rows.sort(key=lambda r: (group_order[r["group_idx"]], r["attempt"]))
 
     pd.DataFrame(rows).to_csv(csv_path, index=False)
     print(f"Saved results      -> {csv_path}")

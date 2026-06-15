@@ -13,7 +13,7 @@ from utils import load_parameters
 @click.option(
     "--vlm_kind",
     required=True,
-    type=click.Choice(["openai", "anthropic", "openrouter", "huggingface"]),
+    type=click.Choice(["openai", "anthropic", "openrouter", "huggingface", "vllm"]),
     help="VLM backend kind",
 )
 @click.option(

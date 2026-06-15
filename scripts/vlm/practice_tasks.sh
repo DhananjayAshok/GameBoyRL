@@ -88,4 +88,5 @@ python vlm.py \
     --executor "${ARGS["executor"]}" \
     --controller_variant "${ARGS["controller_variant"]}" \
     --checker_max_new_tokens "${ARGS["checker_max_new_tokens"]}" \
+    --max_concurrency "${ARGS["max_concurrency"]}" \
     $score_mode_flag

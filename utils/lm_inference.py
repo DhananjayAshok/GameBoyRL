@@ -77,7 +77,14 @@ _RATE_LIMITS: dict[str, int] = {
     "claude-haiku-4-5-20251001": 60,
     "google/gemini-3.1-pro-preview": 60,
     "qwen/qwen3-vl-235b-a22b-instruct": 60,
+    "google/gemma-4-31b-it": 1000,
 }
+
+
+# Model names for which the "not found in _RATE_LIMITS" warning has already
+# been logged once. Avoids re-logging the same warning every time a model
+# with no explicit rate limit is instantiated (e.g. once per practice episode).
+_WARNED_MISSING_RATE_LIMIT: set[str] = set()
 
 
 def get_max_queries_per_minute(model: str, parameters: dict[str, Any]) -> int:
@@ -87,8 +94,8 @@ def get_max_queries_per_minute(model: str, parameters: dict[str, Any]) -> int:
     A key matches ``model`` if the key equals ``model``, the key is a substring
     of ``model``, or ``model`` is a substring of the key. If multiple keys
     match, the longest (most specific) one wins. Falls back to
-    ``parameters["default_max_queries_per_minute"]`` (logging a warning) if no
-    key matches.
+    ``parameters["default_max_queries_per_minute"]`` (logging a warning, once
+    per model name) if no key matches.
 
     :param model: The model identifier string.
     :type model: str
@@ -99,11 +106,13 @@ def get_max_queries_per_minute(model: str, parameters: dict[str, Any]) -> int:
     """
     matches = [key for key in _RATE_LIMITS if key in model or model in key]
     if not matches:
-        log_warn(
-            f"Model {model} not found in _RATE_LIMITS (no exact or substring match). "
-            f"Using default_max_queries_per_minute from project parameters.",
-            parameters=parameters,
-        )
+        if model not in _WARNED_MISSING_RATE_LIMIT:
+            log_warn(
+                f"Model {model} not found in _RATE_LIMITS (no exact or substring match). "
+                f"Using default_max_queries_per_minute from project parameters.",
+                parameters=parameters,
+            )
+            _WARNED_MISSING_RATE_LIMIT.add(model)
         return parameters["default_max_queries_per_minute"]
     else:
         if len(matches) > 1:
@@ -165,8 +174,11 @@ class OpenAICompatibleAPIBase(RateLimitedAPIBase):
     """
     Mixin that extends ``RateLimitedAPIBase`` with an OpenAI-compatible async client.
 
-    Initializes ``self.async_client = AsyncOpenAI(base_url=base_url, api_key=api_key)``
-    after the rate-limiting state is set up. Shared by all OpenAI-compatible
+    Stores the ``AsyncOpenAI(base_url=..., api_key=...)`` constructor arguments
+    after the rate-limiting state is set up. The client itself is created fresh
+    by :meth:`_make_async_client` inside each ``asyncio.run()`` call (see
+    ``APIModel._infer_messages_async``/``_do_infer_async``), so its connection
+    pool is never reused across event loops. Shared by all OpenAI-compatible
     models (``OpenAIAPIModel`` and its subclasses) to avoid repeating client
     creation in every subclass.
     """
@@ -185,7 +197,11 @@ class OpenAICompatibleAPIBase(RateLimitedAPIBase):
             max_queries_per_minute=max_queries_per_minute,
             parameters=parameters,
         )
-        self.async_client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+        self._async_client_base_url = base_url
+        self._async_client_api_key = api_key
+
+    def _make_async_client(self) -> AsyncOpenAI:
+        return AsyncOpenAI(base_url=self._async_client_base_url, api_key=self._async_client_api_key)
 
 
 class InferenceModel(ABC):
@@ -579,7 +595,22 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         pass
 
     @abstractmethod
-    async def query_client(self, messages: list[dict], max_new_tokens: int, temperature: Optional[float] = None, stop_strings: list[str] = None, num_return_sequences: int = 1) -> Any:
+    def _make_async_client(self) -> Any:
+        """
+        Construct a fresh async API client (e.g. ``AsyncOpenAI``/``AsyncAnthropic``).
+
+        Called once per ``asyncio.run()`` invocation (see
+        ``_infer_messages_async``/``_do_infer_async``) so the client's
+        connection pool — and any event-loop-bound primitives it lazily
+        creates — never outlives the loop it was created in.
+
+        :return: A newly constructed async client, usable as an async context manager.
+        :rtype: Any
+        """
+        pass
+
+    @abstractmethod
+    async def query_client(self, client: Any, messages: list[dict], max_new_tokens: int, temperature: Optional[float] = None, stop_strings: list[str] = None, num_return_sequences: int = 1) -> Any:
         """
         Send messages to the API client (asynchronously) and return the raw response.
 
@@ -668,22 +699,23 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         all ``num_return_sequences`` requests (if multiple) are then fired concurrently.
         Per-request rate-limit errors are handled by ``query_client``'s retry/backoff.
         """
-        self.wait()
-        if self.SUPPORTS_NATIVE_N:
-            response = await self.query_client(messages, max_new_tokens, temperature=temperature, stop_strings=stop_strings, num_return_sequences=num_return_sequences)
-            outputs = self.get_outputs(response)
-            if len(outputs) != num_return_sequences:
-                log_error(
-                    f"Expected {num_return_sequences} outputs but got {len(outputs)}. Response was: {response}",
-                    parameters=self.parameters,
-                )
-            return outputs
-        else:
-            async def query_one() -> str:
-                response = await self.query_client(messages, max_new_tokens, temperature=temperature, stop_strings=stop_strings)
-                return self.get_output(response)
+        async with self._make_async_client() as client:
+            self.wait()
+            if self.SUPPORTS_NATIVE_N:
+                response = await self.query_client(client, messages, max_new_tokens, temperature=temperature, stop_strings=stop_strings, num_return_sequences=num_return_sequences)
+                outputs = self.get_outputs(response)
+                if len(outputs) != num_return_sequences:
+                    log_error(
+                        f"Expected {num_return_sequences} outputs but got {len(outputs)}. Response was: {response}",
+                        parameters=self.parameters,
+                    )
+                return outputs
+            else:
+                async def query_one() -> str:
+                    response = await self.query_client(client, messages, max_new_tokens, temperature=temperature, stop_strings=stop_strings)
+                    return self.get_output(response)
 
-            return list(await asyncio.gather(*(query_one() for _ in range(num_return_sequences))))
+                return list(await asyncio.gather(*(query_one() for _ in range(num_return_sequences))))
 
     def do_infer(
         self,
@@ -751,28 +783,29 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         request issued; all requests within the batch are then fired concurrently.
         Per-request rate-limit errors are handled by ``query_client``'s retry/backoff.
         """
-        self.wait()
-        if self.SUPPORTS_NATIVE_N:
-            async def query_one(input_message: dict) -> list[str]:
-                response = await self.query_client(
-                    [input_message], max_new_tokens, temperature=temperature, stop_strings=stop_strings, num_return_sequences=num_return_sequences
-                )
-                seq_outputs = self.get_outputs(response)
-                if len(seq_outputs) != num_return_sequences:
-                    log_error(
-                        f"Expected {num_return_sequences} outputs but got {len(seq_outputs)}. Response was: {response}",
-                        parameters=self.parameters,
+        async with self._make_async_client() as client:
+            self.wait()
+            if self.SUPPORTS_NATIVE_N:
+                async def query_one(input_message: dict) -> list[str]:
+                    response = await self.query_client(
+                        client, [input_message], max_new_tokens, temperature=temperature, stop_strings=stop_strings, num_return_sequences=num_return_sequences
                     )
-                return seq_outputs
+                    seq_outputs = self.get_outputs(response)
+                    if len(seq_outputs) != num_return_sequences:
+                        log_error(
+                            f"Expected {num_return_sequences} outputs but got {len(seq_outputs)}. Response was: {response}",
+                            parameters=self.parameters,
+                        )
+                    return seq_outputs
 
-            return list(await asyncio.gather(*(query_one(input_message) for input_message in inputs)))
-        else:
-            async def query_one(input_message: dict) -> str:
-                response = await self.query_client([input_message], max_new_tokens, temperature=temperature, stop_strings=stop_strings)
-                return self.get_output(response)
+                return list(await asyncio.gather(*(query_one(input_message) for input_message in inputs)))
+            else:
+                async def query_one(input_message: dict) -> str:
+                    response = await self.query_client(client, [input_message], max_new_tokens, temperature=temperature, stop_strings=stop_strings)
+                    return self.get_output(response)
 
-            flat = await asyncio.gather(*(query_one(input_message) for input_message in inputs for _ in range(num_return_sequences)))
-            return [list(flat[i * num_return_sequences : (i + 1) * num_return_sequences]) for i in range(len(inputs))]
+                flat = await asyncio.gather(*(query_one(input_message) for input_message in inputs for _ in range(num_return_sequences)))
+                return [list(flat[i * num_return_sequences : (i + 1) * num_return_sequences]) for i in range(len(inputs))]
 
 
 class OpenAIAPIModel(OpenAICompatibleAPIBase, APIModel):
@@ -829,7 +862,7 @@ class OpenAIAPIModel(OpenAICompatibleAPIBase, APIModel):
             "image_url": {"url": f"data:image/jpeg;base64,{image}"},
         }
 
-    async def query_client(self, messages: list[dict], max_new_tokens: int, temperature: Optional[float] = None, stop_strings: list[str] = None, num_return_sequences: int = 1) -> Any:
+    async def query_client(self, client: Any, messages: list[dict], max_new_tokens: int, temperature: Optional[float] = None, stop_strings: list[str] = None, num_return_sequences: int = 1) -> Any:
         """
         Send a message to the OpenAI chat completions endpoint (asynchronously).
 
@@ -854,7 +887,7 @@ class OpenAIAPIModel(OpenAICompatibleAPIBase, APIModel):
         last_error = None
         for attempt in range(max_tries):
             try:
-                response = await self.async_client.chat.completions.create(**kwargs)
+                response = await client.chat.completions.create(**kwargs)
                 if response is None or not getattr(response, "choices", None):
                     raise ValueError(f"API returned an invalid response (None/missing/empty choices): {response}")
                 return response
@@ -959,7 +992,10 @@ class AnthropicModel(APIModel):
             max_queries_per_minute=max_queries_per_minute,
             parameters=parameters,
         )
-        self.async_client = AsyncAnthropic(api_key=api_key)
+        self._async_client_api_key = api_key
+
+    def _make_async_client(self) -> AsyncAnthropic:
+        return AsyncAnthropic(api_key=self._async_client_api_key)
 
     def get_image_input_dict(self, image: str) -> dict:
         """
@@ -979,7 +1015,7 @@ class AnthropicModel(APIModel):
             },
         }
 
-    async def query_client(self, messages: list[dict], max_new_tokens: int, temperature: Optional[float] = None, stop_strings: list[str] = None, num_return_sequences: int = 1) -> Any:
+    async def query_client(self, client: Any, messages: list[dict], max_new_tokens: int, temperature: Optional[float] = None, stop_strings: list[str] = None, num_return_sequences: int = 1) -> Any:
         """
         Send a message to the Anthropic messages endpoint (asynchronously).
 
@@ -1005,7 +1041,7 @@ class AnthropicModel(APIModel):
         last_error = None
         for attempt in range(max_tries):
             try:
-                response = await self.async_client.messages.create(**kwargs)
+                response = await client.messages.create(**kwargs)
                 if response is None or not getattr(response, "content", None):
                     raise ValueError(f"API returned an invalid response (None/missing/empty content): {response}")
                 return response
