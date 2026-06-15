@@ -85,6 +85,19 @@ class Supervisor(ABC):
 
 
 
+def _parse_optional_int(text: str, key: str) -> Optional[int]:
+    """Extract a non-negative integer from 'Key: value'. Returns None if absent,
+    'N/A', or otherwise unparseable (e.g. the task was never completed)."""
+    raw = (parse_key_value(text, key) or "").strip()
+    if not raw or raw.lower().startswith(("n/a", "na", "none", "unknown")):
+        return None
+    for token in raw.replace(",", " ").split():
+        if token.isdigit():
+            return int(token)
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    return int(digits) if digits else None
+
+
 def _parse_checker_int(text: str, key: str, lo: int, hi: int) -> int:
     """Extract an integer in [lo, hi] from 'Key: value'. Falls back to lo on parse failure."""
     raw = parse_key_value(text, key) or ""
@@ -147,13 +160,13 @@ Description: <concise description of the player's actions and visual changes in 
 
     DESCRIBE_CONSOLIDATE_PROMPT = """You are consolidating segment descriptions from a game of [GAME] into a single complete trajectory description.
 
-Segment descriptions (in chronological order):
+Segment descriptions (in chronological order), each labelled with the frame range it covers:
 [SEGMENT_DESCRIPTIONS]
 
-Produce a single coherent description of the full trajectory from start to finish.
+Produce a single coherent description of the full trajectory from start to finish. Explicitly reference the frame ranges (e.g. "frames 1-10", "frames 11-20") as you describe what happens, so the reader can tell which part of the trajectory each event belongs to. Keep these frame-range references in the same form they appear in the segment labels above.
 
 Respond in exactly this format:
-Description: <complete description of the full trajectory>
+Description: <complete description of the full trajectory, with frame ranges referenced inline>
 [STOP]"""
 
     JUDGE_BINARY_PROMPT = """Task: "[TASK]"
@@ -167,9 +180,12 @@ Did the player successfully complete the task at any point during the trajectory
 
 Do not be overly strict in your judgement: the goal condition is a rough guide, not a strict requirement. If the player has basically achieved the task with only minor, trivial differences, consider it a success.
 
+The description references frame ranges (e.g. "frames 11-20"). Using these, identify the safe success point: the single frame number by which the task has SURELY been achieved. Pick the earliest frame you are confident the task is already complete. If the task was never completed, or you cannot tell from the description, respond with N/A.
+
 Respond in exactly this format:
 Reasoning: <your reasoning, referencing the description and any visual evidence>
 Success: <yes or no>
+Safe success point: <frame number, or N/A if never completed or unknown>
 [STOP]"""
 
     JUDGE_SCORE_PROMPT = """Task: "[TASK]"
@@ -184,9 +200,12 @@ Score how well the player progressed toward or completed this task at any point 
 Do not be overly strict in your judgement: the goal condition is a rough guide, not a strict requirement. Partial progress deserves a fair score and you are allowed to give a perfect score if the player has basically achieved the task with only minor, trivial differences.
 1 = no progress at all, 10 = task perfectly completed.
 
+The description may reference frame ranges (e.g. "frames 11-20"). Using these, identify the safe success point: the single frame number by which the task has SURELY been achieved. Err on the side of caution and pick a later frame if you are unsure. If the task was never completed, or you cannot tell from the description, respond with N/A.
+
 Respond in exactly this format:
 Reasoning: <your reasoning, referencing the description and any visual evidence>
 Score: <integer from 1 to 10>
+Safe success point: <frame number, or N/A if never completed or unknown>
 [STOP]"""
 
     def __init__(
@@ -292,6 +311,7 @@ Score: <integer from 1 to 10>
             empty = {
                 "description": "",
                 "reasoning": "No environment steps were taken.",
+                "safe_success_point": None,
                 "vlm_call_log": report.vlm_call_log,
                 "steps": report.steps,
             }
@@ -324,15 +344,16 @@ Score: <integer from 1 to 10>
         )
 
         reasoning = parse_key_value(judge_output, "Reasoning") or ""
+        safe_success_point = _parse_optional_int(judge_output, "Safe success point")
         executor_meta = {"vlm_call_log": report.vlm_call_log, "steps": report.steps}
 
         if self._score_mode:
             score = _parse_checker_int(judge_output, "Score", lo=1, hi=10)
-            return {"score": score, "description": description, "reasoning": reasoning, **executor_meta}
+            return {"score": score, "safe_success_point": safe_success_point, "description": description, "reasoning": reasoning, **executor_meta}
         else:
             success_str = parse_key_value(judge_output, "Success") or ""
             success = success_str.strip().lower().startswith("yes")
-            return {"success": success, "description": description, "reasoning": reasoning, **executor_meta}
+            return {"success": success, "safe_success_point": safe_success_point, "description": description, "reasoning": reasoning, **executor_meta}
 
 
 # ---------------------------------------------------------------------------

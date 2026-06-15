@@ -41,7 +41,7 @@ from gameboy_worlds.interface import Environment, HighLevelAction
 from gameboy_worlds.interface.action import LowLevelAction
 
 from execution.executor_action import ExecutorAction
-from execution.report import EnvironmentStepRecord, ExecutorReport, SimpleReport, ToolCallRecord, VLMCallRecord
+from execution.report import EnvironmentStepRecord, ExecutorReport, InvalidStepRecord, SimpleReport, ToolCallRecord, VLMCallRecord
 from utils import load_parameters, log_info, ExecutorVLM
 
 MAX_CONSECUTIVE_INVALID = 10
@@ -208,9 +208,18 @@ class Executor(ABC):
     # Concrete helpers — uniform across all executors
     # ------------------------------------------------------------------
 
-    def _record_invalid(self, response: str) -> None:
-        """Append an invalid step and trigger a breakpoint if DEBUG_ON_INVALID is set."""
+    def _record_invalid(self, response: str, reason: str = "parse failure") -> None:
+        """Append an invalid step and trigger a breakpoint if DEBUG_ON_INVALID is set.
+
+        Records both in ``invalid_steps`` (for counts/back-compat) and as an
+        ordered :class:`InvalidStepRecord` in ``steps``, so ``steps`` stays a
+        complete 1:1 log of every action call's outcome and the report renderer
+        can pair calls to steps without guessing.
+
+        :param reason: ``"parse failure"`` or ``"unrecognised action"``.
+        """
         self.report.invalid_steps.append(response)
+        self.report.steps.append(InvalidStepRecord(response=response, reason=reason))
         log_info(f"Invalid response recorded: \n{response}", parameters=self._parameters)
         if DEBUG_ON_INVALID:
             breakpoint()
@@ -252,7 +261,14 @@ class Executor(ABC):
         return record
 
     def _hint_block(self) -> str:
-        return f"\n[HINT_START]\nHint: {self._hint}\nNote: This hint block is a secret. You must use it to guide your decision making, but in the reasoning you say, you should pretend as if you actually just know the content of the hint. Do not refer to it explicitly. So if the hint gives you a direction, instead of saying 'the hint says go here', your reasoning should just say 'next I must go here'. [HINT_END]" if self._hint is not None else ""
+        if self._hint is None:
+            return ""
+        # Steps taken so far == non-tool records in report.steps (tool calls don't
+        # advance the env / n_env_steps). This is the step the agent is about to take.
+        steps_taken = sum(1 for s in self.report.steps if not isinstance(s, ToolCallRecord))
+        step_info = f"""
+[STEP_INFO] You have already taken {steps_taken + 1} actions so for this attempt. Note: this may not be the first step of the overall task and one action does not correspond to one step in the hint plan — earlier actions may already have been taken before this attempt began, so reason from what you currently see on screen rather than assuming a fresh start. The [STEP_INFO_END]"""
+        return step_info + f"\n[HINT_START]\nHint: {self._hint}\nNote: This hint block is a secret. You must use it to guide your decision making, but in the reasoning you say, you should pretend as if you actually just know the content of the hint. Do not refer to it explicitly. So if the hint gives you a direction, instead of saying 'the hint says go here', your reasoning should just say 'next I must go here'. [HINT_END]"
 
     def _get_state(self) -> dict:
         """
@@ -540,7 +556,7 @@ Reasoning: <your reasoning>
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self._record_invalid(f"Unrecognised action string: {action_str!r}")
+                self._record_invalid(f"Unrecognised action string: {action_str!r}", reason="unrecognised action")
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -755,7 +771,7 @@ class SequencePlannerExecutor(SimpleExecutor):
                     f"'{action_str}' in planned sequence is not a recognised action. "
                     "Re-plan with valid actions."
                 )
-                self._record_invalid(f"Unrecognised sequence action: {action_str!r}")
+                self._record_invalid(f"Unrecognised sequence action: {action_str!r}", reason="unrecognised action")
                 pending_sequence = []  # abort remainder of sequence
                 n_env_steps += 1
                 consecutive_invalid += 1
@@ -1385,7 +1401,7 @@ Respond with one line per action in exactly this format:
                 )
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self._record_invalid(f"Unrecognised scored action: {action_str!r}")
+                self._record_invalid(f"Unrecognised scored action: {action_str!r}", reason="unrecognised action")
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1

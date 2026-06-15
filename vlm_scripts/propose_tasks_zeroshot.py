@@ -205,7 +205,7 @@ def _propose_for_init_state(
 )
 @click.option(
     "--max_concurrency",
-    default=8,
+    default=16,
     show_default=True,
     help="Max concurrent propose pipelines (across init_states). Forced to 1 for --verbose or a huggingface vlm_kind.",
 )

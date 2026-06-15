@@ -34,7 +34,7 @@ CLI options
   --lookback          Frames passed to checker VLM (default: 8)
   --executor          Executor class short name (default: simple)
   --controller_variant  (default: low_level)
-  --max_concurrency   Max concurrent episodes (default: 8)
+  --max_concurrency   Max concurrent episodes (default: 16)
 
 Output
 ------
@@ -197,6 +197,7 @@ def _practice_episode(
             "task_string": task_str,
             "success": result.get("success", float("nan")),
             "score": result.get("score", float("nan")),
+            "safe_success_point": result.get("safe_success_point"),
         }
         return row, result["vlm_call_log"]
     except Exception:
@@ -270,7 +271,7 @@ def _practice_episode(
 )
 @click.option(
     "--max_concurrency",
-    default=8,
+    default=16,
     show_default=True,
     help="Max concurrent practice episodes. Forced to 1 for --verbose or a huggingface vlm_kind.",
 )

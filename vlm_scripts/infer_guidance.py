@@ -201,7 +201,7 @@ def infer_guidance_for_trajectory(
 )
 @click.option(
     "--max_concurrency",
-    default=8,
+    default=16,
     show_default=True,
     help="Max concurrent infer_guidance_for_trajectory pipelines (across groups). Forced to 1 for --verbose or a huggingface vlm_kind.",
 )

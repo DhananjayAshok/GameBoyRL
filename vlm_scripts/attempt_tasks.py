@@ -343,7 +343,7 @@ def _attempt_task(
 )
 @click.option(
     "--max_concurrency",
-    default=8,
+    default=16,
     show_default=True,
     help="Max concurrent (init_state, task) attempt pipelines. Forced to 1 for --verbose or a huggingface vlm_kind.",
 )

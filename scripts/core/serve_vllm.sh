@@ -17,6 +17,7 @@
 #   vllm.pid         - Stores the active background process ID (used by stop_vllm.sh)
 #   vllm_server.log  - Standard output and error logs from the server
 #
+source setup/.venv/bin/activate
 module load gcc/13.3.0 cuda/12.6.3
 export TRITON_CACHE_DIR=/dev/shm/${USER}_triton_cache/
 PORT=8000

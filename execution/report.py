@@ -11,7 +11,6 @@ from __future__ import annotations
 import os
 import re
 import shutil
-from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List, Optional, Type, Union
 
@@ -88,6 +87,27 @@ class EnvironmentStepRecord:
     transition_states: List[Dict[str, Any]]
     action_success: int
     reward: float = 0.0
+
+
+@dataclass
+class InvalidStepRecord:
+    """
+    Record of an action-tagged VLM call that did **not** advance the emulator.
+
+    Appended to ``steps`` (alongside :class:`EnvironmentStepRecord` and
+    :class:`ToolCallRecord`) so that ``steps`` is a complete, ordered, 1:1 log of
+    every action call's outcome. This lets the report renderer walk ``steps`` and
+    ``vlm_call_log`` in lockstep instead of guessing the call→step alignment.
+
+    :param response: The raw VLM response that failed to produce a step.
+    :type response: str
+    :param reason: Why no step was produced — ``"parse failure"`` (no parseable
+        ``Action:`` line) or ``"unrecognised action"`` (parsed but not a valid action).
+    :type reason: str
+    """
+
+    response: str
+    reason: str
 
 
 @dataclass
@@ -199,11 +219,6 @@ class ExecutorReport:
             lines.append("  (no VLM calls recorded)")
             return "\n".join(lines)
 
-        parse_fail_counter: Counter[str] = Counter(
-            s for s in getattr(self, "invalid_steps", [])
-            if not s.startswith("Unrecognised")
-        )
-
         steps_iter: Iterator = iter(self.steps)
         call_idx = 0
 
@@ -223,15 +238,13 @@ class ExecutorReport:
                 plt.clf()
 
             if entry.tag in _ACTION_TAGS:
-                if parse_fail_counter.get(entry.response, 0) > 0:
-                    parse_fail_counter[entry.response] -= 1
-                    lines.append("  │ → INVALID  (parse failure)")
+                step = next(steps_iter, None)
+                if step is None:
+                    lines.append("  │ → INVALID  (end of steps)")
+                elif isinstance(step, InvalidStepRecord):
+                    lines.append(f"  │ → INVALID  ({step.reason})")
                 else:
-                    step = next(steps_iter, None)
-                    if step is None:
-                        lines.append("  │ → INVALID  (unrecognised action or end of steps)")
-                    else:
-                        lines.append(f"  │ → {_step_summary(step)}")
+                    lines.append(f"  │ → {_step_summary(step)}")
 
             lines.append("  └" + "─" * 57)
 
@@ -248,9 +261,11 @@ def _indent(text: str, prefix: str = "      ") -> str:
     return "\n".join(prefix + line for line in text.splitlines())
 
 
-def _step_summary(step: Union[EnvironmentStepRecord, ToolCallRecord]) -> str:
+def _step_summary(step: Union[EnvironmentStepRecord, ToolCallRecord, InvalidStepRecord]) -> str:
     if isinstance(step, EnvironmentStepRecord):
         return f"ENV   {step.action_class.__name__}({step.kwargs})"
+    if isinstance(step, InvalidStepRecord):
+        return f"INVALID  ({step.reason})"
     return f"TOOL  {step.executor_action_class.__name__}({step.kwargs})  result={step.result}"
 
 

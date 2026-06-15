@@ -4,6 +4,7 @@
 module load gcc/13.3.0 cuda/12.6.3
 source setup/.venv/bin/activate
 #uv pip install --force-reinstall --no-cache-dir torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cu129
+uv pip install wheel einops hatchling # flash-attn needs, but doesn't declare
 #export FLASH_ATTENTION_FORCE_BUILD=TRUE
 #export MAX_JOBS=4
 #uv pip uninstall flash-attn vllm

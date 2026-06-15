@@ -404,7 +404,7 @@ def _distill_tasks(all_tasks: list[str], vlm: VLM, game: str, max_new_tokens: in
 )
 @click.option(
     "--max_concurrency",
-    default=8,
+    default=16,
     show_default=True,
     help="Max concurrent infer_task pipelines (across groups and trajectories). Forced to 1 for --verbose or a huggingface vlm_kind.",
 )
