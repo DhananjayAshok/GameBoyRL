@@ -10,7 +10,11 @@ List[VLMCallRecord] for that episode).
 Output
 ------
 Directory: parameters["storage_dir"]/datasets/<relpath_from_storage_dir>/
-  dataset.csv — one row per VLM call across all successful episodes.
+  dataset.csv — one row per VLM call across all successful episodes, truncated
+    at each episode's safe-success cutoff (+ --safety_margin) so post-success
+    overshoot is excluded. The cutoff comes from the results.csv
+    ``safe_success_point`` column, which (despite its name) holds a vlm_call_log
+    index, not a frame number — see _episode_cutoff and execution/supervisor.py.
     Fields:
       input   — prompt text with hint block stripped
       output  — raw VLM response text
@@ -52,6 +56,27 @@ def _derive_output_dir(practice_path: str, storage_dir: str) -> str:
     return os.path.join(storage_dir, 'datasets', os.path.basename(abs_practice))
 
 
+def _episode_cutoff(safe_success_point, n_calls: int, safety_margin: int) -> int:
+    """Return the number of leading VLM calls to keep for an episode.
+
+    Despite its name, ``safe_success_point`` here is NOT a frame number — it is
+    already a vlm_call_log slice index. The checker reports a frame number, but
+    execution/supervisor.py converts it to an exact call-log index (via the
+    lockstep frame→call walk, while it still has the steps list) and stores that
+    index under the ``safe_success_point`` key. So we can slice directly; no
+    frame-vs-call approximation happens here. Everything past the cutoff is
+    overshoot we don't want in the training set.
+
+    ``safety_margin`` keeps a few extra calls past the cutoff as insurance.
+    Returns ``n_calls`` (keep everything) when safe_success_point is N/A — either
+    the checker couldn't pin down a completion frame, or the column is absent in
+    an older results.csv produced before this conversion was added.
+    """
+    if safe_success_point is None or pd.isna(safe_success_point):
+        return n_calls
+    return min(n_calls, int(safe_success_point) + safety_margin)
+
+
 def _save_image(img_array: np.ndarray, path: str) -> None:
     arr = img_array
     if arr.dtype != np.uint8:
@@ -68,9 +93,12 @@ def _save_image(img_array: np.ndarray, path: str) -> None:
 @click.command()
 @click.option('--practice_path', required=True, type=str,
               help='Path to the practice output directory (contains results.csv and *.pkl).')
+@click.option('--safety_margin', default=2, show_default=True, type=int,
+              help='Extra VLM calls kept past the safe-success cutoff as insurance '
+                   '(see _episode_cutoff).')
 @click.option('--overwrite', is_flag=True, default=False,
               help='Overwrite existing dataset.')
-def create_dataset(practice_path, overwrite):
+def create_dataset(practice_path, safety_margin, overwrite):
     """Build a VLA training dataset from successful practice episode pkl files."""
     parameters = load_parameters()
     storage_dir = parameters['storage_dir']
@@ -107,7 +135,9 @@ def create_dataset(practice_path, overwrite):
         with open(pkl_path, 'rb') as f:
             vlm_call_log = pickle.load(f)
 
-        for call_idx, record in enumerate(vlm_call_log):
+        cutoff = _episode_cutoff(row.get('safe_success_point'), len(vlm_call_log), safety_margin)
+
+        for call_idx, record in enumerate(vlm_call_log[:cutoff]):
             image_paths = []
             for img_idx, img_array in enumerate(record.images):
                 img_fname = f'{group_idx}_{attempt}_{call_idx}_{img_idx}.jpg'

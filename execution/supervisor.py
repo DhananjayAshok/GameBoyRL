@@ -7,7 +7,7 @@ from typing import Any, List, Optional, Type
 from gameboy_worlds.interface import Environment
 
 from execution.executor import Executor
-from execution.report import EnvironmentStepRecord, ExecutorReport
+from execution.report import EnvironmentStepRecord, ExecutorReport, _ACTION_TAGS
 from utils import load_parameters, VLM, parse_key_value
 
 
@@ -96,6 +96,44 @@ def _parse_optional_int(text: str, key: str) -> Optional[int]:
             return int(token)
     digits = "".join(ch for ch in raw if ch.isdigit())
     return int(digits) if digits else None
+
+
+def _frame_to_call_cutoff(
+    vlm_call_log: list,
+    steps: list,
+    safe_frame: Optional[int],
+) -> Optional[int]:
+    """Convert a 1-based env-frame number into a vlm_call_log slice index.
+
+    The judge VLM reports ``safe_success_point`` as a *frame number* — the
+    earliest env frame by which the task is surely complete. Downstream
+    (create_dataset.py) we only have the per-episode vlm_call_log, not ``steps``,
+    so we resolve the frame→call mapping here, while both lists are in hand, and
+    return the number of leading vlm_call_log entries to keep.
+
+    NOTE: the returned value is what gets stored under the ``safe_success_point``
+    key (see process_executor_return) — i.e. that key carries a *call-log index*,
+    NOT the original frame number. The frame number is intentionally not
+    preserved.
+
+    Mirrors the lockstep walk in report.ExecutorReport.__str__: only calls tagged
+    in ``_ACTION_TAGS`` consume a step, and only an ``EnvironmentStepRecord`` step
+    advances a frame (tool calls / invalid actions consume a call without
+    producing a frame). Returns ``None`` (no truncation downstream) when
+    ``safe_frame`` is None — the judge couldn't pin down a completion frame.
+    """
+    if safe_frame is None:
+        return None
+    steps_iter = iter(steps)
+    env_frames = 0
+    for call_idx, entry in enumerate(vlm_call_log):
+        if entry.tag in _ACTION_TAGS:
+            step = next(steps_iter, None)
+            if isinstance(step, EnvironmentStepRecord):
+                env_frames += 1
+                if env_frames >= safe_frame:
+                    return call_idx + 1  # keep through the call that produced this frame
+    return len(vlm_call_log)
 
 
 def _parse_checker_int(text: str, key: str, lo: int, hi: int) -> int:
@@ -344,7 +382,14 @@ Safe success point: <frame number, or N/A if never completed or unknown>
         )
 
         reasoning = parse_key_value(judge_output, "Reasoning") or ""
-        safe_success_point = _parse_optional_int(judge_output, "Safe success point")
+        # The judge reports a *frame number*; we immediately convert it to a
+        # vlm_call_log slice index and store THAT under "safe_success_point".
+        # i.e. consumers of this key (practice_tasks.py -> results.csv ->
+        # create_dataset.py) receive a call-log index, not a frame number. This
+        # overloading is deliberate: it lets create_dataset slice the saved
+        # vlm_call_log directly without also needing the (unsaved) steps list.
+        safe_frame = _parse_optional_int(judge_output, "Safe success point")
+        safe_success_point = _frame_to_call_cutoff(report.vlm_call_log, report.steps, safe_frame)
         executor_meta = {"vlm_call_log": report.vlm_call_log, "steps": report.steps}
 
         if self._score_mode:
