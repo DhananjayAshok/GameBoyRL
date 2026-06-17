@@ -148,7 +148,7 @@ def infer_guidance_for_trajectory(
 
             parsed = _parse_guidance(output)
             if parsed is None:
-                print(f"Warning: failed to parse guidance for frames {start}-{end - 1}, skipping slice.")
+                log_warn(f"failed to parse guidance for frames {start}-{end - 1}, skipping slice.")
                 continue
 
             slice_descriptions.append(
@@ -177,7 +177,7 @@ def infer_guidance_for_trajectory(
 
     parsed = _parse_guidance(output)
     if parsed is None:
-        print(f"Warning: failed to parse consolidated guidance output:\n{output}")
+        log_warn(f"failed to parse consolidated guidance output:\n{output}")
         return None
     return parsed
 
@@ -279,7 +279,7 @@ def infer_guidance_cmd(obj, trajectory_path, max_obs_at_once, max_concurrency):
             task = task_map[group_idx]
             trajectories = traj_map.get(group_idx)
             if not trajectories:
-                print(f"Warning: no trajectories for group {group_idx}, skipping.")
+                log_warn(f"no trajectories for group {group_idx}, skipping.")
                 continue
 
             # Use the first available trajectory as the representative example.
@@ -302,7 +302,7 @@ def infer_guidance_cmd(obj, trajectory_path, max_obs_at_once, max_concurrency):
             group_idx, task, init_state = future_info[future]
             guidance = future.result()
             if guidance is None:
-                print(f"Warning: could not generate guidance for group {group_idx}.")
+                log_warn(f"could not generate guidance for group {group_idx}.")
                 continue
 
             goal_condition = guidance.pop("goal_condition", "")
@@ -318,7 +318,7 @@ def infer_guidance_cmd(obj, trajectory_path, max_obs_at_once, max_concurrency):
 
     with open(out_json, "w") as f:
         json.dump(guidance_output, f, indent=2)
-    print(f"Saved guidance annotations → {out_json}")
+    log_info(f"Saved guidance annotations → {out_json}")
 
     if os.path.exists(checkpoint_path):
         os.remove(checkpoint_path)

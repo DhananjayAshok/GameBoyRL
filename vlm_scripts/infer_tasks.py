@@ -20,6 +20,12 @@ Output: trajectory_annotation.json  +  trajectory_annotation.pkl
         - keys are group indices
         - values are the subset of trajectories from that group that were actually used
           during inference (up to max_trajectories_per_group); same trajectory format as input
+
+    With --dedup_tasks (default on), groups that distill to the SAME task string
+    are merged into a single group_idx before saving (their trajectory lists are
+    concatenated), so downstream practice doesn't run redundant copies of the
+    same task. This is exact-match on a normalized form only — paraphrases are
+    not merged. See _dedup_task_groups.
 """
 
 import json
@@ -31,7 +37,7 @@ import numpy as np
 import click
 from PIL import Image
 
-from utils import load_parameters, log_info, VLM, parse_key_value, HuggingFaceModel
+from utils import load_parameters, log_info, log_warn, VLM, parse_key_value, HuggingFaceModel
 from show_trajectories import plot_transitions
 
 SAVE_FRAMES_DIR = "save_frames"
@@ -295,8 +301,8 @@ def infer_task(
 
     parsed_block = _parse_infer_block(infer_output, window_offset=n - k, n_obs=n)
     if parsed_block is None:
-        print(
-            f"Warning: infer_task failed to parse Task block from INFER stage. Output was:\n{infer_output}"
+        log_warn(
+            f"infer_task failed to parse Task block from INFER stage. Output was:\n{infer_output}"
         )
         return None
     task_description = parse_key_value(infer_output, "Visual Description")
@@ -368,6 +374,48 @@ def _distill_tasks(all_tasks: list[str], vlm: VLM, game: str, max_new_tokens: in
     return distilled_task
 
 
+def _canonical_task(task: str) -> str:
+    """Normalize a task string for duplicate detection: lowercase, collapse
+    whitespace, strip surrounding punctuation. Cheap exact-match canonicalization
+    — does not catch semantic paraphrases."""
+    return " ".join(task.lower().split()).strip(" .!?\"'")
+
+
+def _dedup_task_groups(trajectory_output: dict, trajectory_data_output: dict):
+    """Merge groups that distilled to the same task string.
+
+    Curiosity groups are clustered by final-frame similarity, so several
+    independent groups can distill to an identical task (e.g. three separate
+    'enter the pokemon center' groups). Downstream (infer_guidance → practice)
+    treats every group_idx as a distinct task to practice, so identical task
+    strings cause redundant practice runs. We collapse groups sharing a canonical
+    task string into the first group_idx that produced it, concatenating their
+    trajectories so no example data is lost. Detection is exact-match on the
+    canonical form only — paraphrases (different wording, same meaning) are NOT
+    merged here.
+
+    Returns (deduped_output, deduped_data, merges) where merges maps the kept
+    group_idx to the list of group_idxs folded into it (for logging).
+    """
+    canon_to_keep: dict[str, int] = {}
+    deduped_output: dict[int, str] = {}
+    deduped_data: dict[int, list] = {}
+    merges: dict[int, list] = {}
+    for gid in sorted(trajectory_output):
+        task = trajectory_output[gid]
+        canon = _canonical_task(task)
+        if canon in canon_to_keep:
+            keep = canon_to_keep[canon]
+            deduped_data[keep].extend(trajectory_data_output.get(gid, []))
+            merges[keep].append(gid)
+        else:
+            canon_to_keep[canon] = gid
+            deduped_output[gid] = task
+            deduped_data[gid] = list(trajectory_data_output.get(gid, []))
+            merges[gid] = []
+    return deduped_output, deduped_data, merges
+
+
 # ---------------------------------------------------------------------------
 # Click interface
 # ---------------------------------------------------------------------------
@@ -403,6 +451,13 @@ def _distill_tasks(all_tasks: list[str], vlm: VLM, game: str, max_new_tokens: in
     help="Run pairwise DESCRIBE stage before INFER.",
 )
 @click.option(
+    "--dedup_tasks/--no_dedup_tasks",
+    default=True,
+    show_default=True,
+    help="Merge groups that distilled to an identical task string into one group "
+         "(concatenating trajectories) before saving. Exact-match only.",
+)
+@click.option(
     "--max_concurrency",
     default=16,
     show_default=True,
@@ -410,7 +465,7 @@ def _distill_tasks(all_tasks: list[str], vlm: VLM, game: str, max_new_tokens: in
 )
 @click.pass_obj
 def infer_task_cmd(
-    obj, trajectory_path, run_name, lookback, max_trajectories_per_group, describe_pairs, max_concurrency
+    obj, trajectory_path, run_name, lookback, max_trajectories_per_group, describe_pairs, dedup_tasks, max_concurrency
 ):
     """Infer task strings for each trajectory group."""
     max_new_tokens = obj["max_new_tokens"]
@@ -496,8 +551,8 @@ def infer_task_cmd(
                     used_trajectories.append(trajectory)
 
             if not all_tasks:
-                print(
-                    f"Warning: skipping group {group_idx} — could not infer any task strings."
+                log_warn(
+                    f"skipping group {group_idx} — could not infer any task strings."
                 )
                 continue
 
@@ -509,12 +564,25 @@ def infer_task_cmd(
             with open(pkl_checkpoint_path, "wb") as f:
                 pickle.dump(trajectory_data_output, f)
 
+    if dedup_tasks:
+        before = len(trajectory_output)
+        trajectory_output, trajectory_data_output, merges = _dedup_task_groups(
+            trajectory_output, trajectory_data_output
+        )
+        for keep, folded in merges.items():
+            if folded:
+                log_info(
+                    f"Merged groups {folded} into group {keep} "
+                    f"(task: {trajectory_output[keep]!r})"
+                )
+        log_info(f"Dedup: {before} groups → {len(trajectory_output)} unique tasks.")
+
     with open(traj_path, "w") as f:
         json.dump(trajectory_output, f, indent=2)
     with open(pkl_path, "wb") as f:
         pickle.dump(trajectory_data_output, f)
-    print(f"Saved trajectory annotations → {traj_path}")
-    print(f"Saved trajectories → {pkl_path}")
+    log_info(f"Saved trajectory annotations → {traj_path}")
+    log_info(f"Saved trajectories → {pkl_path}")
     if os.path.exists(checkpoint_path):
         os.remove(checkpoint_path)
     if os.path.exists(pkl_checkpoint_path):

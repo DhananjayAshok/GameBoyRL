@@ -178,8 +178,8 @@ def _propose_for_init_state(
 
     tasks = _parse_task_list(output)
     if not tasks:
-        print(
-            f"Warning: no tasks parsed from VLM output for init_state '{init_state}'."
+        log_warn(
+            f"no tasks parsed from VLM output for init_state '{init_state}'."
         )
     return tasks
 

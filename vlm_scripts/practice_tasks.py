@@ -388,8 +388,8 @@ def practice_tasks_cmd(
     rows.sort(key=lambda r: (group_order[r["group_idx"]], r["attempt"]))
 
     pd.DataFrame(rows).to_csv(csv_path, index=False)
-    print(f"Saved results      -> {csv_path}")
-    print(f"Saved episode pkls -> {out_dir}/")
+    log_info(f"Saved results      -> {csv_path}")
+    log_info(f"Saved episode pkls -> {out_dir}/")
 
     if os.path.exists(checkpoint_path):
         os.remove(checkpoint_path)

@@ -6,6 +6,7 @@ create_all_traj.sh and propose_all_zeroshot.sh stay in sync.
 """
 import os
 from gameboy_worlds import get_all_training_states
+from utils import log_info
 
 # DELTA TODO: 1: Change this to print out only the init states from benchmark for those.
 # That means each game dict will lead to a straight comma separated list of states.
@@ -35,4 +36,4 @@ if __name__ == "__main__":
     lines += ["", "export TRAIN_STATES", ""]
     with open(output_path, "w") as f:
         f.write("\n".join(lines))
-    print(f"Saved task dictionary to {output_path}")
+    log_info(f"Saved task dictionary to {output_path}")

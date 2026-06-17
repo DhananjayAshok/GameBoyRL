@@ -9,7 +9,7 @@ from gameboy_worlds import (
     get_test_environment,
 )
 import click
-from utils import load_parameters, log_error
+from utils import load_parameters, log_error, log_info
 from execution.registry import AVAILABLE_EXECUTORS
 from tqdm import tqdm
 import pandas as pd
@@ -188,7 +188,7 @@ def do(
         )
         df = pd.DataFrame(results, columns=columns)
         df.to_csv(save_path, index=False)
-        print(f"Saved benchmark results to {save_path}")
+        log_info(f"Saved benchmark results to {save_path}")
         print(df.to_string(index=False))
 
 

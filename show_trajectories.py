@@ -21,7 +21,7 @@ import numpy as np
 import click
 from PIL import Image, ImageDraw, ImageFont
 
-from utils import load_parameters, VLM, convert_numpy_greyscale_to_pillow
+from utils import load_parameters, log_info, VLM, convert_numpy_greyscale_to_pillow
 
 
 try:
@@ -90,7 +90,7 @@ def show(name, trajectory_path, frac, group_idx, traj_idx, max_per_group):
             observations, _, high_level_actions, _, init_state = trajectory
             save_path = group_dir + f"/traj_{traj_idx}.png"
             plot_transitions(observations, save_path, high_level_actions=high_level_actions)
-            print(f"Saved {save_path}")
+            log_info(f"Saved {save_path}")
         else:
             for j, trajectory in tqdm(enumerate(trajectory_group), leave=False, total=len(trajectory_group)):
                 if j >= max_per_group:
@@ -98,9 +98,9 @@ def show(name, trajectory_path, frac, group_idx, traj_idx, max_per_group):
                 observations, _, high_level_actions, _, init_state = trajectory
                 plot_transitions(observations, group_dir + f"/traj_{j}.png", high_level_actions=high_level_actions)
             if group_idx is not None:
-                print(f"Saved {group_dir}/")
+                log_info(f"Saved {group_dir}/")
     if group_idx is None and traj_idx is None:
-        print(f"Saved {parameters['tmp_dir']}/trajectories/{name}/")
+        log_info(f"Saved {parameters['tmp_dir']}/trajectories/{name}/")
 
 
 if __name__ == "__main__":

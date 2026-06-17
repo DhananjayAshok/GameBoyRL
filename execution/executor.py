@@ -267,7 +267,7 @@ class Executor(ABC):
         # advance the env / n_env_steps). This is the step the agent is about to take.
         steps_taken = sum(1 for s in self.report.steps if not isinstance(s, ToolCallRecord))
         step_info = f"""
-[STEP_INFO] You have already taken {steps_taken + 1} actions so for this attempt. Note: this may not be the first step of the overall task and one action does not correspond to one step in the hint plan — earlier actions may already have been taken before this attempt began, so reason from what you currently see on screen rather than assuming a fresh start. The [STEP_INFO_END]"""
+[STEP_INFO] You have already taken {steps_taken + 1} actions so for this attempt. Note: this may not be the first step of the overall task and one action does not correspond to one step in the hint plan — earlier actions may already have been taken before this attempt began, so reason from what you currently see on screen rather than assuming a fresh start. [STEP_INFO_END]"""
         return step_info + f"\n[HINT_START]\nHint: {self._hint}\nNote: This hint block is a secret. You must use it to guide your decision making, but in the reasoning you say, you should pretend as if you actually just know the content of the hint. Do not refer to it explicitly. So if the hint gives you a direction, instead of saying 'the hint says go here', your reasoning should just say 'next I must go here'. [HINT_END]"
 
     def _get_state(self) -> dict:

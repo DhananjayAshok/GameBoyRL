@@ -231,9 +231,6 @@ def _attempt_task(
     result = None
     trajectory = None
 
-    if verbose:
-        print(f"Task [{group_idx}]: {task_str}")
-
     try:
         for attempt in range(max_attempts):
             env.reset()
@@ -466,9 +463,9 @@ def attempt_tasks_cmd(
     with open(json_path, "w") as f:
         json.dump(success_json, f, indent=2)
 
-    print(f"Saved results       -> {csv_path}")
-    print(f"Saved success tasks -> {json_path}")
-    print(f"Saved trajectories  -> {pkl_path}")
+    log_info(f"Saved results       -> {csv_path}")
+    log_info(f"Saved success tasks -> {json_path}")
+    log_info(f"Saved trajectories  -> {pkl_path}")
 
     if os.path.exists(checkpoint_json):
         os.remove(checkpoint_json)
