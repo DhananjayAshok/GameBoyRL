@@ -106,7 +106,12 @@ init_state_group=${ARGS["init_state_group"]}
 replay_buffer_save_folder=${ARGS["run_name"]}/${init_state_group}/$sweep_run_name/
 echo "Setting replay_buffer_save_folder to $replay_buffer_save_folder for iterative training"
 
-
+# z_kind is not an arg here; group_trajectories defaults to global, so the output is always the global file.
+grouped_file="$storage_dir/grouped_trajectories/${ARGS["game"]}/${ARGS["run_name"]}/${init_state_group}/grouped_global_high_reward_trajectories.pkl"
+if [[ "${ARGS["overwrite"]}" != "true" && -f "$grouped_file" ]]; then
+    echo "Grouped trajectories already exist at $grouped_file. Skipping (pass --overwrite true to regenerate)."
+    exit 0
+fi
 
 # if skip_training, skip the bottom
 if [ "${ARGS["skip_training"]}" == "true" ]; then

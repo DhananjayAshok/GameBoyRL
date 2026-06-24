@@ -3,7 +3,7 @@
 # then delegates to propose_and_attempt_all with extra=curiosity.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
-python scripts/python/create_task_dictionary.py
+python scripts/python/create_task_dictionary.py || { echo "Could not regenerate train states"; exit 1; }
 source scripts/core/all_train_states.sh
 
 declare -A ARGS

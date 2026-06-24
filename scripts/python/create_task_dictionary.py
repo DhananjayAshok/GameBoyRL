@@ -5,11 +5,18 @@ Run this whenever the set of training states in GameBoyWorlds changes so that
 create_all_traj.sh and propose_all_zeroshot.sh stay in sync.
 """
 import os
+import sys
 from gameboy_worlds import get_all_training_states
-from utils import log_info
 
 # DELTA TODO: 1: Change this to print out only the init states from benchmark for those.
 # That means each game dict will lead to a straight comma separated list of states.
+
+
+def log(message):
+    # Self-contained logger: `from utils import ...` does not resolve when this is run
+    # as `python scripts/python/create_task_dictionary.py` (project root is not on
+    # sys.path under path invocation). Matches scripts/python/get_strings.py.
+    print(message, file=sys.stderr)
 
 
 if __name__ == "__main__":
@@ -36,4 +43,4 @@ if __name__ == "__main__":
     lines += ["", "export TRAIN_STATES", ""]
     with open(output_path, "w") as f:
         f.write("\n".join(lines))
-    log_info(f"Saved task dictionary to {output_path}")
+    log(f"Saved task dictionary to {output_path}")

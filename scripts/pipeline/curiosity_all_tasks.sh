@@ -4,7 +4,7 @@
 # before iterating.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
-python scripts/python/create_task_dictionary.py
+python scripts/python/create_task_dictionary.py || { echo "Could not regenerate train states"; exit 1; }
 source scripts/core/all_train_states.sh
 
 declare -A ARGS
@@ -65,6 +65,7 @@ _do_guidance=false
 
 game="${ARGS["game"]}"
 IFS=',' read -ra init_states_arr <<< "${TRAIN_STATES[$game]}"
+grouped_pkls=()
 for init_state in "${init_states_arr[@]}"; do
     ARGS["init_state"]=$init_state
 
@@ -75,11 +76,24 @@ for init_state in "${init_states_arr[@]}"; do
     if [[ "$init_state_group" == "none" ]]; then
         init_state_group="$init_state"
     fi
-    ARGS["trajectory_path"]="$storage_dir/grouped_trajectories/${game}/${ARGS["run_name"]}/${init_state_group}/grouped_global_high_reward_trajectories.pkl"
-
-    infer_flags=$(args_to_flags_subset ARGS INFER_TASKS_ARG_KEYS)
-    bash scripts/vlm/infer_tasks.sh $infer_flags || exit 1
+    grouped_pkls+=("$storage_dir/grouped_trajectories/${game}/${ARGS["run_name"]}/${init_state_group}/grouped_global_high_reward_trajectories.pkl")
 done
+
+# Combine every init_state's grouped trajectories into one pkl, then annotate them in a
+# single infer_tasks call. infer_tasks keys its output only on run_name (no init_state),
+# so a per-init_state infer loop would let only the first state's annotation survive —
+# combining first is what makes all states contribute. The combined dir is "all", which
+# collides if a game ever has a real init_state named "all" (see combine_grouped_trajectories.py).
+combined_dir="$storage_dir/grouped_trajectories/${game}/${ARGS["run_name"]}/all"
+input_paths=$(IFS=,; echo "${grouped_pkls[*]}")
+python scripts/python/combine_grouped_trajectories.py \
+    --input_paths "$input_paths" \
+    --save_path "$combined_dir" \
+    --z_kind global || exit 1
+
+ARGS["trajectory_path"]="$combined_dir/grouped_global_high_reward_trajectories.pkl"
+infer_flags=$(args_to_flags_subset ARGS INFER_TASKS_ARG_KEYS)
+bash scripts/vlm/infer_tasks.sh $infer_flags || exit 1
 
 model_save_name="${ARGS["model_name"]##*/}"
 gp_trajectory_path="$storage_dir/proposed_tasks/${game}/${model_save_name}/curiosity/${ARGS["run_name"]}/trajectory_annotation"

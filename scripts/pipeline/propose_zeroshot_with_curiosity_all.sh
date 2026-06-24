@@ -4,7 +4,7 @@
 # and once with extra=zeroshot_with_curiosity.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
-python scripts/python/create_task_dictionary.py
+python scripts/python/create_task_dictionary.py || { echo "Could not regenerate train states"; exit 1; }
 source scripts/core/all_train_states.sh
 
 declare -A ARGS
@@ -59,16 +59,23 @@ done
 model_save_name="${ARGS["model_name"]##*/}"
 curiosity_dir="$storage_dir/proposed_tasks/${ARGS["game"]}/${model_save_name}/curiosity/${ARGS["run_name"]}"
 
-if [[ ! -f "$curiosity_dir/trajectory_annotation.json" ]]; then
-    echo "Error: trajectory_annotation.json not found at $curiosity_dir. Run infer_tasks first."
-    exit 1
-fi
-if [[ ! -f "$curiosity_dir/trajectory_annotation.pkl" ]]; then
-    echo "Error: trajectory_annotation.pkl not found at $curiosity_dir. Run infer_tasks first."
-    exit 1
-fi
-
 user_do_guidance="${ARGS["do_guidance_and_practice"]}"
+
+# Ensure the curiosity prior exists. curiosity_all_tasks runs create_traj (skips if
+# grouped trajectories already exist) + infer_tasks (skips if annotation exists) for
+# every init_state. overwrite=false so existing curiosity output is reused, never
+# regenerated; do_guidance_and_practice=false since we only need the annotation prior.
+saved_overwrite="${ARGS["overwrite"]}"
+ARGS["overwrite"]="false"
+ARGS["do_guidance_and_practice"]="false"
+curiosity_flags=$(args_to_flags_subset ARGS CURIOSITY_TASKS_ARG_KEYS)
+bash scripts/pipeline/curiosity_all_tasks.sh $curiosity_flags || exit 1
+ARGS["overwrite"]="$saved_overwrite"
+
+if [[ ! -f "$curiosity_dir/trajectory_annotation.json" || ! -f "$curiosity_dir/trajectory_annotation.pkl" ]]; then
+    echo "Error: curiosity annotation still missing at $curiosity_dir after curiosity_all_tasks. Aborting."
+    exit 1
+fi
 
 # Stage 1: zeroshot baseline — only proposal needed as prior for stage 2.
 ARGS["extra"]="none"
