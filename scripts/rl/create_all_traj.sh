@@ -14,6 +14,12 @@ source scripts/core/all_train_states.sh
 declare -A ARGS
 REQUIRED_ARGS=()
 populate_array CREATE_TRAJ_ESSENTIALS REQUIRED_ARGS
+# init_state is supplied by the TRAIN_STATES loop below, not the CLI, so drop it from
+# REQUIRED_ARGS (keeping game and any other create_traj essentials required).
+for i in "${!REQUIRED_ARGS[@]}"; do
+    [[ "${REQUIRED_ARGS[$i]}" == "init_state" ]] && unset 'REQUIRED_ARGS[$i]'
+done
+REQUIRED_ARGS=("${REQUIRED_ARGS[@]}")
 populate_dict CREATE_TRAJ_DEFAULTS ARGS
 
 
