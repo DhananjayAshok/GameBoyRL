@@ -73,7 +73,7 @@ from tqdm import tqdm
 
 from gameboy_worlds import get_environment
 from execution.registry import AVAILABLE_EXECUTORS
-from execution.report import EnvironmentStepRecord
+from execution.report import EnvironmentStepRecord, attach_next_frames
 from execution.supervisor import SimpleCheckerSupervisor
 from utils import log_info, log_error, VLM, HuggingFaceModel
 from vlm_scripts.attempt_tasks import _derive_hint
@@ -185,6 +185,21 @@ def _practice_episode(
             hint_str = f"{guidance_str}\nSpecific hint: {derived_hint}" if guidance_str else f"Specific hint: {derived_hint}"
             supervisor._hint = hint_str
             result = supervisor.evaluate()
+
+        # Backfill each action call's resulting frame onto its VLMCallRecord, so
+        # the saved vlm_call_log carries the after-frame (clean_practice uses it
+        # to judge the action's effect). Must run on the FINAL result so the
+        # vlm_call_log and steps come from the same (post-retry) report.
+        # Best-effort: a frame-alignment hiccup must not discard an otherwise-good
+        # episode.
+        try:
+            attach_next_frames(result["vlm_call_log"], result["steps"])
+        except Exception:
+            log_info(
+                f"[{group_idx}_{attempt}] attach_next_frames failed (next_frame left "
+                f"unset):\n{traceback.format_exc()}",
+                parameters,
+            )
 
         if verbose:
             print(f"  Attempt {attempt}: {'success' if result.get('success') else 'failure'} | score={result.get('score', float('nan')):.3f}")

@@ -7,7 +7,7 @@ from typing import Any, List, Optional, Type
 from gameboy_worlds.interface import Environment
 
 from execution.executor import Executor
-from execution.report import EnvironmentStepRecord, ExecutorReport, _ACTION_TAGS
+from execution.report import EnvironmentStepRecord, ExecutorReport, iter_call_steps
 from utils import load_parameters, VLM, parse_key_value
 
 
@@ -124,15 +124,12 @@ def _frame_to_call_cutoff(
     """
     if safe_frame is None:
         return None
-    steps_iter = iter(steps)
     env_frames = 0
-    for call_idx, entry in enumerate(vlm_call_log):
-        if entry.tag in _ACTION_TAGS:
-            step = next(steps_iter, None)
-            if isinstance(step, EnvironmentStepRecord):
-                env_frames += 1
-                if env_frames >= safe_frame:
-                    return call_idx + 1  # keep through the call that produced this frame
+    for call_idx, entry, step in iter_call_steps(vlm_call_log, steps):
+        if isinstance(step, EnvironmentStepRecord):
+            env_frames += 1
+            if env_frames >= safe_frame:
+                return call_idx + 1  # keep through the call that produced this frame
     return len(vlm_call_log)
 
 

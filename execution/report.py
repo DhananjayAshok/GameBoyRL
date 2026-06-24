@@ -12,7 +12,7 @@ import os
 import re
 import shutil
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterator, List, Optional, Type, Union
+from typing import Any, Dict, List, Optional, Type, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -127,12 +127,19 @@ class VLMCallRecord:
     :type prompt: str
     :param response: The raw text returned by the VLM.
     :type response: str
+    :param next_frame: For an ``action``-tagged call that produced an
+        :class:`EnvironmentStepRecord`, the resulting ``frame_after`` of that
+        step (backfilled post-hoc by :func:`attach_next_frames`). ``None`` for
+        non-action calls, action calls that produced no env step, and any record
+        pickled before this field existed.
+    :type next_frame: Optional[np.ndarray]
     """
 
     tag: str
     images: List[np.ndarray]
     prompt: str
     response: str
+    next_frame: Optional[np.ndarray] = None
 
 
 @dataclass
@@ -219,26 +226,30 @@ class ExecutorReport:
             lines.append("  (no VLM calls recorded)")
             return "\n".join(lines)
 
-        steps_iter: Iterator = iter(self.steps)
-        call_idx = 0
-
-        for entry in self.vlm_call_log:
-            call_idx += 1
+        # call_idx from iter_call_steps is 0-based; this renderer prints/saves
+        # 1-based, so use call_idx + 1 for both the header and image filenames.
+        # n_action counts the action calls (each consumes one steps entry), so
+        # self.steps[n_action:] recovers the trailing steps the walk didn't pair
+        # to a call — equivalent to draining the iterator (slicing past the end
+        # yields []).
+        n_action = 0
+        for call_idx, entry, step in iter_call_steps(self.vlm_call_log, self.steps):
+            display_idx = call_idx + 1
             tag_label = f"[{entry.tag.upper()}]"
-            lines.append(f"\n  ┌─ {tag_label} (call {call_idx})" + "─" * max(0, 48 - len(tag_label)))
+            lines.append(f"\n  ┌─ {tag_label} (call {display_idx})" + "─" * max(0, 48 - len(tag_label)))
             lines.append("")
             lines.append("  | Prompt:")
             lines.append(_indent(entry.prompt, "  │   "))
             lines.append("  │ VLM output:")
             lines.append(_indent(entry.response, "  │   "))
             for i, image in enumerate(entry.images):
-                img_path = os.path.join(img_save_path, f"{call_idx}_{i}.png")
+                img_path = os.path.join(img_save_path, f"{display_idx}_{i}.png")
                 plt.imshow(image)
                 plt.savefig(img_path)
                 plt.clf()
 
             if entry.tag in _ACTION_TAGS:
-                step = next(steps_iter, None)
+                n_action += 1
                 if step is None:
                     lines.append("  │ → INVALID  (end of steps)")
                 elif isinstance(step, InvalidStepRecord):
@@ -248,7 +259,7 @@ class ExecutorReport:
 
             lines.append("  └" + "─" * 57)
 
-        remaining = list(steps_iter)
+        remaining = self.steps[n_action:]
         if remaining:
             lines.append(f"\n  (+ {len(remaining)} env steps from planned sequences:)")
             for j, step in enumerate(remaining):
@@ -270,6 +281,41 @@ def _step_summary(step: Union[EnvironmentStepRecord, ToolCallRecord, InvalidStep
 
 
 _ACTION_TAGS = {"action", "score", "decide"}
+
+
+def iter_call_steps(vlm_call_log, steps):
+    """Yield ``(call_idx, entry, step)`` pairing each VLM call with the steps
+    entry it consumed.
+
+    This is the single source of truth for the call<->step lockstep alignment.
+    Only calls whose ``tag`` is in :data:`_ACTION_TAGS` consume a ``steps`` entry
+    (one per action call, in order); for every other call ``step`` is ``None``.
+    Once ``steps`` is exhausted, action calls yield ``step=None`` too (matching
+    the original ``next(steps_iter, None)`` behaviour). ``call_idx`` is the
+    0-based index into ``vlm_call_log``.
+
+    Consumers that want a 1-based position add 1 themselves; consumers that need
+    the trailing (unconsumed) steps can take ``steps[n_action:]`` where
+    ``n_action`` is the number of action-tagged calls they saw.
+    """
+    steps_iter = iter(steps)
+    for call_idx, entry in enumerate(vlm_call_log):
+        step = next(steps_iter, None) if entry.tag in _ACTION_TAGS else None
+        yield call_idx, entry, step
+
+
+def attach_next_frames(vlm_call_log, steps) -> None:
+    """Backfill ``record.next_frame`` for action calls that produced an env step.
+
+    Mutates ``vlm_call_log`` in place: each action call that consumed an
+    :class:`EnvironmentStepRecord` gets that step's ``frame_after``; all other
+    records are left as ``None``. ``steps`` must be the FULL interleaved steps
+    list (tool/env/invalid) — a pre-filtered (e.g. env-only) list would break the
+    lockstep alignment. Idempotent.
+    """
+    for _, entry, step in iter_call_steps(vlm_call_log, steps):
+        if isinstance(step, EnvironmentStepRecord):
+            entry.next_frame = step.frame_after
 
 
 @dataclass

@@ -70,4 +70,13 @@ if [[ "${ARGS["guidance_only"]}" == "true" || "${ARGS["guidance_only"]}" == "yes
 else
     practice_flags=$(args_to_flags_subset ARGS PRACTICE_TASKS_ARG_KEYS)
     bash scripts/vlm/practice_tasks.sh $practice_flags || exit 1
+
+    # practice_tasks writes to dirname(guidance_path)/practice_{executor}; clean it.
+    if [[ "${ARGS["do_clean"]}" == "true" || "${ARGS["do_clean"]}" == "yes" || "${ARGS["do_clean"]}" == "y" || "${ARGS["do_clean"]}" == "t" ]]; then
+        ARGS["practice_path"]="$(dirname "${ARGS["guidance_path"]}")/practice_${ARGS["executor"]}"
+        clean_flags=$(args_to_flags_subset ARGS CLEAN_PRACTICE_ARG_KEYS)
+        bash scripts/vlm/clean_practice.sh $clean_flags || exit 1
+    else
+        echo "do_clean=false: skipping clean_practice."
+    fi
 fi

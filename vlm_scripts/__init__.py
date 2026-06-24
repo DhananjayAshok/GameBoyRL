@@ -3,3 +3,4 @@ from vlm_scripts.propose_tasks_zeroshot import propose_tasks_zeroshot
 from vlm_scripts.infer_guidance import infer_guidance_cmd as infer_guidance
 from vlm_scripts.attempt_tasks import attempt_tasks_cmd as attempt_tasks
 from vlm_scripts.practice_tasks import practice_tasks_cmd as practice_tasks
+from vlm_scripts.clean_practice import clean_practice_cmd as clean_practice

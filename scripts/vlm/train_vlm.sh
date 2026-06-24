@@ -9,7 +9,7 @@ source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 # Define defaults and required args.
 # These should be specific to this script and not shared across scripts (that is handled below).
 declare -A ARGS
-ARGS["batch_size"]="4"
+ARGS["batch_size"]="8"
 ARGS["num_train_epochs"]="20"
 ARGS["lora_rank"]="32"
 ARGS["lora_alpha"]="32"
@@ -17,6 +17,7 @@ ARGS["learning_rate"]="2e-4"
 ARGS["weight_decay"]="0.01"
 ARGS["overwrite"]=false
 ARGS["push_to_hub"]=false
+ARGS["validation_file"]=none
 
 REQUIRED_ARGS=("train_file" "model_name" "run_name")
 
@@ -113,6 +114,15 @@ else
     push_to_hub_flag=""
 fi
 
+# If a validation file is provided, forward it and let the trainer use it directly
+# (leakage-free split from create_dataset). Otherwise fall back to an internal
+# 0.85 train/validation split of the train file.
+if [[ "${ARGS["validation_file"]}" != "none" ]]; then
+    validation_flag="--validation_file ${ARGS["validation_file"]}"
+else
+    validation_flag="--train_validation_split 0.85"
+fi
+
 
 
 
@@ -121,7 +131,7 @@ bash scripts/core/llm-utils.sh python train.py --training_kind sft --modality vl
         --train_file ${ARGS["train_file"]}  \
         --run_name vlm-sft-${ARGS["run_name"]}-$model_save_name \
         --per_device_train_batch_size ${ARGS["batch_size"]} --per_device_eval_batch_size ${ARGS["batch_size"]} \
-        --train_validation_split 0.85 \
+        $validation_flag \
         --logging_strategy steps --logging_steps 200 \
         --save_strategy epoch --save_steps 0.5 \
         --eval_strategy epoch --eval_steps 0.5 \
