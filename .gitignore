@@ -181,3 +181,5 @@ save_frames/
 configs/config.env
 scripts/all_train_states.sh
 vllm*.pid
+# Runtime storage (ROM data, captures, results — set via configs/private_vars.yaml)
+storage/

@@ -13,6 +13,7 @@ from execution.executor import (
     BeliefStateExecutor,
     AdversarialSamplingExecutor,
 )
+from execution.pokemon_prism.executors import PokemonPrismBadgeExecutor
 
 
 AVAILABLE_EXECUTORS: dict[str, type[Executor]] = {
@@ -28,5 +29,6 @@ AVAILABLE_EXECUTORS: dict[str, type[Executor]] = {
     "value": ActionValueEstimatorExecutor,
     "belief": BeliefStateExecutor,
     "adversarial": AdversarialSamplingExecutor,
+    "prism_badge": PokemonPrismBadgeExecutor,
 }
 """ Registry of available executors. Keys are short names, values are the corresponding classes. """

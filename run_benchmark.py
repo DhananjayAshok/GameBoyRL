@@ -90,6 +90,12 @@ def run_task(row, max_resets, controller_variant, executor_class, max_tool_calls
 @click.option("--random_sample", type=int, default=None)
 @click.option("--verbose", is_flag=True, default=False)
 @click.option("--regenerate", is_flag=True, default=False)
+# Inline task override: when --task_text is set, these three flags define a single
+# ad-hoc task row without needing a CSV entry.  Useful for games not yet in the
+# benchmark CSVs (e.g. pokemon_prism) while the CSV files stay untouched.
+@click.option("--task_text", default=None, type=str, help="Override: task description text (bypasses CSV lookup)")
+@click.option("--init_state", default=None, type=str, help="Override: init state name (required with --task_text)")
+@click.option("--state_tracker_class", default="default", type=str, help="Override: state tracker class key (used with --task_text)")
 def do(
     game,
     controller_variant,
@@ -104,6 +110,9 @@ def do(
     random_sample,
     verbose,
     regenerate,
+    task_text,
+    init_state,
+    state_tracker_class,
 ):
     project_parameters = load_parameters()
     vlm_name = executor_vlm_model or project_parameters["executor_vlm_model"]
@@ -116,7 +125,22 @@ def do(
         "session_name": session_name,
         "max_steps": max_steps,
     }
-    benchmark_tasks = get_benchmark_tasks(game=game)
+    if task_text is not None:
+        # Ad-hoc single-task mode: build a one-row DataFrame without touching any CSV.
+        if init_state is None:
+            raise click.UsageError("--init_state is required when --task_text is set")
+        benchmark_tasks = pd.DataFrame([{
+            "game": game,
+            "task_category": "custom",
+            "task": task_text,
+            "init_state": init_state,
+            "state_tracker_class": state_tracker_class,
+            "shifted_training_games": "",
+            "can_train_from_init_state": False,
+        }])
+        log_info(f"Running inline task: '{task_text}' (init_state={init_state}, tracker={state_tracker_class})")
+    else:
+        benchmark_tasks = get_benchmark_tasks(game=game)
     results = []
     columns = [
         "game",
