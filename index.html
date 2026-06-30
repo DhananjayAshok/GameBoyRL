@@ -1401,6 +1401,80 @@
         })();
     </script>
 
+    <!-- ════════════════════════════════════════════════════════════
+     ROLLOUT VIEWER – GEMINI-3-PRO ON POKEMON RED
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-light-alt" id="rollouts">
+        <div class="container">
+            <h2 class="section-heading">Example Rollouts</h2>
+            <div class="section-divider"></div>
+            <p
+                style="text-align:center; color:#555; margin-bottom:1.5rem; max-width:600px; margin-left:auto; margin-right:auto;">
+                Select a Pokemon Red task to watch Gemini-3-Pro attempt it.
+            </p>
+            <div class="rollout-viewer" style="max-width:900px;margin:0 auto 2rem;">
+                <div class="rollout-viewer-controls"
+                    style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:1rem;margin-bottom:1.5rem;padding:1rem;background:#fff;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,.08);">
+                    <label
+                        style="display:flex;align-items:center;gap:0.5rem;font-size:0.9rem;font-weight:600;color:#333;">
+                        Task
+                        <div class="select is-small">
+                            <select id="rollout-task-select"></select>
+                        </div>
+                    </label>
+                    <span id="rollout-task-outcome" class="task-cat-pill"></span>
+                </div>
+                <div class="result-card" style="overflow:hidden;">
+                    <video id="rollout-video" controls muted playsinline preload="metadata"
+                        style="width:100%;display:block;border-radius:8px 8px 0 0;background:#000;">
+                        <source id="rollout-video-src" src="" type="video/mp4">
+                    </video>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <script>
+        (function () {
+            var TASKS = [
+                { file: 'gemini_success_exit_cave.mp4', label: 'Exit the Cave', outcome: 'success' },
+                { file: 'gemini_fail_catch_pidgey.mp4', label: 'Catch a Pidgey', outcome: 'fail' }
+            ];
+            var BASE = 'assets';
+            var select = document.getElementById('rollout-task-select');
+            var video = document.getElementById('rollout-video');
+            var videoSrc = document.getElementById('rollout-video-src');
+            var outcomePill = document.getElementById('rollout-task-outcome');
+
+            function updateVideo() {
+                var task = TASKS[select.selectedIndex];
+                if (!task) return;
+                videoSrc.src = BASE + '/' + encodeURIComponent(task.file);
+                video.load();
+
+                outcomePill.textContent = task.outcome === 'success' ? 'Success' : 'Failure';
+                outcomePill.style.background = task.outcome === 'success' ? '#effaf3' : '#fff0ee';
+                outcomePill.style.color = task.outcome === 'success' ? '#1f9d55' : '#d1453b';
+                outcomePill.style.borderColor = task.outcome === 'success' ? '#bdeccd' : '#f5c2bc';
+
+                function tryPlay() {
+                    var p = video.play();
+                    if (p && p.catch) p.catch(function () { });
+                }
+                video.addEventListener('canplay', tryPlay, { once: true });
+                if (video.readyState >= 2) tryPlay();
+            }
+
+            TASKS.forEach(function (task, i) {
+                var o = document.createElement('option');
+                o.value = i;
+                o.textContent = task.label;
+                select.appendChild(o);
+            });
+            select.addEventListener('change', updateVideo);
+            updateVideo();
+        })();
+    </script>
 
     <!-- ════════════════════════════════════════════════════════════
      DATASET — RBM-1M
