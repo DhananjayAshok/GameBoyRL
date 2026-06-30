@@ -1477,15 +1477,16 @@
     </script>
 
     <!-- ════════════════════════════════════════════════════════════
-     SUBMISSIONS — JSONL UPLOAD
+     SUBMISSIONS — CSV UPLOAD
 ════════════════════════════════════════════════════════════ -->
     <section class="section is-light-alt" id="submissions">
         <div class="container" style="max-width:640px;">
             <h2 class="section-heading">Submissions</h2>
             <div class="section-divider"></div>
             <p style="text-align:center;color:#555;margin-bottom:2rem;">
-                Have a <code>.jsonl</code> submission for GameBoyWorlds? Upload it below and it'll be sent directly
-                to us.
+                Upload the CSV generated from the run (<a
+                    href="https://github.com/DhananjayAshok/GameBoyRL/run_benchmark.py" target="_blank">run_benchmark.py</a>)
+                and we'll update the leaderboard with your information.
             </p>
 
             <form id="submission-form" class="result-card" style="padding:2rem;">
@@ -1494,26 +1495,34 @@
                 <input type="checkbox" name="botcheck" style="display:none;" tabindex="-1" autocomplete="off">
 
                 <div class="field">
-                    <label class="label">Name (optional)</label>
+                    <label class="label">Name</label>
                     <div class="control">
-                        <input class="input" type="text" name="name" placeholder="Your name">
+                        <input class="input" type="text" name="name" placeholder="Your name" required>
                     </div>
                 </div>
 
                 <div class="field">
-                    <label class="label">Email (optional, for follow-up)</label>
+                    <label class="label">Email</label>
                     <div class="control">
-                        <input class="input" type="email" name="email" placeholder="you@example.com">
+                        <input class="input" type="email" name="email" placeholder="you@example.com" required>
                     </div>
                 </div>
 
                 <div class="field">
-                    <label class="label">JSONL file</label>
+                    <label class="label">CSV file</label>
                     <div class="control">
-                        <input class="input" type="file" id="submission-file" name="attachment" accept=".jsonl"
+                        <input class="input" type="file" id="submission-file" name="attachment" accept=".csv"
                             required>
                     </div>
-                    <p class="help">Must be a .jsonl file, 5MB max.</p>
+                    <p class="help">Must be a .csv file, 5MB max.</p>
+                </div>
+
+                <div class="field">
+                    <label class="label">Solution code (optional)</label>
+                    <div class="control">
+                        <input class="input" type="text" name="solution_code"
+                            placeholder="Link to your code (repo, gist, etc.)">
+                    </div>
                 </div>
 
                 <div class="field" style="margin-top:1.5rem;">
@@ -1548,11 +1557,11 @@
 
                 var file = fileInput.files[0];
                 if (!file) {
-                    setStatus('Please choose a .jsonl file.', true);
+                    setStatus('Please choose a .csv file.', true);
                     return;
                 }
-                if (!/\.jsonl$/i.test(file.name)) {
-                    setStatus('File must have a .jsonl extension.', true);
+                if (!/\.csv$/i.test(file.name)) {
+                    setStatus('File must have a .csv extension.', true);
                     return;
                 }
                 if (file.size > MAX_BYTES) {
