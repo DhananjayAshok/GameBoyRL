@@ -24,10 +24,7 @@ from typing import List, Optional, Type
 
 from execution.executor import HistoryAwareExecutor
 from execution.report import EnvironmentStepRecord
-from execution.pokemon.executor_actions import (
-    CheckInteractionAction,
-    PokemonLocateAction,
-)
+from execution.pokemon_prism.actions import PrismLocateAction
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +74,7 @@ class PokemonPrismBadgeExecutor(HistoryAwareExecutor):
     :type reflection_interval: int
     """
 
-    available_tools = [PokemonLocateAction, CheckInteractionAction]
+    available_tools = [PrismLocateAction]
 
     # Prompt used at every step — inherits [HISTORY_SECTION] from HistoryAwareExecutor
     STEP_PROMPT = """Task: [TASK][HINT_BLOCK]
