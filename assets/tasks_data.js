@@ -3,11 +3,11 @@ window.GAMEBOYWORLDS_TASKS = [
   {
     "id": "bomberman",
     "name": "Bomberman",
+    "description": "The Bomberman series follows the bomb-wielding hero as he clears obstacles and enemies by strategically laying and detonating bombs. It features RPG-tinged spin-off entries that layer town exploration, NPC dialogue, and creature-collecting (Charabom) elements on top of classic bomb-based puzzle action. Test tasks evaluate models on their ability to navigate menus, converse with townsfolk and read signage, and trigger and survive bomb-driven combat encounters.",
     "games": [
       {
         "id": "bomberman_quest",
         "name": "Bomberman Quest",
-        "description": "Bomberman Quest is a title in the Bomberman series. This benchmark includes 50 tasks spanning categories such as combat, interaction, menu, navigation.",
         "tasks": [
           {
             "task": "Open the pause menu",
@@ -341,7 +341,6 @@ window.GAMEBOYWORLDS_TASKS = [
       {
         "id": "bomberman_pocket",
         "name": "Bomberman Pocket",
-        "description": "Bomberman Pocket is a title in the Bomberman series. This benchmark includes 50 tasks spanning categories such as \"navigation, combat, combat\", interaction, menu, navigation.",
         "tasks": [
           {
             "task": "Open the pause menu",
@@ -676,7 +675,6 @@ window.GAMEBOYWORLDS_TASKS = [
       {
         "id": "bomberman_max",
         "name": "Bomberman Max",
-        "description": "Bomberman Max is a title in the Bomberman series. This benchmark includes 50 tasks spanning categories such as combat, interaction, menu, navigation.",
         "tasks": [
           {
             "task": "Open the pause menu",
@@ -986,11 +984,11 @@ window.GAMEBOYWORLDS_TASKS = [
   {
     "id": "deja_vu",
     "name": "Deja Vu",
+    "description": "The Deja Vu series casts the player as an amnesiac private eye reconstructing a string of crimes across moody, noir-styled crime scenes. It features a point-and-click interface where almost any object can be examined, opened, or carried, including items nested inside other items like a wallet tucked in a coat pocket. Test tasks evaluate models on their ability to manipulate layered, interactive objects and methodically search environments for clues.",
     "games": [
       {
         "id": "deja_vu_1",
         "name": "Deja Vu 1",
-        "description": "Deja Vu 1 is a title in the Deja Vu series. This benchmark includes 35 tasks spanning categories such as action, interaction, item, menu, navigation.",
         "tasks": [
           {
             "task": "Take coat from the front door",
@@ -1210,7 +1208,6 @@ window.GAMEBOYWORLDS_TASKS = [
       {
         "id": "deja_vu_2",
         "name": "Deja Vu 2",
-        "description": "Deja Vu 2 is a title in the Deja Vu series. This benchmark includes 34 tasks spanning categories such as action, interaction, item, menu, navigation.",
         "tasks": [
           {
             "task": "open the trench coat pocket",
@@ -1423,11 +1420,11 @@ window.GAMEBOYWORLDS_TASKS = [
   {
     "id": "harry_potter",
     "name": "Harry Potter",
+    "description": "The Harry Potter series adapts the early novels into an adventure that sends players through Hogwarts and the wider wizarding world on the books' central storylines. It features spell-based combat, dialogue with characters drawn from the source material, and collectible items such as wands and trading cards. Test tasks evaluate models on their ability to reach key locations, acquire story-critical items, and defeat scripted boss battles.",
     "games": [
       {
         "id": "harry_potter_philosophers_stone",
         "name": "Harry Potter Philosophers Stone",
-        "description": "Harry Potter Philosophers Stone is a title in the Harry Potter series. This benchmark includes 24 tasks spanning categories such as combat, interaction, menu, navigation.",
         "tasks": [
           {
             "task": "enter the potions shop",
@@ -1592,7 +1589,6 @@ window.GAMEBOYWORLDS_TASKS = [
       {
         "id": "harry_potter_chamber_of_secrets",
         "name": "Harry Potter Chamber Of Secrets",
-        "description": "Harry Potter Chamber Of Secrets is a title in the Harry Potter series. This benchmark includes 14 tasks spanning categories such as combat, interaction, menu, navigation.",
         "tasks": [
           {
             "task": "find Dobby in the bedroom",
@@ -1691,11 +1687,11 @@ window.GAMEBOYWORLDS_TASKS = [
   {
     "id": "harvest_moon",
     "name": "Harvest Moon",
+    "description": "The Harvest Moon series is a life simulator centered on running a struggling farm back to prosperity through planting, ranching, and forming bonds with the local townsfolk. It features tool-based chores, animal husbandry, and a roster of farm buildings that must be entered and worked in over the course of each day. Test tasks evaluate models on their ability to locate and equip the correct tools and navigate between the farm's structures to complete chores.",
     "games": [
       {
         "id": "harvest_moon_1",
         "name": "Harvest Moon 1",
-        "description": "Harvest Moon 1 is a title in the Harvest Moon series. This benchmark includes 50 tasks spanning categories such as interaction, menu, navigation.",
         "tasks": [
           {
             "task": "enter the cow barn",
@@ -2062,7 +2058,6 @@ window.GAMEBOYWORLDS_TASKS = [
       {
         "id": "harvest_moon_2",
         "name": "Harvest Moon 2",
-        "description": "Harvest Moon 2 is a title in the Harvest Moon series. This benchmark includes 50 tasks spanning categories such as interaction, menu, navigation.",
         "tasks": [
           {
             "task": "enter the cow barn",
@@ -2427,7 +2422,6 @@ window.GAMEBOYWORLDS_TASKS = [
       {
         "id": "harvest_moon_3",
         "name": "Harvest Moon 3",
-        "description": "Harvest Moon 3 is a title in the Harvest Moon series. This benchmark includes 50 tasks spanning categories such as interaction, menu, navigation.",
         "tasks": [
           {
             "task": "enter the chicken coop",
@@ -2779,11 +2773,11 @@ window.GAMEBOYWORLDS_TASKS = [
   {
     "id": "legend_of_zelda",
     "name": "Legend Of Zelda",
+    "description": "The Legend of Zelda series sends a lone hero through overworlds and dungeons to gather items and overcome enemies on the way to a larger quest. It features an equipment-driven inventory in which collected swords, shields, and tools must be selected and equipped before they take effect, alongside environmental puzzles. Test tasks evaluate models on their ability to manage inventory items, extract plot-critical gear from NPCs through dialogue, and navigate out of constrained starting areas.",
     "games": [
       {
         "id": "legend_of_zelda_links_awakening",
         "name": "Legend Of Zelda Links Awakening",
-        "description": "Legend Of Zelda Links Awakening is a title in the Legend Of Zelda series. This benchmark includes 50 tasks spanning categories such as interaction, inventory, navigation, navigation + interaction, navigaton.",
         "tasks": [
           {
             "task": "The character is stuck behind the bed inside the initial spawning room and it has to get out of that room",
@@ -3090,7 +3084,6 @@ window.GAMEBOYWORLDS_TASKS = [
       {
         "id": "legend_of_zelda_the_oracle_of_seasons",
         "name": "Legend Of Zelda The Oracle Of Seasons",
-        "description": "Legend Of Zelda The Oracle Of Seasons is a title in the Legend Of Zelda series. This benchmark includes 50 tasks spanning categories such as interaction, inventory, navigation, navigation + interaction.",
         "tasks": [
           {
             "task": "go to other people",
@@ -3399,11 +3392,11 @@ window.GAMEBOYWORLDS_TASKS = [
   {
     "id": "pokemon",
     "name": "Pokemon",
+    "description": "The Pokemon series is a monster-collecting role-playing game in which trainers capture, raise, and battle creatures while traveling across a sprawling region. It features turn-based battles, town and route exploration, and support systems like Pokemon Centers for healing an active roster. Test tasks evaluate models on their ability to travel between locations, win battles against trainers and gym leaders, and interact with key NPCs and items along the way.",
     "games": [
       {
         "id": "pokemon_red",
         "name": "Pokemon Red",
-        "description": "Pokemon Red is a title in the Pokemon series. This benchmark includes 13 tasks spanning categories such as catch_pokemon, combat, interaction, menu, navigation.",
         "tasks": [
           {
             "task": "Enter the Pokemon Center",
@@ -3496,11 +3489,11 @@ window.GAMEBOYWORLDS_TASKS = [
   {
     "id": "runes_of_virtue",
     "name": "Runes Of Virtue",
+    "description": "The Runes of Virtue series is an Ultima spin-off in which players roam an overworld and descend into a set of elemental Caverns to recover ancient runes. It features dialogue-heavy town encounters, menu-based inventory management, and survival pressures that persist across dungeon exploration. Test tasks evaluate models on their ability to hold conversations with NPCs, operate menus, and locate and enter the game's caverns.",
     "games": [
       {
         "id": "runes_of_virtue_1",
         "name": "Runes Of Virtue 1",
-        "description": "Runes Of Virtue 1 is a title in the Runes Of Virtue series. This benchmark includes 30 tasks spanning categories such as dialog, interaction, menu, navigation, survival.",
         "tasks": [
           {
             "task": "Open the inventory menu",
@@ -3687,7 +3680,6 @@ window.GAMEBOYWORLDS_TASKS = [
       {
         "id": "runes_of_virtue_2",
         "name": "Runes Of Virtue 2",
-        "description": "Runes Of Virtue 2 is a title in the Runes Of Virtue series. This benchmark includes 30 tasks spanning categories such as dialog, interaction, menu, navigation, survival.",
         "tasks": [
           {
             "task": "Open the inventory menu",
@@ -3876,11 +3868,11 @@ window.GAMEBOYWORLDS_TASKS = [
   {
     "id": "survival_kids",
     "name": "Survival Kids",
+    "description": "The Survival Kids series strands its young protagonist on a deserted island, where staying alive means gathering raw materials, crafting tools, and warding off wildlife. It features scavenging and crafting loops alongside direct combat encounters with hostile creatures. Test tasks evaluate models on their ability to find and collect resources, craft and equip the right tools, and fight off threats to survive.",
     "games": [
       {
         "id": "survival_kids_1",
         "name": "Survival Kids 1",
-        "description": "Survival Kids 1 is a title in the Survival Kids series. This benchmark includes 50 tasks spanning categories such as combat, interaction, menu, navigation, survival.",
         "tasks": [
           {
             "task": "Open the inventory",
@@ -4213,7 +4205,6 @@ window.GAMEBOYWORLDS_TASKS = [
       {
         "id": "survival_kids_2",
         "name": "Survival Kids 2",
-        "description": "Survival Kids 2 is a title in the Survival Kids series. This benchmark includes 50 tasks spanning categories such as interaction, menu, navigation, survival.",
         "tasks": [
           {
             "task": "Find the hidden bag",
@@ -4534,11 +4525,11 @@ window.GAMEBOYWORLDS_TASKS = [
   {
     "id": "sword_of_hope",
     "name": "Sword Of Hope",
+    "description": "The Sword of Hope series is a dialogue-driven dungeon RPG where players move room by room, battle monsters, and talk through plot-advancing conversations. It features turn-based encounters, shop-based gear purchases, and lateral-thinking puzzles such as examining objects to uncover hidden items. Test tasks evaluate models on their ability to navigate between rooms, clear dialogue and menu states, and reason through hidden interactions while surviving battles.",
     "games": [
       {
         "id": "sword_of_hope_1",
         "name": "Sword Of Hope 1",
-        "description": "Sword Of Hope 1 is a title in the Sword Of Hope series. This benchmark includes 50 tasks spanning categories such as combat, dialogue, interaction, menu, navigation, progression, reasoning.",
         "tasks": [
           {
             "task": "Reach the first adjacent room from the start state",
@@ -4878,7 +4869,6 @@ window.GAMEBOYWORLDS_TASKS = [
       {
         "id": "sword_of_hope_2",
         "name": "Sword Of Hope 2",
-        "description": "Sword Of Hope 2 is a title in the Sword Of Hope series. This benchmark includes 50 tasks spanning categories such as combat, dialogue, hard, interaction, menu, navigation, progression, reasoning.",
         "tasks": [
           {
             "task": "Clear the active dialogue box and return control to the player",

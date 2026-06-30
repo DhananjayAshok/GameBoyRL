@@ -712,6 +712,133 @@
             cursor: pointer;
         }
 
+        /* ── Task explorer (GameBoyWorlds benchmark browser) ───────── */
+        .task-explorer {
+            display: flex;
+            align-items: flex-start;
+            gap: 1.5rem;
+            margin-top: 1rem;
+        }
+
+        .task-explorer-sidebar {
+            flex: 0 0 240px;
+            max-height: 600px;
+            overflow-y: auto;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, .08);
+            padding: 0.75rem;
+        }
+
+        .task-explorer-series-name {
+            font-weight: 700;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            color: #888;
+            padding: 0.7rem 0.5rem 0.25rem;
+        }
+
+        .task-explorer-series-name:first-child {
+            padding-top: 0.25rem;
+        }
+
+        .task-explorer-game-btn {
+            display: block;
+            width: 100%;
+            text-align: left;
+            background: none;
+            border: none;
+            border-radius: 6px;
+            padding: 0.45rem 0.6rem;
+            font-size: 0.92rem;
+            color: #333;
+            cursor: pointer;
+        }
+
+        .task-explorer-game-btn:hover {
+            background: #eef5ff;
+        }
+
+        .task-explorer-game-btn.is-active {
+            background: #3273dc;
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .task-explorer-content {
+            flex: 1;
+            min-width: 0;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, .08);
+            padding: 1.5rem;
+        }
+
+        .task-explorer-game-title {
+            color: #1a1a2e;
+            font-size: 1.3rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .task-explorer-game-desc {
+            color: #555;
+            line-height: 1.6;
+            margin-bottom: 1.25rem;
+        }
+
+        .task-explorer-task-list {
+            max-height: 420px;
+            overflow-y: auto;
+            border-top: 1px solid #eee;
+        }
+
+        .task-explorer-task-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.55rem 0.25rem;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 0.92rem;
+            color: #333;
+        }
+
+        .task-explorer-task-row:last-child {
+            border-bottom: none;
+        }
+
+        .task-explorer-task-cats {
+            flex-shrink: 0;
+            display: flex;
+            gap: 0.3rem;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .task-cat-pill {
+            font-size: 0.68rem;
+            padding: 0.1rem 0.5rem;
+            border-radius: 12px;
+            background: #eef3ff;
+            color: #3273dc;
+            border: 1px solid #b8cef5;
+            white-space: nowrap;
+        }
+
+        @media (max-width: 768px) {
+            .task-explorer {
+                flex-direction: column;
+            }
+
+            .task-explorer-sidebar {
+                flex: 0 0 auto;
+                width: 100%;
+                max-height: 220px;
+            }
+        }
+
         /* ── Section alternating backgrounds ────────────────────── */
         .section.is-light-alt {
             background: #f7f9fc;
@@ -942,7 +1069,8 @@
                             <span class="icon"><i class="fab fa-github"></i></span>
                             <span>Code</span>
                         </a>
-                        <a class="button is-dark" href="https://github.com/DhananjayAshok/GameBoyWorlds" target="_blank">
+                        <a class="button is-dark" href="https://github.com/DhananjayAshok/GameBoyWorlds"
+                            target="_blank">
                             <span class="icon"><i class="fab fa-github"></i></span>
                             <span>GameBoyWorlds</span>
                         </a>
@@ -962,8 +1090,7 @@
     </section>
 
     <!-- Overview – teaser video (below hero, after scroll) -->
-    <section class="section is-light-alt" id="overview"
-        style="padding: 2rem 1.5rem; max-width: 100%; margin: 0 auto;">
+    <section class="section is-light-alt" id="overview" style="padding: 2rem 1.5rem; max-width: 100%; margin: 0 auto;">
         <div class="teaser-video-wrap">
             <h2 class="section-heading">Project Overview</h2>
             <div class="section-divider"></div>
@@ -999,7 +1126,7 @@
     </section>
 
     <!-- ════════════════════════════════════════════════════════════
-     DEMO – HUGGING FACE SPACE
+     TASK EXPLORER – BENCHMARK BROWSER
 ════════════════════════════════════════════════════════════ -->
     <section class="section is-light-alt" id="gameboyworlds">
         <div class="container">
@@ -1007,16 +1134,86 @@
             <div class="section-divider"></div>
             <p
                 style="text-align:center; color:#555; margin-bottom:1.5rem; max-width:600px; margin-left:auto; margin-right:auto;">
-                Try the reward model evaluation UI below, or separate visit in a new tab at <a
-                    href="https://robometer-rewardeval-ui.hf.space"
-                    target="_blank">https://robometer-rewardeval-ui.hf.space</a>.
+                Browse the benchmark by game, or see the full test suite on
+                <a href="https://github.com/DhananjayAshok/GameBoyWorlds/tree/main/benchmark/tests"
+                    target="_blank">GitHub</a>.
             </p>
-            <div style="width:100%; border-radius:12px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,.12);">
-                <iframe src="https://robometer-rewardeval-ui.hf.space" frameborder="0" width="100%" height="550"
-                    title="Robometer / Reward Eval Demo" style="display:block; min-height:550px;"></iframe>
+            <div class="task-explorer">
+                <nav class="task-explorer-sidebar" id="task-explorer-sidebar" aria-label="Game selector"></nav>
+                <div class="task-explorer-content">
+                    <h3 class="task-explorer-game-title" id="task-explorer-game-title"></h3>
+                    <p class="task-explorer-game-desc" id="task-explorer-game-desc"></p>
+                    <div class="task-explorer-task-list" id="task-explorer-task-list"></div>
+                </div>
             </div>
         </div>
     </section>
+
+    <script src="assets/tasks_data.js"></script>
+    <script>
+        (function () {
+            var data = window.GAMEBOYWORLDS_TASKS || [];
+            var sidebar = document.getElementById('task-explorer-sidebar');
+            var titleEl = document.getElementById('task-explorer-game-title');
+            var descEl = document.getElementById('task-explorer-game-desc');
+            var listEl = document.getElementById('task-explorer-task-list');
+
+            function renderGame(game, series) {
+                titleEl.textContent = game.name;
+                descEl.textContent = series.description;
+                listEl.innerHTML = '';
+                game.tasks.forEach(function (t) {
+                    var row = document.createElement('div');
+                    row.className = 'task-explorer-task-row';
+
+                    var label = document.createElement('span');
+                    label.className = 'task-explorer-task-label';
+                    label.textContent = t.task;
+                    row.appendChild(label);
+
+                    var cats = document.createElement('span');
+                    cats.className = 'task-explorer-task-cats';
+                    t.categories.forEach(function (c) {
+                        var pill = document.createElement('span');
+                        pill.className = 'task-cat-pill';
+                        pill.textContent = c;
+                        cats.appendChild(pill);
+                    });
+                    row.appendChild(cats);
+
+                    listEl.appendChild(row);
+                });
+            }
+
+            function selectGame(btn, game, series) {
+                var prev = sidebar.querySelector('.task-explorer-game-btn.is-active');
+                if (prev) prev.classList.remove('is-active');
+                btn.classList.add('is-active');
+                renderGame(game, series);
+            }
+
+            data.forEach(function (series, seriesIdx) {
+                var heading = document.createElement('div');
+                heading.className = 'task-explorer-series-name';
+                heading.textContent = series.name;
+                sidebar.appendChild(heading);
+
+                series.games.forEach(function (game, gameIdx) {
+                    var btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'task-explorer-game-btn';
+                    btn.textContent = game.name;
+                    btn.addEventListener('click', function () { selectGame(btn, game, series); });
+                    sidebar.appendChild(btn);
+
+                    if (seriesIdx === 0 && gameIdx === 0) {
+                        btn.classList.add('is-active');
+                        renderGame(game, series);
+                    }
+                });
+            });
+        })();
+    </script>
 
 
     <!-- ════════════════════════════════════════════════════════════
@@ -1947,13 +2144,15 @@
                     <img src="assets/images/robometer_method_figure.png" alt="Method overview"
                         style="width:100%; display:block; border-radius:8px;">
                 </div>
-                <h3 class="title is-4" style="color:#1a1a2e; margin-top:1.7rem;">Unstructured Exploration &rarr; Task Identification &rarr; Task Rehearsal</h3>
+                <h3 class="title is-4" style="color:#1a1a2e; margin-top:1.7rem;">Unstructured Exploration &rarr; Task
+                    Identification &rarr; Task Rehearsal</h3>
                 <div class="columns">
                     <div class="column">
                         <div class="highlight-box is-info-light" style="height:100%; margin-bottom:0;">
                             <strong>Curiosity Based Task Discovery</strong><br />
                             Uses RL (PPO) with a simple CNN agent to seek out novel experiences in the environment.
-                            The most unique trajectories are ones where "tasks" are potentially being implicitly executed.
+                            The most unique trajectories are ones where "tasks" are potentially being implicitly
+                            executed.
                         </div>
                     </div>
                     <div class="column">
