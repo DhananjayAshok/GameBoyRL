@@ -15,7 +15,7 @@ Inherits from HistoryAwareExecutor to get:
 Adds:
   - Domain-specific system knowledge block in every prompt
   - Periodic reflection call every `reflection_interval` env steps
-  - PokemonLocateAction and CheckInteractionAction in available_tools
+  - PrismLocateAction in available_tools
 """
 
 from __future__ import annotations

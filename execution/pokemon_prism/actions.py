@@ -30,6 +30,7 @@ class PrismLocateAction(LocateAction):
         "gym": "a pixelated building entrance with a badge symbol or 'GYM' label",
         "door": "a pixelated building entrance or doorway",
         "pokemon center": "a pixelated red-roofed building entrance with a nurse icon or 'CENTER' label",
+        "pokemart": "a Poke Mart shop building",
     }
 
     @classmethod
@@ -53,3 +54,6 @@ class PrismLocateAction(LocateAction):
         if match:
             return {"target": match.group(1).strip()}
         return None
+
+    def is_valid(self, target: str = None, **kwargs) -> bool:
+        return super().is_valid(target=target)
