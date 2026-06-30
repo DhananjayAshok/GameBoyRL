@@ -1477,111 +1477,120 @@
     </script>
 
     <!-- ════════════════════════════════════════════════════════════
-     DATASET — RBM-1M
+     SUBMISSIONS — JSONL UPLOAD
 ════════════════════════════════════════════════════════════ -->
     <section class="section is-light-alt" id="submissions">
-        <div class="container">
+        <div class="container" style="max-width:640px;">
             <h2 class="section-heading">Submissions</h2>
             <div class="section-divider"></div>
+            <p style="text-align:center;color:#555;margin-bottom:2rem;">
+                Have a <code>.jsonl</code> submission for GameBoyWorlds? Upload it below and it'll be sent directly
+                to us.
+            </p>
 
-            <div class="columns is-multiline is-centered" style="margin-bottom:1.5rem;">
-                <!-- Stats cards -->
-                <div class="column is-3 has-text-centered">
-                    <div style="background:#eef3ff;border-radius:12px;padding:1.5rem;">
-                        <p style="font-size:2.2rem;font-weight:700;color:#3273dc;">1M+</p>
-                        <p style="color:#555;">Trajectories</p>
-                    </div>
-                </div>
-                <div class="column is-3 has-text-centered">
-                    <div style="background:#eef3ff;border-radius:12px;padding:1.5rem;">
-                        <p style="font-size:2.2rem;font-weight:700;color:#3273dc;">21</p>
-                        <p style="color:#555;">Robot Embodiments</p>
-                    </div>
-                </div>
-                <!--<div class="column is-3 has-text-centered">
-        <div style="background:#eef3ff;border-radius:12px;padding:1.5rem;">
-          <p style="font-size:2.2rem;font-weight:700;color:#3273dc;">XXX+</p>
-          <p style="color:#555;">Tasks</p>
-        </div>
-      </div>-->
-                <div class="column is-3 has-text-centered">
-                    <div style="background:#eef3ff;border-radius:12px;padding:1.5rem;">
-                        <p style="font-size:2.2rem;font-weight:700;color:#3273dc;">140,000+</p>
-                        <p style="color:#555;">Trajs. from Mixed Expertise Datasets</p>
-                    </div>
-                </div>
-            </div>
+            <form id="submission-form" class="result-card" style="padding:2rem;">
+                <!-- Honeypot: hidden from real users, bots tend to fill it in. Web3Forms silently drops the
+                     submission when this is non-empty. -->
+                <input type="checkbox" name="botcheck" style="display:none;" tabindex="-1" autocomplete="off">
 
-            <!-- Dataset figure -->
-            <div class="columns is-vcentered" style="align-items: stretch;">
-                <div class="column is-4" style="display: flex; flex-direction: column; height: 100%;">
-                    <div class="result-card"
-                        style="margin-bottom:2rem; height:100%; display: flex; flex-direction: column; justify-content: center;">
-                        <img src="assets/images/rbm_1m_pie_chart.jpeg" alt="RBM-1M statistics"
-                            style="width:100%; display:block; margin:0 auto;">
-                        <div class="card-caption" style="font-size:0.97rem;"><strong>Distribution of different
-                                trajectory types in RBM-1M.</strong></div>
+                <div class="field">
+                    <label class="label">Name (optional)</label>
+                    <div class="control">
+                        <input class="input" type="text" name="name" placeholder="Your name">
                     </div>
                 </div>
-                <div class="column is-8" style="display: flex; flex-direction: column; height: 100%;">
-                    <div class="result-card"
-                        style="margin-bottom:2rem; height:100%; display:flex; flex-direction:column; justify-content:center;">
-                        <div
-                            style="margin-top:2.5rem; display: flex; gap: 0; justify-content: center; align-items: flex-end; flex-wrap: nowrap;">
-                            <div
-                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
-                                <img src="assets/example_trajs/example_1.gif" alt="Example Trajectory 1"
-                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
-                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#444;">Expert</div> -->
-                            </div>
-                            <div
-                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
-                                <img src="assets/example_trajs/example_2.gif" alt="Example Trajectory 2"
-                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
-                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#444;">Suboptimal</div> -->
-                            </div>
-                            <div
-                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
-                                <img src="assets/example_trajs/example_3.gif" alt="Example Trajectory 3"
-                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
-                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#444;">Suboptimal</div> -->
-                            </div>
-                            <div
-                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
-                                <img src="assets/example_trajs/example_4.gif" alt="Example Trajectory 4"
-                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
-                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#d24343;">Failed</div> -->
-                            </div>
-                            <div
-                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
-                                <img src="assets/example_trajs/example_5.gif" alt="Example Trajectory 5"
-                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
-                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#444;">Expert</div> -->
-                            </div>
-                            <div
-                                style="flex:1 1 0; max-width:16.5%; text-align:center; display: flex; flex-direction: column; height:100%;">
-                                <img src="assets/example_trajs/example_6.gif" alt="Example Trajectory 6"
-                                    style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:7px;box-shadow:0 2px 8px #0001;flex-shrink:0;">
-                                <!-- <div style="font-size:0.92rem;margin-top:0.5rem;color:#d24343;">Failed</div> -->
-                            </div>
-                        </div>
-                        <div class="card-caption" style="font-size:0.97rem;"><strong>Example trajectories from
-                                RBM-1M.</strong>
-                            Dataset composition across robot embodiments, tasks, and trajectory quality levels.
-                            Suboptimal and failure data
-                            constitute a substantial fraction, enabling the preference-based learning component of
-                            Robometer.
-                        </div>
+
+                <div class="field">
+                    <label class="label">Email (optional, for follow-up)</label>
+                    <div class="control">
+                        <input class="input" type="email" name="email" placeholder="you@example.com">
                     </div>
                 </div>
-            </div>
-            <!-- <p class="fig-caption">
-      <strong>Figure 3 — RBM-1M.</strong>
-      Dataset composition across robot embodiments, tasks, and trajectory quality levels. Suboptimal and failure data
-      constitute a substantial fraction, enabling the preference-based learning component of Robometer.
-    </p> -->
+
+                <div class="field">
+                    <label class="label">JSONL file</label>
+                    <div class="control">
+                        <input class="input" type="file" id="submission-file" name="attachment" accept=".jsonl"
+                            required>
+                    </div>
+                    <p class="help">Must be a .jsonl file, 5MB max.</p>
+                </div>
+
+                <div class="field" style="margin-top:1.5rem;">
+                    <button type="submit" id="submission-submit-btn" class="button is-link is-fullwidth">
+                        Submit
+                    </button>
+                </div>
+
+                <p id="submission-status" style="text-align:center;margin-top:1rem;font-size:0.9rem;"></p>
+            </form>
         </div>
     </section>
+
+    <script>
+        (function () {
+            var WEB3FORMS_ACCESS_KEY = '2d935692-1354-4d08-9d1c-f743d91a8493';
+            var MAX_BYTES = 5 * 1024 * 1024;
+
+            var form = document.getElementById('submission-form');
+            var fileInput = document.getElementById('submission-file');
+            var submitBtn = document.getElementById('submission-submit-btn');
+            var status = document.getElementById('submission-status');
+
+            function setStatus(message, isError) {
+                status.textContent = message;
+                status.style.color = isError ? '#d1453b' : '#1f9d55';
+            }
+
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+                setStatus('', false);
+
+                var file = fileInput.files[0];
+                if (!file) {
+                    setStatus('Please choose a .jsonl file.', true);
+                    return;
+                }
+                if (!/\.jsonl$/i.test(file.name)) {
+                    setStatus('File must have a .jsonl extension.', true);
+                    return;
+                }
+                if (file.size > MAX_BYTES) {
+                    setStatus('File is too large — 5MB max.', true);
+                    return;
+                }
+
+                var formData = new FormData(form);
+                formData.append('access_key', WEB3FORMS_ACCESS_KEY);
+                formData.append('subject', 'New GameBoyWorlds Submission');
+
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Submitting…';
+
+                fetch('https://api.web3forms.com/submit', {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json' },
+                    body: formData
+                })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        if (data.success) {
+                            setStatus('Thanks! Your submission was sent.', false);
+                            form.reset();
+                        } else {
+                            setStatus(data.message || 'Something went wrong. Please try again.', true);
+                        }
+                    })
+                    .catch(function () {
+                        setStatus('Network error — please try again.', true);
+                    })
+                    .finally(function () {
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Submit';
+                    });
+            });
+        })();
+    </script>
 
     <!-- ════════════════════════════════════════════════════════════
      ABSTRACT
