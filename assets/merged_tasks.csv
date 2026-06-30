@@ -1,0 +1,781 @@
+game_series,game,task_category,task
+bomberman,bomberman_quest,menu,Open the pause menu
+bomberman,bomberman_quest,menu,Open the bomb select screen
+bomberman,bomberman_quest,"navigation, interaction",Talk to the NPC
+bomberman,bomberman_quest,"navigation, interaction",Talk to the Old Man
+bomberman,bomberman_quest,"navigation, interaction",Talk to the Girl
+bomberman,bomberman_quest,"navigation, interaction",Talk to the Man
+bomberman,bomberman_quest,"navigation, interaction",Talk to the Guide
+bomberman,bomberman_quest,"navigation, interaction",Read the House Sign
+bomberman,bomberman_quest,"navigation, interaction",Read the Danger Sign
+bomberman,bomberman_quest,interaction,Activate the switch
+bomberman,bomberman_quest,navigation,Enter the House
+bomberman,bomberman_quest,"navigation, interaction",Read the sign
+bomberman,bomberman_quest,combat,Get a Game Over
+bomberman,bomberman_quest,combat,Start a Charabom battle
+bomberman,bomberman_quest,menu,Open the bomb component screen
+bomberman,bomberman_quest,"navigation, interaction",Read the sign next to the entrance
+bomberman,bomberman_quest,"navigation, interaction",Read the box sign
+bomberman,bomberman_quest,navigation,Enter the green cave
+bomberman,bomberman_quest,"navigation, interaction",Read the sign next to the green cave
+bomberman,bomberman_quest,"navigation, interaction",Read the sign at the green cave entrance
+bomberman,bomberman_quest,combat,Activate the switch using a bomb
+bomberman,bomberman_quest,interaction,Pick up the red box
+bomberman,bomberman_quest,"navigation, interaction",Talk to the NPC to save the game
+bomberman,bomberman_quest,"navigation, interaction",Talk to the librarian
+bomberman,bomberman_quest,"navigation, interaction",Talk to the guide on the right
+bomberman,bomberman_quest,"navigation, interaction",Talk to the Guide
+bomberman,bomberman_quest,"navigation, interaction",Read the Sign near the Forest Entrance
+bomberman,bomberman_quest,"navigation, interaction",Read the Sign in the Middle of the Forest
+bomberman,bomberman_quest,"navigation, interaction",Read the Cloud Sign
+bomberman,bomberman_quest,navigation,Enter the Room
+bomberman,bomberman_quest,"navigation, interaction",Read the Ruins Sign
+bomberman,bomberman_quest,navigation,Enter the Ancient Ruins
+bomberman,bomberman_quest,"navigation, interaction",Read the Ruins Puzzle Sign
+bomberman,bomberman_quest,"navigation, interaction",Jump to the Cliff and Open the Box
+bomberman,bomberman_quest,"navigation, interaction",Dodge the Arrows and Enter Combat
+bomberman,bomberman_quest,interaction,Use the Power Glove to Activate the Switch
+bomberman,bomberman_quest,"navigation, interaction",Navigate Down to Enter Combat with the Boss
+bomberman,bomberman_quest,"navigation, interaction",Read the Snow Cave Sign
+bomberman,bomberman_quest,"navigation, interaction",Jump Off the Cliff and Enter Combat with the Enemy
+bomberman,bomberman_quest,"navigation, interaction",Jump Off the Cliff and Read the Sign
+bomberman,bomberman_pocket,menu,Open the pause menu
+bomberman,bomberman_pocket,combat,Kill the Forest Stage Boss and Take the Exit
+bomberman,bomberman_pocket,combat,Get a Game Over
+bomberman,bomberman_pocket,interaction,Pick up a Bomb Up
+bomberman,bomberman_pocket,interaction,Area 2 Pick up a Bomb Up
+bomberman,bomberman_pocket,interaction,Area 3 Pick up a Bomb Up
+bomberman,bomberman_pocket,"""navigation, combat""",Navigate Forest Area 1 to Find and Kill the Enemy
+bomberman,bomberman_pocket,"""navigation, combat""",Forest Area 1 Navigate to Find and Take the Exit
+bomberman,bomberman_pocket,"""navigation, combat""",Forest Area 2 Navigate to Find and Take the Exit
+bomberman,bomberman_pocket,"""navigation, combat""",Forest Area 3 Navigate to Find and Take the Exit
+bomberman,bomberman_pocket,combat,Area 2 Kill the Enemy Using a Bomb
+bomberman,bomberman_pocket,"""navigation, combat""",Navigate Forest Area 3 to Find and Kill the Enemy
+bomberman,bomberman_pocket,"""navigation, combat""",Navigate to Find and Kill the Strong Enemy
+bomberman,bomberman_pocket,"""navigation, combat""",Navigate to Find and Kill the Shell
+bomberman,bomberman_pocket,"""navigation, combat""",Navigate Forest Area 4 to Find and Kill the Enemy
+bomberman,bomberman_pocket,interaction,Pick up a Bomb Range Up
+bomberman,bomberman_pocket,interaction,Ocean Area 1 Pick up a Fire Up
+bomberman,bomberman_pocket,navigation,Enter Jump Game
+bomberman,bomberman_pocket,combat,Complete a Jump Game round
+bomberman,bomberman_pocket,interaction,Pick up a heart
+bomberman,bomberman_pocket,"""navigation, combat""",Navigate Ocean Area 1 to Find and Kill the Enemy
+bomberman,bomberman_pocket,"""navigation, combat""",Navigate Ocean Area 1 to Find and Kill the Strong Green Fish
+bomberman,bomberman_pocket,navigation,Ocean Area 1 Take the Exit
+bomberman,bomberman_pocket,"""navigation, combat""",Navigate Ocean Area 2 to Find and Kill the Enemy
+bomberman,bomberman_pocket,interaction,Ocean Area 2 Pick up a Bomb Up
+bomberman,bomberman_pocket,"""navigation, combat""",Ocean Area 2 Navigate to Find and Take the Exit
+bomberman,bomberman_pocket,interaction,Ocean Area 3 Pick up a Bomb Up
+bomberman,bomberman_pocket,"""navigation, combat""",Navigate Ocean Area 3 to Find and Kill the Enemy
+bomberman,bomberman_pocket,"""navigation, combat""",Ocean Area 3 Navigate to Find the Hidden Exit
+bomberman,bomberman_pocket,interaction,Ocean Area 4 Pick up a Bomb Up
+bomberman,bomberman_pocket,interaction,Ocean Area 3 Pick up a Heart
+bomberman,bomberman_pocket,"""navigation, combat""",Navigate Ocean Area 4 to Find and Kill the Enemy
+bomberman,bomberman_pocket,interaction,Ocean Area 4 Pick up a Heart
+bomberman,bomberman_pocket,"""navigation, combat""",Navigate Ocean Area 4 to Find and Kill the Strong Enemy
+bomberman,bomberman_pocket,"""navigation, combat""",Ocean Area 4 Navigate to Find and Take the Exit
+bomberman,bomberman_pocket,combat,Ocean Area 5 Defeat the Boss Using a Bomb
+bomberman,bomberman_pocket,"""navigation, combat""",Navigate Wind Area 1 to Find and Kill the Enemy
+bomberman,bomberman_pocket,"""navigation, combat""",Navigate Wind Area 1 to Find and Kill the Strong Enemy
+bomberman,bomberman_pocket,"""navigation, combat""",Wind Area 1 Navigate to Find and Take the Exit
+bomberman,bomberman_pocket,"""navigation, combat""",Navigate Wind Area 2 to Find and Kill the Enemy
+bomberman,bomberman_pocket,interaction,Wind Area 2 Pick up a Heart
+bomberman,bomberman_pocket,"""navigation, combat""",Wind Area 2 Navigate Up to Find and Take the Exit
+bomberman,bomberman_pocket,"""navigation, combat""",Navigate Wind Area 3 to Find and Kill the Blue Fish
+bomberman,bomberman_pocket,"""navigation, combat""",Wind Area 3 Navigate to Break the Block and Avoid the Laser to Take the Exit
+bomberman,bomberman_pocket,"""navigation, combat""",Navigate Wind Area 4 to Find and Kill the Blue Fish
+bomberman,bomberman_pocket,"""navigation, combat""",Wind Area 4 Navigate to Find and Take the Exit
+bomberman,bomberman_pocket,combat,Wind Area 5 Defeat the Boss Using a Bomb
+bomberman,bomberman_pocket,"""navigation, combat""",Navigate Cloud Area 1 to Find and Kill the Enemy
+bomberman,bomberman_pocket,"""navigation, combat""",Navigate the Wind Area 1 Clouds to Find and Kill an Enemy
+bomberman,bomberman_pocket,navigation,Cloud Area 1 Navigate Up and Take the Exit
+bomberman,bomberman_max,menu,Open the pause menu
+bomberman,bomberman_max,menu,Open the Charabom select screen
+bomberman,bomberman_max,menu,Choose Normal Game
+bomberman,bomberman_max,combat,Get a Game Over
+bomberman,bomberman_max,interaction,Pick up a Bomb Up
+bomberman,bomberman_max,interaction,Stage 2 Pick up a Bomb Up
+bomberman,bomberman_max,interaction,Pick up a Fire Up
+bomberman,bomberman_max,interaction,Stage 2 Pick up a Fire Up
+bomberman,bomberman_max,"navigation, interaction",Interact with a Charabom
+bomberman,bomberman_max,navigation,Stage 1 Go to the Stage Exit
+bomberman,bomberman_max,navigation,Stage 2 Go to the Stage Exit
+bomberman,bomberman_max,navigation,Stage 2 Go to the Red Exit
+bomberman,bomberman_max,navigation,Stage 3 Go to the Stage Exit
+bomberman,bomberman_max,combat,Stage 2 Defeat an Enemy Using a Bomb
+bomberman,bomberman_max,combat,Stage 3 Defeat an Enemy Using a Bomb
+bomberman,bomberman_max,combat,Stage 12 Defeat an Enemy Using a Bomb
+bomberman,bomberman_max,combat,Defeat the Skull Enemy Using a Bomb
+bomberman,bomberman_max,combat,Defeat the Flower Enemy Using a Bomb
+bomberman,bomberman_max,combat,Stage 1 Defeat an Enemy Using a Bomb
+bomberman,bomberman_max,menu,Choose Pitch Area
+bomberman,bomberman_max,combat,Stage 14 Defeat an Enemy Using a Bomb
+bomberman,bomberman_max,combat,Stage 14 Defeat the Strong Enemy Using a Bomb
+bomberman,bomberman_max,combat,Stage 5 Defeat an Enemy Using a Bomb
+bomberman,bomberman_max,navigation,Stage 5 Go to the Stage Exit
+bomberman,bomberman_max,navigation,Stage 14 Go to the Stage Exit
+bomberman,bomberman_max,combat,Stage 22 Defeat an Enemy Using a Bomb
+bomberman,bomberman_max,navigation,Stage 14 Go to the Blue Exit
+bomberman,bomberman_max,combat,Stage 10 Defeat an Enemy Using a Bomb
+bomberman,bomberman_max,navigation,Stage 10 Go to the Stage Exit
+bomberman,bomberman_max,combat,Stage 16 Defeat the Skull Enemy Using a Bomb
+bomberman,bomberman_max,combat,Stage 16 Defeat an Enemy Using a Bomb
+bomberman,bomberman_max,navigation,Stage 16 Go to the Stage Exit
+bomberman,bomberman_max,combat,Stage 18 Defeat the Boss Using a Bomb
+bomberman,bomberman_max,navigation,Stage 18 Go to the Stage Exit
+bomberman,bomberman_max,navigation,Stage 2-1 Go to the Stage Exit
+bomberman,bomberman_max,combat,Stage 2-4 Defeat an Enemy Using a Bomb
+bomberman,bomberman_max,navigation,Stage 2-4 Go to the Stage Exit
+bomberman,bomberman_max,combat,Stage 2-12 Defeat an Enemy Using a Bomb
+bomberman,bomberman_max,combat,Stage 22 Defeat an Enemy Using a Bomb
+bomberman,bomberman_max,navigation,Stage 22 Go to the Stage Exit
+bomberman,bomberman_max,combat,Stage 2-3 Clear the Block and Defeat the Enemy
+bomberman,bomberman_max,navigation,Stage 2-3 Use the Teleport Door to Reach the Blue Exit
+bomberman,bomberman_max,combat,Stage 2-2 Defeat the Green Ninja Using a Bomb
+bomberman,bomberman_max,navigation,Stage 2-2 Avoid the Traps and Take the Blue Exit
+bomberman,bomberman_max,combat,Stage 2-9 Defeat the Fire Ninja Using a Bomb
+bomberman,bomberman_max,navigation,Stage 2-9 Find and Take the Hidden Exit
+bomberman,bomberman_max,combat,Stage 2-10 Defeat the Fire Ninja Using a Bomb
+bomberman,bomberman_max,navigation,Stage 2-5 Jump to the Left and Find the Blue Exit
+bomberman,bomberman_max,navigation,Stage 2-7 Go to the Stage Exit
+bomberman,bomberman_max,combat,Stage 2-8 Break the Block and Defeat the Enemy
+bomberman,bomberman_quest,navigation,Navigate from the Start to Find the Cave and Enter It
+bomberman,bomberman_quest,navigation,Navigate from the Forest Entrance to Enter the Ancient Ruins
+bomberman,bomberman_quest,navigation,Navigate from the Ruins Back to the House
+bomberman,bomberman_quest,navigation,Navigate from the Cloud Sign Area to Find and Save the Game
+bomberman,bomberman_quest,navigation,Navigate from the Traps Area to Enter the Ancient Ruins
+bomberman,bomberman_quest,navigation,Navigate from the Ruins Puzzle Area to Find and Enter the Room
+bomberman,bomberman_quest,navigation,Navigate from the Electro Boss Area to Find and Enter the Cave
+bomberman,bomberman_quest,navigation,Navigate from the Snow Cave Area to Find and Enter the House
+bomberman,bomberman_quest,navigation,Navigate from the Electro Sign to Find and Save the Game
+bomberman,bomberman_quest,navigation,Navigate from the Under Cliff Area Back to the Camp
+deja_vu,deja_vu_1,item,Take coat from the front door
+deja_vu,deja_vu_1,item,Take gun from the front door
+deja_vu,deja_vu_1,navigation,Open the door
+deja_vu,deja_vu_1,navigation,Close the door
+deja_vu,deja_vu_1,menu,Open the coat pocket
+deja_vu,deja_vu_1,menu,Open the wallet in the coat pocket
+deja_vu,deja_vu_1,menu,close the pocket
+deja_vu,deja_vu_1,menu,close the wallet
+deja_vu,deja_vu_1,item,check the coat
+deja_vu,deja_vu_1,item,check the gun
+deja_vu,deja_vu_1,action,open the spigot
+deja_vu,deja_vu_1,action,hit the bottle
+deja_vu,deja_vu_1,navigation,get into cellar
+deja_vu,deja_vu_1,navigation,enter connecting room
+deja_vu,deja_vu_1,navigation,go to empty room from map
+deja_vu,deja_vu_1,navigation,unlock the front
+deja_vu,deja_vu_1,interaction,meet the mugger
+deja_vu,deja_vu_1,action,hit the mugger
+deja_vu,deja_vu_1,"action, navigation",unlock the car door
+deja_vu,deja_vu_1,action,open the dashbrd
+deja_vu,deja_vu_1,action,close the dashbrd
+deja_vu,deja_vu_1,item,check the note2
+deja_vu,deja_vu_1,item,check the map
+deja_vu,deja_vu_1,item,check the snapshot
+deja_vu,deja_vu_1,navigation,go to the newsstand
+deja_vu,deja_vu_1,interaction,enter taxi
+deja_vu,deja_vu_1,interaction,talk to the taxi driver
+deja_vu,deja_vu_1,navigation,go to westend
+deja_vu,deja_vu_1,interaction,pay for taxi fee
+deja_vu,deja_vu_1,navigation,go to apartment
+deja_vu,deja_vu_1,navigation,enter the westend lobby
+deja_vu,deja_vu_1,"action, navigation",open the elevator door
+deja_vu,deja_vu_1,navigation,enter elevator
+deja_vu,deja_vu_1,"action, navigation",close elevator door
+deja_vu,deja_vu_1,interaction,check the photo
+deja_vu,deja_vu_2,menu,open the trench coat pocket
+deja_vu,deja_vu_2,navigation,open the bathroom door
+deja_vu,deja_vu_2,item,take gum from trench coat
+deja_vu,deja_vu_2,menu,open the pants pocket
+deja_vu,deja_vu_2,item,take the pants
+deja_vu,deja_vu_2,menu,close the pants pocket
+deja_vu,deja_vu_2,item,put on the trench coat
+deja_vu,deja_vu_2,item,put on the pants
+deja_vu,deja_vu_2,menu,open wallet1
+deja_vu,deja_vu_2,item,take newsclip1
+deja_vu,deja_vu_2,item,take license1
+deja_vu,deja_vu_2,menu,close wallet1
+deja_vu,deja_vu_2,item,check the newsclip1
+deja_vu,deja_vu_2,navigation,open the door from map
+deja_vu,deja_vu_2,navigation,close the door from map
+deja_vu,deja_vu_2,navigation,enter the hallway
+deja_vu,deja_vu_2,interaction,buy 2 chips
+deja_vu,deja_vu_2,navigation,return to  cashier
+deja_vu,deja_vu_2,interaction,cash out
+deja_vu,deja_vu_2,navigation,open the door of lobby
+deja_vu,deja_vu_2,navigation,exit the casino
+deja_vu,deja_vu_2,interaction,talk in train station
+deja_vu,deja_vu_2,navigation,visit counter
+deja_vu,deja_vu_2,menu,check the timetable
+deja_vu,deja_vu_2,navigation,enter the platform on track6
+deja_vu,deja_vu_2,navigation,enter the train
+deja_vu,deja_vu_2,interaction,buy a train ticket
+deja_vu,deja_vu_2,interaction,check the girl in the train
+deja_vu,deja_vu_2,interaction,check the sign
+deja_vu,deja_vu_2,interaction,chat with newspaper seller
+deja_vu,deja_vu_2,action,buy newspaper
+deja_vu,deja_vu_2,action,take newsclip4
+deja_vu,deja_vu_2,navigation,enter the taxi
+deja_vu,deja_vu_2,interaction,chat with taxi driver
+harry_potter,harry_potter_philosophers_stone,navigation,enter the potions shop
+harry_potter,harry_potter_philosophers_stone,navigation,enter Ollivander's wand shop
+harry_potter,harry_potter_philosophers_stone,"navigation, interaction",get wand from Ollivander
+harry_potter,harry_potter_philosophers_stone,"navigation, interaction",receive Folio Magi from boy
+harry_potter,harry_potter_philosophers_stone,"navigation, menu, interaction",select a card deck (1 of 4)
+harry_potter,harry_potter_philosophers_stone,navigation,enter Gringotts bank
+harry_potter,harry_potter_philosophers_stone,"navigation, interaction",talk to Hagrid inside Gringotts
+harry_potter,harry_potter_philosophers_stone,"navigation, combat",find and beat boss rat
+harry_potter,harry_potter_philosophers_stone,combat,level upgrade
+harry_potter,harry_potter_philosophers_stone,combat,gain a new spell level
+harry_potter,harry_potter_philosophers_stone,"navigation, interaction",find Hagrid after boss / enter vault
+harry_potter,harry_potter_philosophers_stone,navigation,enter Madam Malkin's
+harry_potter,harry_potter_philosophers_stone,interaction,open Madam Malkin's buy menu
+harry_potter,harry_potter_philosophers_stone,menu,select robes at Madam Malkin's
+harry_potter,harry_potter_philosophers_stone,interaction,confirm robes purchase at Madam Malkin's
+harry_potter,harry_potter_philosophers_stone,navigation,enter Flourish and Blotts bookshop
+harry_potter,harry_potter_philosophers_stone,"navigation, interaction",buy books at Flourish and Blotts
+harry_potter,harry_potter_philosophers_stone,navigation,enter the apothecary
+harry_potter,harry_potter_philosophers_stone,"navigation, menu, interaction",buy a Potion Kit at the apothecary
+harry_potter,harry_potter_philosophers_stone,navigation,enter the cauldron shop
+harry_potter,harry_potter_philosophers_stone,"navigation, menu, interaction",buy a cauldron at the cauldron shop
+harry_potter,harry_potter_philosophers_stone,navigation,enter Sugarplums Sweets shop
+harry_potter,harry_potter_philosophers_stone,"navigation, interaction",open the Sugarplums buy menu
+harry_potter,harry_potter_philosophers_stone,"navigation, interaction",talk to Hagrid in Diagon Alley after shopping
+harry_potter,harry_potter_chamber_of_secrets,"navigation, interaction",find Dobby in the bedroom
+harry_potter,harry_potter_chamber_of_secrets,menu,select a card deck before leaving
+harry_potter,harry_potter_chamber_of_secrets,"navigation, interaction",board the flying car
+harry_potter,harry_potter_chamber_of_secrets,navigation,enter the Burrow
+harry_potter,harry_potter_chamber_of_secrets,"navigation, combat",enter a battle in the Burrow
+harry_potter,harry_potter_chamber_of_secrets,navigation,enter Percy's room in the Burrow
+harry_potter,harry_potter_chamber_of_secrets,navigation,enter Ginny's room in the Burrow
+harry_potter,harry_potter_chamber_of_secrets,navigation,enter the Weasley parents' room in the Burrow
+harry_potter,harry_potter_chamber_of_secrets,navigation,enter Fred and George's room in the Burrow
+harry_potter,harry_potter_chamber_of_secrets,navigation,enter Ron's room in the Burrow
+harry_potter,harry_potter_chamber_of_secrets,"navigation, interaction",talk to Ron in his room (sleep cutscene)
+harry_potter,harry_potter_chamber_of_secrets,"navigation, interaction",reach the kitchen and trigger Mrs Weasley's quest dialogue
+harry_potter,harry_potter_chamber_of_secrets,"navigation, interaction",reach the garden and start dialogue with Ron
+harry_potter,harry_potter_chamber_of_secrets,navigation,navigate to left side of white car
+harvest_moon,harvest_moon_1,navigation,enter the cow barn
+harvest_moon,harvest_moon_1,navigation,enter the chicken coop
+harvest_moon,harvest_moon_1,navigation,enter the storage shed
+harvest_moon,harvest_moon_1,"navigation, interaction",pick up the water can
+harvest_moon,harvest_moon_1,"navigation, interaction",pick up the cow bell
+harvest_moon,harvest_moon_1,"navigation, interaction",pick up the sickle
+harvest_moon,harvest_moon_1,"navigation, interaction",pick up the hoe
+harvest_moon,harvest_moon_1,"navigation, interaction",pick up the hammer
+harvest_moon,harvest_moon_1,"navigation, interaction",pick up the grass seeds
+harvest_moon,harvest_moon_1,"navigation, interaction",go to bed
+harvest_moon,harvest_moon_1,"navigation, interaction",feed the harvest spirit
+harvest_moon,harvest_moon_1,"navigation, interaction",help the spirit after earthquake
+harvest_moon,harvest_moon_1,"navigation, interaction",water only the center of the turnip bud field below without disturbing the others
+harvest_moon,harvest_moon_1,"navigation, interaction",harvest only the center turnip of the 3x3 crop field without disturbing the others
+harvest_moon,harvest_moon_1,"navigation, interaction",water only the center turnip of the 3x3 crop field without disturbing the others
+harvest_moon,harvest_moon_1,"navigation, interaction",harvest only the center potato of the 3x3 crop field without disturbing the others
+harvest_moon,harvest_moon_1,"navigation, interaction",water only the center potato of the 3x3 crop field above without disturbing the others
+harvest_moon,harvest_moon_1,"navigation, interaction",break the nearest rock with the hammer while standing to its left
+harvest_moon,harvest_moon_1,"navigation, interaction",break the rightmost rock in the area with the hammer while standing above it
+harvest_moon,harvest_moon_1,"navigation, interaction",pull out the bottommost weed while standing above it
+harvest_moon,harvest_moon_1,"navigation, interaction",cut the bottommost weed with the sickle while standing above it
+harvest_moon,harvest_moon_1,"navigation, interaction",pull out the topmost weed along the left fence by hand
+harvest_moon,harvest_moon_1,"navigation, interaction",cut the topmost weed along the left fence with the sickle
+harvest_moon,harvest_moon_1,"navigation, interaction","harvest the center row of grass from right to left without disturbing the other rows, stopping next to the center potato"
+harvest_moon,harvest_moon_1,"navigation, interaction",pick up the broken fence piece and slot it back into the fence while staying next to the wall
+harvest_moon,harvest_moon_1,"navigation, menu, interaction",buy material at the carpenter
+harvest_moon,harvest_moon_1,"navigation, menu, interaction",get an estimate for a home expansion at the carpenter
+harvest_moon,harvest_moon_1,"navigation, menu, interaction",buy a chicken from the animal shop
+harvest_moon,harvest_moon_1,"navigation, menu, interaction",buy a cow and name it ABBY
+harvest_moon,harvest_moon_1,"navigation, menu, interaction",sell the 1st chicken at the animal shop
+harvest_moon,harvest_moon_1,"navigation, menu, interaction",buy a cow brush from the tool shop
+harvest_moon,harvest_moon_1,"navigation, menu, interaction",buy a saddlebag from the tool shop
+harvest_moon,harvest_moon_1,"navigation, menu, interaction",buy a milker from the tool shop
+harvest_moon,harvest_moon_1,"navigation, menu, interaction",buy a rice ball
+harvest_moon,harvest_moon_1,"navigation, menu, interaction",buy a croissant
+harvest_moon,harvest_moon_1,"navigation, menu, interaction",buy a cake
+harvest_moon,harvest_moon_1,"navigation, menu, interaction",buy a grape juice
+harvest_moon,harvest_moon_1,"navigation, menu, interaction",go to the church to pray
+harvest_moon,harvest_moon_1,"navigation, interaction",open the storage item list
+harvest_moon,harvest_moon_1,"navigation, interaction",find the rainy money
+harvest_moon,harvest_moon_1,"navigation, interaction",find the lost bird for friend
+harvest_moon,harvest_moon_1,"navigation, interaction",speak to the girl with long straight blue hair
+harvest_moon,harvest_moon_1,"navigation, interaction",speak to the girl with short hair
+harvest_moon,harvest_moon_1,"navigation, interaction",speak to the girl with long curly pink hair
+harvest_moon,harvest_moon_1,"navigation, interaction",speak to the girl with long straight blue hair at the winter gathering
+harvest_moon,harvest_moon_1,"navigation, interaction",speak to the girl with long curly pink hair at the winter gathering
+harvest_moon,harvest_moon_1,"navigation, interaction",speak to the girl with red hair and a high ponytail at the winter gathering
+harvest_moon,harvest_moon_1,"navigation, interaction",put chicken grass on the leftmost block of the feeding stall
+harvest_moon,harvest_moon_1,"navigation, interaction",put cow fodder on the upper right feeding stall from the right
+harvest_moon,harvest_moon_1,"navigation, interaction",place the egg into the incubator while standing against the wall to hatch it
+harvest_moon,harvest_moon_2,navigation,enter the cow barn
+harvest_moon,harvest_moon_2,navigation,enter the chicken coop
+harvest_moon,harvest_moon_2,"navigation, interaction",find the lucky money from the clock
+harvest_moon,harvest_moon_2,navigation,enter the hospital
+harvest_moon,harvest_moon_2,navigation,enter the tool shop
+harvest_moon,harvest_moon_2,navigation,enter the carpenter
+harvest_moon,harvest_moon_2,navigation,enter the animal shop
+harvest_moon,harvest_moon_2,navigation,enter the library
+harvest_moon,harvest_moon_2,navigation,enter the flower shop
+harvest_moon,harvest_moon_2,navigation,enter the restaurant
+harvest_moon,harvest_moon_2,"navigation, menu, interaction",get an estimate for building a bridge
+harvest_moon,harvest_moon_2,"navigation, menu, interaction",buy a milker from the tool shop
+harvest_moon,harvest_moon_2,"navigation, menu, interaction",buy a food set
+harvest_moon,harvest_moon_2,"navigation, menu, interaction",buy a beverage set
+harvest_moon,harvest_moon_2,"navigation, menu, interaction",buy today's special
+harvest_moon,harvest_moon_2,"navigation, menu, interaction",go to bed
+harvest_moon,harvest_moon_2,"navigation, interaction",read the secret garden sign
+harvest_moon,harvest_moon_2,"navigation, interaction",read the crop field sign
+harvest_moon,harvest_moon_2,"navigation, interaction",cross the 500m line in the cherry cup race
+harvest_moon,harvest_moon_2,"navigation, interaction",cross the 1000m line in the cherry cup race
+harvest_moon,harvest_moon_2,"navigation, menu, interaction",equip the sickle replacig empty hands
+harvest_moon,harvest_moon_2,"navigation, menu, interaction",equip the hammer replacig empty hands
+harvest_moon,harvest_moon_2,"navigation, menu, interaction",equip the fishing rod replacig empty hands
+harvest_moon,harvest_moon_2,"navigation, menu, interaction",exchange the axe with the net
+harvest_moon,harvest_moon_2,"navigation, menu, interaction",exchange the axe with the rosemary seeds
+harvest_moon,harvest_moon_2,"navigation, menu, interaction",exchange the sprinkler with the sickle
+harvest_moon,harvest_moon_2,"navigation, menu, interaction",exchange the hoe with the fishing net
+harvest_moon,harvest_moon_2,"navigation, interaction",harvest only the center eggplant of the 3x3 crop field without disturbing the others
+harvest_moon,harvest_moon_2,"navigation, interaction",harvest only the center carrot of the 3x3 winter crop field without disturbing the others
+harvest_moon,harvest_moon_2,"navigation, interaction",water only the center potato of the 3x3 crop field without disturbing the others
+harvest_moon,harvest_moon_2,"navigation, interaction",water only the center asparagus of the 3x3 crop field without disturbing the others
+harvest_moon,harvest_moon_2,"navigation, interaction",water the 3x3 corn field with the sprinkler while standing at the center
+harvest_moon,harvest_moon_2,"navigation, interaction",cut only the center corn bud of the 3x3 field with the sickle without disturbing the others
+harvest_moon,harvest_moon_2,"navigation, interaction",water the 3x3 cabbage field with the sprinkler while standing at the center
+harvest_moon,harvest_moon_2,"navigation, interaction",learn how to use computers from the billboard
+harvest_moon,harvest_moon_2,"navigation, interaction",learn how to clean boulders from the billboard
+harvest_moon,harvest_moon_2,"navigation, interaction",learn how to sell crops from the billboard
+harvest_moon,harvest_moon_2,"navigation, interaction",remove the leftmost weed against the wall
+harvest_moon,harvest_moon_2,"navigation, interaction",pick a berry from the left while standing against the treetop
+harvest_moon,harvest_moon_2,"navigation, interaction",pick the berry from above without disturbing the surrounding weeds
+harvest_moon,harvest_moon_2,"navigation, interaction",speak to the girl with blue twin tails by the billboard
+harvest_moon,harvest_moon_2,"navigation, interaction",speak to the person with short purple hair standing by the wall
+harvest_moon,harvest_moon_2,"navigation, interaction",speak to the person with short curly blonde hair
+harvest_moon,harvest_moon_2,"navigation, interaction",place the egg in the incubator to hatch the chick
+harvest_moon,harvest_moon_2,"menu, interaction",buy a cow and name it LUNA
+harvest_moon,harvest_moon_2,"navigation, menu, interaction",sell the cow at the animal shop
+harvest_moon,harvest_moon_2,"navigation, menu, interaction",sell the chicken at the animal shop
+harvest_moon,harvest_moon_2,"navigation, menu, interaction",get an estimate for building a hothouse
+harvest_moon,harvest_moon_2,"navigation, menu, interaction",buy a chicken from the animal shop
+harvest_moon,harvest_moon_2,"navigation, interaction",put chicken grass on the leftmost block
+harvest_moon,harvest_moon_3,navigation,enter the chicken coop
+harvest_moon,harvest_moon_3,"navigation, interaction",place the egg in the incubator to hatch the chick
+harvest_moon,harvest_moon_3,"navigation, interaction",put chicken grass on the topmost feeding block
+harvest_moon,harvest_moon_3,"navigation, interaction",read the secret garden sign
+harvest_moon,harvest_moon_3,"navigation, interaction",read the morning market sign
+harvest_moon,harvest_moon_3,"navigation, interaction",take the ferry back to the village
+harvest_moon,harvest_moon_3,"navigation, interaction",read the storage sign
+harvest_moon,harvest_moon_3,"navigation, interaction",speak to Kirk (the ferry staff) in the village
+harvest_moon,harvest_moon_3,"navigation, interaction",talk to Joe (morning market staff)
+harvest_moon,harvest_moon_3,"navigation, interaction",talk to Lukia (flower shop staff)
+harvest_moon,harvest_moon_3,"navigation, interaction",talk to Lucus (tool shop staff)
+harvest_moon,harvest_moon_3,"navigation, interaction",talk to Lyla (library staff)
+harvest_moon,harvest_moon_3,"navigation, interaction",put cow fodder on the rightmost block
+harvest_moon,harvest_moon_3,navigation,enter the farm
+harvest_moon,harvest_moon_3,navigation,enter the village
+harvest_moon,harvest_moon_3,navigation,enter the grassland
+harvest_moon,harvest_moon_3,navigation,enter the forest
+harvest_moon,harvest_moon_3,navigation,enter the cliff
+harvest_moon,harvest_moon_3,navigation,enter the mountain
+harvest_moon,harvest_moon_3,navigation,enter the shopping mall
+harvest_moon,harvest_moon_3,navigation,go to the second floor of the shopping mall
+harvest_moon,harvest_moon_3,navigation,enter the farmer's union
+harvest_moon,harvest_moon_3,navigation,enter the aquarium
+harvest_moon,harvest_moon_3,navigation,enter the theatre
+harvest_moon,harvest_moon_3,"navigation, menu, interaction",buy a meal set
+harvest_moon,harvest_moon_3,"navigation, menu, interaction",buy a flower vase
+harvest_moon,harvest_moon_3,"navigation, menu, interaction",buy a horse saddle
+harvest_moon,harvest_moon_3,"navigation, interaction",choose tea to buy
+harvest_moon,harvest_moon_3,"navigation, interaction",choose asparagus seeds to buy
+harvest_moon,harvest_moon_3,"navigation, interaction",choose coffee to buy
+harvest_moon,harvest_moon_3,"navigation, interaction",read the ferry sign
+harvest_moon,harvest_moon_3,"navigation, interaction",find secret savings
+harvest_moon,harvest_moon_3,"navigation, interaction",choose potato seeds to buy
+harvest_moon,harvest_moon_3,"navigation, interaction",choose turnip seeds to buy
+harvest_moon,harvest_moon_3,navigation,enter the hot spring
+harvest_moon,harvest_moon_3,"navigation, interaction",break the rock in between the two stumps with the hammer while standing to its left
+harvest_moon,harvest_moon_3,"navigation, interaction",remove the weed against the fence while standing to its left
+harvest_moon,harvest_moon_3,"navigation, interaction",pick up the cherry while standing against the weed
+harvest_moon,harvest_moon_3,"navigation, interaction",pick up the berry while standing above it and against the tree on the left
+harvest_moon,harvest_moon_3,"navigation, menu, interaction",sell the chicken at the farmer's union
+harvest_moon,harvest_moon_3,"navigation, menu, interaction",buy and only buy a fodder set at the farmer's union
+harvest_moon,harvest_moon_3,"navigation, menu, interaction",buy and only buy horse medicine at the farmer's union
+harvest_moon,harvest_moon_3,"navigation, interaction",speak to Kate (the girl in the light blue skirt) by the cliff and watch fireworks together
+harvest_moon,harvest_moon_3,"navigation, interaction",water only the center sweet potato of the 3x3 field without disturbing the others
+harvest_moon,harvest_moon_3,"navigation, interaction",water only the center watermelon plant of the 3x3 field without disturbing the others
+harvest_moon,harvest_moon_3,"navigation, interaction",harvest only the top-center potato of the 3x3 field while standing below it without disturbing the others
+harvest_moon,harvest_moon_3,"navigation, interaction",harvest only the center eggplant of the top 3x3 field without disturbing the others
+harvest_moon,harvest_moon_3,"navigation, interaction",harvest only the center turnip of the 3x3 turnip field on the left that has 8 turnips planted without disturbing the others
+harvest_moon,harvest_moon_3,"navigation, interaction","read through ""Living with Animals"" Chapter 2"
+harvest_moon,harvest_moon_3,"navigation, menu",check how much money the player May currently has
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,The character is stuck behind the bed inside the initial spawning room and it has to get out of that room
+legend_of_zelda,legend_of_zelda_links_awakening,interaction,talk to tarin inside the spawn house to get the shield
+legend_of_zelda,legend_of_zelda_links_awakening,interaction,pick up the sword from the shore
+legend_of_zelda,legend_of_zelda_links_awakening,interaction,open inventory by pressing enter
+legend_of_zelda,legend_of_zelda_links_awakening,inventory,open inventory by pressing enter and remove sword
+legend_of_zelda,legend_of_zelda_links_awakening,inventory,equip the sword
+legend_of_zelda,legend_of_zelda_links_awakening,interaction,talk to kids outside the library
+legend_of_zelda,legend_of_zelda_links_awakening,interaction,talk to the statue
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,read the sign board
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,go inside the shop
+legend_of_zelda,legend_of_zelda_links_awakening,interaction,make a call
+legend_of_zelda,legend_of_zelda_links_awakening,navigation + interaction,go inside the dark forest by chopping bushes
+legend_of_zelda,legend_of_zelda_links_awakening,navigation + interaction,go inside the tunnel
+legend_of_zelda,legend_of_zelda_links_awakening,navigation + interaction,in dark forest and kill all the bats to acquire money from the chest
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,take the heart
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,take the shroom
+legend_of_zelda,legend_of_zelda_links_awakening,inventory,swap shroom with sword
+legend_of_zelda,legend_of_zelda_links_awakening,inventory,swap shroom with shield
+legend_of_zelda,legend_of_zelda_links_awakening,interaction,make another call from the chest shop
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,go inside the skeleton house
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,go underground
+legend_of_zelda,legend_of_zelda_links_awakening,interaction,talk to diamond kid
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,go inside the 2 door house
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,go inside the pot room
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,go near sign
+legend_of_zelda,legend_of_zelda_links_awakening,inventory,go in the water
+legend_of_zelda,legend_of_zelda_links_awakening,navigation + interaction,go and see the pond
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,go inside the weird tunnel
+legend_of_zelda,legend_of_zelda_links_awakening,interaction,talk to witch
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,go to the right screen
+legend_of_zelda,legend_of_zelda_links_awakening,navigaton,go near calling booth
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,go left
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,get off the carpet
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,get off the track
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,get out
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,go up
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,go left and then go up
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,climb the stairs
+legend_of_zelda,legend_of_zelda_links_awakening,interaction,push the heavy stone
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,finish dialogue
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,head to the grass
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,head to the grass 2
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,go right
+legend_of_zelda,legend_of_zelda_links_awakening,interaction,finish dialogue
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,jump
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,jump2
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,die
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,go
+legend_of_zelda,legend_of_zelda_links_awakening,navigation,go near sign then go up
+legend_of_zelda,legend_of_zelda_links_awakening,navigation + interaction,read sign board near the potholes
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go to other people
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,interaction,talk to the girl after start
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,jump from flowers
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,interaction,talk to farmer
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go inside the library
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation + interaction,go inside the library and talk to parrot
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,fall from the bridge
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,hang out and watch the water
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,interaction,read the signboard outside horror villlage
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go inside the shop
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation + interaction,talk to the shop person
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go to the girl house
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation + interaction,go to the girl house and move pots
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go inside the old man's tunnel
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,interaction,talk to the artist
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go to the chicken house
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,traverse the jiggly path
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,interaction,talk to the fairy
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,interaction,interact with the thing
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,inventory,open inventory
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,interaction,read signboard outside clock tower
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,climb stairs
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation + interaction,go to girl's house and talk to her
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go to the entr
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go to the pier
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,visit cat
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,interaction,say meow
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,interaction,talk to owner
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,walk the bridge
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go see the dog
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go left
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,step off the grass
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go left then up
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go up then left
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go right
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go inside joystick house
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go near red snake
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go near blue snake
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,interaction,red snake talk
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,interaction,blue snake talk
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,interaction,go read the blue book
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,interaction,go read the red book
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go to the lava floor
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go off track then go down
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go left into the gloomy place
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,interaction,die
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,get off green carpet
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go up then alley
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go down near holes
+legend_of_zelda,legend_of_zelda_the_oracle_of_seasons,navigation,go left then attack the bush then bridge
+pokemon,pokemon_red,navigation,Enter the Pokemon Center
+pokemon,pokemon_red,navigation,Exit the cave using the exit on the bottom right
+pokemon,pokemon_red,interaction,Speak to Bill
+pokemon,pokemon_red,interaction,Pick up the item
+pokemon,pokemon_red,"navigation, interaction",Read the sign below you
+pokemon,pokemon_red,"navigation, interaction",Speak to the aide inside the gym
+pokemon,pokemon_red,combat,Defeat Gym Leader Brock
+pokemon,pokemon_red,combat,Defeat Trainer Lass
+pokemon,pokemon_red,"catch_pokemon, combat",Catch Pidgey
+pokemon,pokemon_red,"catch_pokemon, combat",Catch Pikachu
+pokemon,pokemon_red,menu,Open the Map
+pokemon,pokemon_red,menu,Use a Potion on Charmander
+pokemon,pokemon_red,"navigation, menu, interaction",Buy a Potion
+runes_of_virtue,runes_of_virtue_1,menu,Open the inventory menu
+runes_of_virtue,runes_of_virtue_1,dialog,Talk to the king for the first time
+runes_of_virtue,runes_of_virtue_1,dialog,Talk to Chuckles
+runes_of_virtue,runes_of_virtue_1,dialog,Talk to Gnu Gnu at the 1st store
+runes_of_virtue,runes_of_virtue_1,dialog,Talk to Gnu Gnu at the 2nd store
+runes_of_virtue,runes_of_virtue_1,dialog,Talk to Sherry
+runes_of_virtue,runes_of_virtue_1,navigation,Enter the Cavern of Hatred
+runes_of_virtue,runes_of_virtue_1,navigation,Enter the Cavern of Deceit
+runes_of_virtue,runes_of_virtue_1,navigation,Enter the Cavern of Cowardice
+runes_of_virtue,runes_of_virtue_1,navigation,Cavern of Cowardice enter floor 2
+runes_of_virtue,runes_of_virtue_1,navigation,Cavern of Cowardice enter floor 3
+runes_of_virtue,runes_of_virtue_1,interaction,Cavern of Cowardice floor 3 open chest
+runes_of_virtue,runes_of_virtue_1,navigation,Cavern of Cowardice enter floor 4
+runes_of_virtue,runes_of_virtue_1,dialog,Cavern of Cowardice talk to sherry floor 4
+runes_of_virtue,runes_of_virtue_1,interaction,Cavern of Cowardice take stew floor 4
+runes_of_virtue,runes_of_virtue_1,interaction,Cavern of Cowardice obtain coin floor 4
+runes_of_virtue,runes_of_virtue_1,dialog,Cavern of Deceit Talk to Dr. Cat
+runes_of_virtue,runes_of_virtue_1,dialog,Talk to Dr. Cat in the Cat's Lair
+runes_of_virtue,runes_of_virtue_1,interaction,Cavern of Hatred open chest floor 1
+runes_of_virtue,runes_of_virtue_1,navigation,Cavern of Hatred enter floor 2
+runes_of_virtue,runes_of_virtue_1,dialog,Cavern of Hatred Talk to Sherry Floor 2
+runes_of_virtue,runes_of_virtue_1,dialog,Cavern of Hatred Choose Door with Sherry
+runes_of_virtue,runes_of_virtue_1,dialog,Cavern of Hatred Choose Right Door and Talk with Melissa
+runes_of_virtue,runes_of_virtue_1,navigation,Cavern of Hatred enter floor 3
+runes_of_virtue,runes_of_virtue_1,navigation,Cavern of Hatred enter floor 4
+runes_of_virtue,runes_of_virtue_1,navigation,Ride the ship
+runes_of_virtue,runes_of_virtue_1,navigation,Unlock the basement ladder
+runes_of_virtue,runes_of_virtue_1,interaction,Open the basement chest
+runes_of_virtue,runes_of_virtue_1,interaction,Access the telescope
+runes_of_virtue,runes_of_virtue_1,survival,Die
+runes_of_virtue,runes_of_virtue_2,menu,Open the inventory menu
+runes_of_virtue,runes_of_virtue_2,interaction,Read a book
+runes_of_virtue,runes_of_virtue_2,dialog,Talk to Nystul
+runes_of_virtue,runes_of_virtue_2,dialog,Talk to blacksmith and fail to buy shield
+runes_of_virtue,runes_of_virtue_2,dialog,Talk to Sherry the mouse
+runes_of_virtue,runes_of_virtue_2,dialog,Talk to Sandy the cook
+runes_of_virtue,runes_of_virtue_2,dialog,Talk to Lord Whitsaber
+runes_of_virtue,runes_of_virtue_2,navigation,Enter the Cave of Dishonour
+runes_of_virtue,runes_of_virtue_2,navigation,Cave of Dishonour enter floor 2
+runes_of_virtue,runes_of_virtue_2,navigation,Cave of Dishonour enter floor 3
+runes_of_virtue,runes_of_virtue_2,interaction,Grab cheese from kitchen
+runes_of_virtue,runes_of_virtue_2,interaction,Give cheese to Sherry
+runes_of_virtue,runes_of_virtue_2,navigation,Climb ladder behind locked door
+runes_of_virtue,runes_of_virtue_2,interaction,Interact with map on the table
+runes_of_virtue,runes_of_virtue_2,navigation,Find a ladder back from the castle
+runes_of_virtue,runes_of_virtue_2,navigation,Enter the Cavern of Hatred
+runes_of_virtue,runes_of_virtue_2,interaction,Unlock gate 1 in the Cavern of Hatred
+runes_of_virtue,runes_of_virtue_2,navigation,Cavern of Hatred enter blocked room
+runes_of_virtue,runes_of_virtue_2,navigation,Enter Cave of Hatred ladder room 2
+runes_of_virtue,runes_of_virtue_2,navigation,Cavern of Hatred enter floor 3
+runes_of_virtue,runes_of_virtue_2,interaction,Cavern of Hatred grab key
+runes_of_virtue,runes_of_virtue_2,navigation,Castle of Hatred enter floor 4
+runes_of_virtue,runes_of_virtue_2,navigation,Cavern of Hatred enter floor 5
+runes_of_virtue,runes_of_virtue_2,navigation,Cavern of Hatred enter floor 6
+runes_of_virtue,runes_of_virtue_2,navigation,Cavern of Hatred enter floor 7
+runes_of_virtue,runes_of_virtue_2,interaction,Unlock door and save Tholden
+runes_of_virtue,runes_of_virtue_2,navigation,Find a ladder out of Cavern of Hatred
+runes_of_virtue,runes_of_virtue_2,interaction,Bring Tholden back to king
+runes_of_virtue,runes_of_virtue_2,interaction,Attend the ceremony in the castle
+runes_of_virtue,runes_of_virtue_2,survival,Die
+survival_kids,survival_kids_1,menu,Open the inventory
+survival_kids,survival_kids_1,interaction,Pick up the item
+survival_kids,survival_kids_1,interaction,Find the bag
+survival_kids,survival_kids_1,interaction,Pick up the stick
+survival_kids,survival_kids_1,interaction,Pick up the tree bark
+survival_kids,survival_kids_1,interaction,Pick up the bird feather
+survival_kids,survival_kids_1,"menu, interaction",Choose the knife
+survival_kids,survival_kids_1,"menu, interaction",Equip the knife
+survival_kids,survival_kids_1,"menu, survival",Make kindling from the inventory
+survival_kids,survival_kids_1,"menu, interaction",Drop trash from the inventory
+survival_kids,survival_kids_1,"menu, survival",Select kindling from the inventory
+survival_kids,survival_kids_1,"menu, survival",Use kindling
+survival_kids,survival_kids_1,survival,Light a fire with kindling
+survival_kids,survival_kids_1,"menu, survival",Open the inventory after lighting a fire
+survival_kids,survival_kids_1,"menu, survival",Enter Items after lighting a fire
+survival_kids,survival_kids_1,"menu, survival",Select meat from the inventory
+survival_kids,survival_kids_1,"menu, survival",Select Burn on the meat
+survival_kids,survival_kids_1,"menu, survival",Confirm burning the meat
+survival_kids,survival_kids_1,survival,Cook the meat over the fire
+survival_kids,survival_kids_1,"menu, survival",Open the cooked meat action menu
+survival_kids,survival_kids_1,survival,Store the cooked meat
+survival_kids,survival_kids_1,"menu, survival",Select Eat on the cooked meat
+survival_kids,survival_kids_1,survival,Eat the cooked meat
+survival_kids,survival_kids_1,interaction,Cut grass
+survival_kids,survival_kids_1,"interaction, menu",Select Take from the item menu
+survival_kids,survival_kids_1,"interaction, menu",Select Take from the clam menu
+survival_kids,survival_kids_1,interaction,Pick up the clam
+survival_kids,survival_kids_1,interaction,Pick up the canteen
+survival_kids,survival_kids_1,"interaction, menu",Select Take from the canteen menu
+survival_kids,survival_kids_1,"menu, survival",Choose the canteen
+survival_kids,survival_kids_1,"menu, survival",Open the canteen action menu
+survival_kids,survival_kids_1,"menu, survival",Select Use on the canteen
+survival_kids,survival_kids_1,"menu, survival",Select Drink on the canteen
+survival_kids,survival_kids_1,survival,Drink from the canteen
+survival_kids,survival_kids_1,navigation,Clear the first blocked path
+survival_kids,survival_kids_1,navigation,Enter the shelter after clearing grass
+survival_kids,survival_kids_1,navigation,Find the river
+survival_kids,survival_kids_1,navigation,Enter the shelter
+survival_kids,survival_kids_1,survival,Reach daytime
+survival_kids,survival_kids_1,survival,Reach nighttime
+survival_kids,survival_kids_1,"interaction, survival",Open the water menu
+survival_kids,survival_kids_1,survival,Drink water from the water menu
+survival_kids,survival_kids_1,survival,Start filling water from the water menu
+survival_kids,survival_kids_1,survival,Get water from the water menu
+survival_kids,survival_kids_1,"interaction, menu",Select Take from the feather menu
+survival_kids,survival_kids_1,"menu, survival",Open the meat action menu
+survival_kids,survival_kids_1,combat,Hunt the animal
+survival_kids,survival_kids_1,"menu, survival",Open the merge menu
+survival_kids,survival_kids_1,"interaction, menu",Open the canteen take or leave menu
+survival_kids,survival_kids_1,"interaction, menu",Open the feather take or leave menu
+survival_kids,survival_kids_2,interaction,Find the hidden bag
+survival_kids,survival_kids_2,menu,Open the inventory
+survival_kids,survival_kids_2,"menu, interaction",Choose the knife
+survival_kids,survival_kids_2,"menu, interaction",Equip the knife
+survival_kids,survival_kids_2,interaction,Pick up the stick
+survival_kids,survival_kids_2,interaction,Cut grass
+survival_kids,survival_kids_2,interaction,Cut grass before the sharp stone
+survival_kids,survival_kids_2,navigation,Find the sharp stone
+survival_kids,survival_kids_2,interaction,Pick up the sharp stone
+survival_kids,survival_kids_2,interaction,Pick up the stone
+survival_kids,survival_kids_2,interaction,Pick up the vine
+survival_kids,survival_kids_2,navigation,Clear the first blocked path
+survival_kids,survival_kids_2,navigation,Move past the cleared grass
+survival_kids,survival_kids_2,navigation,Find the first new path
+survival_kids,survival_kids_2,navigation,Find the second new path
+survival_kids,survival_kids_2,navigation,Find the river
+survival_kids,survival_kids_2,navigation,Enter the shelter
+survival_kids,survival_kids_2,survival,Reach afternoon
+survival_kids,survival_kids_2,survival,Reach daytime
+survival_kids,survival_kids_2,survival,Reach nighttime
+survival_kids,survival_kids_2,"menu, interaction",Enter Items from the inventory
+survival_kids,survival_kids_2,interaction,Find the helmet
+survival_kids,survival_kids_2,interaction,Find the fruit
+survival_kids,survival_kids_2,"interaction, menu",Open the fruit action menu
+survival_kids,survival_kids_2,"interaction, menu",Select Eat on the fruit
+survival_kids,survival_kids_2,interaction,Pick up the fruit
+survival_kids,survival_kids_2,survival,Eat the fruit
+survival_kids,survival_kids_2,survival,Recover hunger by eating fruit
+survival_kids,survival_kids_2,interaction,Pick up the tree bark
+survival_kids,survival_kids_2,navigation,Move past the cleared C1 grass
+survival_kids,survival_kids_2,navigation,Enter shelter after C1 grass
+survival_kids,survival_kids_2,"interaction, survival",Find water
+survival_kids,survival_kids_2,menu,Open the inventory with club
+survival_kids,survival_kids_2,"menu, interaction",Select the club
+survival_kids,survival_kids_2,"menu, interaction",Equip the club
+survival_kids,survival_kids_2,navigation,Approach the pry stone
+survival_kids,survival_kids_2,interaction,Open the pry stone dialogue
+survival_kids,survival_kids_2,"menu, interaction",Open inventory near the pry stone with club
+survival_kids,survival_kids_2,"menu, interaction",Select the club near the pry stone
+survival_kids,survival_kids_2,"menu, interaction",Equip the club near the pry stone
+survival_kids,survival_kids_2,navigation,Move to the path after prying the stone
+survival_kids,survival_kids_2,interaction,Cut grass before the push stone
+survival_kids,survival_kids_2,navigation,Approach the second push stone
+survival_kids,survival_kids_2,interaction,Open the second push stone dialogue
+survival_kids,survival_kids_2,"menu, interaction",Open inventory near the second push stone with club
+survival_kids,survival_kids_2,interaction,Push open the second stone
+survival_kids,survival_kids_2,navigation,Move to the path after pushing the second stone
+survival_kids,survival_kids_2,interaction,Cut grass before the log
+survival_kids,survival_kids_2,interaction,Find the log
+survival_kids,survival_kids_2,interaction,Pick up the log
+sword_of_hope,sword_of_hope_1,navigation,Reach the first adjacent room from the start state
+sword_of_hope,sword_of_hope_1,navigation,Navigate from the Old Man's Room to the Shaman's House
+sword_of_hope,sword_of_hope_1,dialogue,Clear the active dialogue box and return control to the player
+sword_of_hope,sword_of_hope_1,combat,Finish a battle encounter without a game over
+sword_of_hope,sword_of_hope_1,interaction,Look at an object in the environment to discover a hidden item
+sword_of_hope,sword_of_hope_1,"menu, interaction",Buy equipment or supplies from a shop
+sword_of_hope,sword_of_hope_1,"navigation, progression",From default reach a stable overworld position with no open dialogue or menu
+sword_of_hope,sword_of_hope_1,interaction,Talk to an NPC or interactable and advance one full dialogue page
+sword_of_hope,sword_of_hope_1,menu,Open the command menu and close it to return to exploration
+sword_of_hope,sword_of_hope_1,"combat, menu",During battle choose a non-default command such as item spell or defend
+sword_of_hope,sword_of_hope_1,menu,Cast Teleport to return to a previously visited location
+sword_of_hope,sword_of_hope_1,interaction,Talk to an NPC multiple times to trigger a progression event
+sword_of_hope,sword_of_hope_1,dialogue,Make a binary dialogue choice that affects the outcome
+sword_of_hope,sword_of_hope_1,interaction,Look at surroundings to reveal a previously hidden path
+sword_of_hope,sword_of_hope_1,combat,Defeat a boss using offensive magic spells (Treant with Firebal2)
+sword_of_hope,sword_of_hope_1,interaction,Open a chest / collect a quest item (Scroll of Grace from backroom)
+sword_of_hope,sword_of_hope_1,"menu, interaction",Use a key or quest item to unlock passage to a new area
+sword_of_hope,sword_of_hope_1,menu,Cast a quest spell at a specific location to trigger a story event (Grace at Martel altar -> Charm)
+sword_of_hope,sword_of_hope_1,menu,Cast Teleport to return to a previously visited location (full completion - arrival)
+sword_of_hope,sword_of_hope_1,"combat, menu",Escape from a battle using the Escape command
+sword_of_hope,sword_of_hope_2,dialogue,Clear the active dialogue box and return control to the player
+sword_of_hope,sword_of_hope_2,interaction,Talk to an NPC or interactable and advance one full dialogue page
+sword_of_hope,sword_of_hope_2,menu,Open the command menu and close it to return to exploration
+sword_of_hope,sword_of_hope_2,navigation,Reach the first adjacent room from the start state
+sword_of_hope,sword_of_hope_2,"navigation, progression",From default reach a stable overworld position with no open dialogue or menu
+sword_of_hope,sword_of_hope_2,combat,Finish a battle encounter without a game over
+sword_of_hope,sword_of_hope_2,"combat, menu",Escape from a battle using the Flee command
+sword_of_hope,sword_of_hope_2,"menu, interaction",Open a shop's buy menu
+sword_of_hope,sword_of_hope_2,"menu, interaction",Buy Wheat from a shop
+sword_of_hope,sword_of_hope_2,"combat, menu",During battle choose Magic command (submenu opens)
+sword_of_hope,sword_of_hope_2,menu,Cast Motion magic from overworld at lvl 2
+sword_of_hope,sword_of_hope_2,"menu, interaction",Buy CPR Sword from Weapons Shop via Look-shopkeeper-Buy chain
+sword_of_hope,sword_of_hope_2,"combat, menu",Navigate cursor to AUTO command in battle row
+sword_of_hope,sword_of_hope_2,interaction,Hit a tree at Riccar Woods [A4] until Wheat is received
+sword_of_hope,sword_of_hope_2,"menu, interaction",Open Item submenu and reach the Use action (Item -> Use chain)
+sword_of_hope,sword_of_hope_2,"menu, interaction",Use Wheat from inventory
+sword_of_hope,sword_of_hope_2,"menu, interaction",View Theo's stats and reach EXP-to-level-up page
+sword_of_hope,sword_of_hope_2,"menu, navigation",Navigate cursor onto LOOK in command grid
+sword_of_hope,sword_of_hope_2,"menu, navigation",Navigate cursor onto ITEM in command grid
+sword_of_hope,sword_of_hope_2,"menu, navigation",Navigate cursor onto OPEN in command grid
+sword_of_hope,sword_of_hope_2,"menu, navigation",Navigate cursor onto MAGIC in command grid
+sword_of_hope,sword_of_hope_2,"menu, navigation",Navigate cursor onto HIT in command grid
+sword_of_hope,sword_of_hope_2,"menu, navigation",Cycle cursor through all 6 commands in order
+sword_of_hope,sword_of_hope_1,"menu, interaction",Open the shop buy menu (shorter scope than purchase)
+sword_of_hope,sword_of_hope_1,"menu, navigation",Select the LOOK command in the command grid
+sword_of_hope,sword_of_hope_1,menu,Open the command menu from exploration
+sword_of_hope,sword_of_hope_1,menu,Open the Magic spell list from the overworld
+sword_of_hope,sword_of_hope_1,interaction,Initiate an NPC dialogue (shorter scope than advancing)
+sword_of_hope,sword_of_hope_1,"menu, navigation",Navigate cursor onto LOOK in command grid
+sword_of_hope,sword_of_hope_1,"menu, navigation",Navigate cursor onto OPEN in command grid
+sword_of_hope,sword_of_hope_1,"menu, navigation",Navigate cursor onto USE in command grid
+sword_of_hope,sword_of_hope_1,"menu, navigation",Navigate cursor onto MAGIC in command grid
+sword_of_hope,sword_of_hope_1,"menu, navigation",Navigate cursor onto HIT in command grid
+sword_of_hope,sword_of_hope_1,"menu, navigation",Navigate cursor onto POWER in command grid
+sword_of_hope,sword_of_hope_1,"menu, navigation",Cycle cursor through all 6 commands in order (LOOK->OPEN->USE->MAGIC->HIT->POWER)
+sword_of_hope,sword_of_hope_1,"menu, interaction",Open Power stats menu to first stats page (HP/MP/etc)
+sword_of_hope,sword_of_hope_1,"combat, menu",Navigate cursor to AUTO command in battle row
+sword_of_hope,sword_of_hope_1,"menu, reasoning",Open Magic submenu and back out without casting (menu-cancel reasoning)
+sword_of_hope,sword_of_hope_1,"menu, reasoning",Open Power menu first stats page and close back to exploration
+sword_of_hope,sword_of_hope_1,"menu, reasoning",Open Teleport destination list and cancel back to exploration
+sword_of_hope,sword_of_hope_1,"menu, reasoning",Open shop buy menu and exit without purchasing
+sword_of_hope,sword_of_hope_1,"menu, reasoning",Look at target options and back out without choosing
+sword_of_hope,sword_of_hope_1,"combat, reasoning",Open battle Magic submenu and cancel back to battle command
+sword_of_hope,sword_of_hope_1,"menu, navigation",Cycle cursor all the way around back to LOOK via POWER (wrap-around)
+sword_of_hope,sword_of_hope_1,"menu, navigation",Navigate cursor to POWER via MAGIC (lower-row constrained path)
+sword_of_hope,sword_of_hope_1,"combat, menu",In battle Magic submenu cursor on Firebal spell specifically (battle-only spell)
+sword_of_hope,sword_of_hope_1,"combat, menu",In battle Magic submenu cursor on Firebal2 spell specifically (battle-only spell)
+sword_of_hope,sword_of_hope_1,"combat, menu",In battle Magic submenu cursor on Stripall debuff spell specifically
+sword_of_hope,sword_of_hope_1,"combat, reasoning",In battle Magic submenu navigate cursor to Stripall then back out without casting
+sword_of_hope,sword_of_hope_1,"menu, interaction",In Teleport destination list cursor on Old Man's House specifically
+sword_of_hope,sword_of_hope_1,"menu, interaction",In Use submenu cursor on Herb inventory item specifically
+sword_of_hope,sword_of_hope_1,"menu, interaction",In Use submenu cursor on Key M inventory item specifically
+sword_of_hope,sword_of_hope_1,"menu, navigation, reasoning",View Power stats last page then Teleport to Old Man's House (3-subgoal composite)
+sword_of_hope,sword_of_hope_2,"menu, navigation",Navigate cursor onto POWER in command grid
+sword_of_hope,sword_of_hope_2,"menu, interaction",Open Power stats menu to first stats page (HP/MP)
+sword_of_hope,sword_of_hope_2,menu,Open the Magic submenu from exploration
+sword_of_hope,sword_of_hope_2,"menu, interaction",Open the Item submenu (inventory view) from exploration
+sword_of_hope,sword_of_hope_2,"interaction, menu",Look at the weapons-shop shopkeeper to engage interaction
+sword_of_hope,sword_of_hope_2,"menu, interaction",Reach the weapons shop BUY item list from the shopkeeper interaction
+sword_of_hope,sword_of_hope_2,"menu, navigation",Navigate the cursor onto CPR Sword in the weapons shop item list
+sword_of_hope,sword_of_hope_2,"menu, interaction",Open the Use submenu after selecting Wheat in inventory
+sword_of_hope,sword_of_hope_2,"menu, interaction",Reach the BUY/SELL choice menu after engaging the weapons shopkeeper
+sword_of_hope,sword_of_hope_2,"menu, navigation",Navigate the cursor onto Wheat in the Item submenu
+sword_of_hope,sword_of_hope_2,"combat, menu",Navigate the cursor onto CLASH in the battle command row
+sword_of_hope,sword_of_hope_2,navigation,Reach Ancient Temple 1F from outside the temple entrance (story event #1)
+sword_of_hope,sword_of_hope_2,"menu, reasoning",Open Magic submenu and cancel back to exploration without casting
+sword_of_hope,sword_of_hope_2,"menu, reasoning",Open Item inventory submenu and cancel back to exploration
+sword_of_hope,sword_of_hope_2,"menu, reasoning",Open shop buy menu and exit without purchasing
+sword_of_hope,sword_of_hope_2,"menu, reasoning",Reach weapons shop BUY item list then cancel back to exploration
+sword_of_hope,sword_of_hope_2,"menu, reasoning",Look at the weapons-shop shopkeeper then back out without engaging
+sword_of_hope,sword_of_hope_2,"combat, navigation",In battle navigate cursor AUTO -> CLASH (reverse selection)
+sword_of_hope,sword_of_hope_2,"combat, navigation",In battle navigate cursor CLASH -> AUTO (forward selection)
+sword_of_hope,sword_of_hope_2,"menu, interaction, hard",In Magic submenu choose Theo then cursor on Motion spell (lvl-2 overworld spell)
+sword_of_hope,sword_of_hope_2,"menu, interaction, hard",In shop buy list cursor on first item entry (full_screen capture)
+sword_of_hope,sword_of_hope_2,"menu, interaction, hard",In shop buy list cursor on third item entry (must traverse from first)
+sword_of_hope,sword_of_hope_2,"menu, interaction, hard",In weapons shop cursor on first weapon (Knife)
+sword_of_hope,sword_of_hope_2,"menu, interaction, hard",In weapons shop cursor on second weapon (Rapier) - single step from first
+sword_of_hope,sword_of_hope_2,"menu, interaction, hard",In weapons shop cursor on third weapon (CPR Sword) - traverse first and second
+sword_of_hope,sword_of_hope_2,"interaction, menu, hard",Use LOOK then cursor on TREE target in target list
+sword_of_hope,sword_of_hope_2,"menu, navigation, reasoning, hard",View Power stats first then exp page then cast Motion (3-subgoal composite)
