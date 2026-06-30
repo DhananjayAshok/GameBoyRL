@@ -712,6 +712,54 @@
             cursor: pointer;
         }
 
+        /* ── Results chart (leaderboard) ────────────────────────────── */
+        .results-chart-wrap {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .results-chart-canvas-wrap {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, .08);
+            padding: 1.5rem 1.5rem 1rem;
+            opacity: 1;
+        }
+
+        .results-series-tabs {
+            margin-top: 1.5rem;
+        }
+
+        .results-series-tabs .tabs {
+            overflow-x: auto;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .results-series-tabs .tabs ul {
+            border-bottom: none;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .results-series-tabs .tabs li {
+            margin: 0.2rem;
+        }
+
+        .results-series-tabs .tabs li a {
+            border-radius: 999px;
+            border-color: #dbe2ee;
+            color: #333;
+            transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+
+        .results-series-tabs .tabs li.is-active a {
+            background-color: #3273dc;
+            border-color: #3273dc;
+            color: #fff;
+            font-weight: 600;
+        }
+
         /* ── Task explorer (GameBoyWorlds benchmark browser) ───────── */
         .task-explorer {
             display: flex;
@@ -1217,788 +1265,142 @@
 
 
     <!-- ════════════════════════════════════════════════════════════
-     PEARSON'S CORRELATION (REWARD MODEL EVALUATION)
+     LEADERBOARD – TASK SUCCESS RATE BAR CHART
 ════════════════════════════════════════════════════════════ -->
     <section class="section is-white-alt" id="leaderboard">
         <div class="container">
             <h2 class="section-heading">Leaderboard</h2>
             <div class="section-divider"></div>
-
-            <h3 class="title is-5" style="margin-top:0;margin-bottom:1rem;text-align:center;color:#1a1a2e;">
-                Video-language Reward Confusion Matrix</h3>
-            <div class="result-card" style="margin-bottom:2rem;">
-                <img src="assets/images/robometer_confusionmatrix.png" alt="Failure detection confusion matrix"
-                    style="width:100%; display:block; border-radius:8px 8px 0 0;">
-                <div class="card-caption"><strong>Video-language reward confusion matrix.</strong> For each task (unseen
-                    data), we score all video–instruction pairs. Robometer yields the most diagonal matrix, indicating
-                    strong alignment between demos and instructions. Values are column-normalized diagonal means
-                    (fraction of reward on aligned pairs).</div>
-            </div>
-            <hr class="offline-eval-separator" aria-hidden="true">
-
-            <!-- Qualitative plots -->
-            <h3 class="title is-5" style="margin-top:2.5rem;text-align:center;color:#1a1a2e;">Qualitative Reward Curves
-            </h3>
-            <p style="text-align:center;color:#555;margin-bottom:1.5rem;font-size:0.95rem;">
-                Reward curves predicted by Robometer and ablated variants on example trajectories.
+            <p
+                style="text-align:center; color:#555; margin-bottom:1.5rem; max-width:650px; margin-left:auto; margin-right:auto;">
+                Task success rates (%) for frontier models on the GameBoyWorlds benchmark. Select a game series below,
+                and hover any bar for the exact model, game title, and success rate.
             </p>
-            <div class="columns">
-                <div class="column is-12">
-                    <div class="result-card">
-                        <img src="assets/images/qualitative_plots.png" alt="Qualitative reward plots"
-                            style="width:100%; display:block; border-radius:8px 8px 0 0;">
-                        <div class="card-caption">Qualitative reward curves across expert, suboptimal, and failed
-                            trajectories.
-                            Robometer predictions reflect subtle failures and best align with true progress.
-                        </div>
-                    </div>
+            <div class="results-chart-wrap">
+                <div class="results-chart-canvas-wrap">
+                    <canvas id="results-chart" height="120"></canvas>
+                </div>
+                <div class="results-series-tabs">
+                    <ul class="tabs is-centered is-toggle is-medium" id="results-series-tab-list"></ul>
                 </div>
             </div>
-            <hr class="offline-eval-separator" aria-hidden="true">
-
-            <h3 class="title is-5" style="margin-top:2.5rem;margin-bottom:1rem;text-align:center;color:#1a1a2e;">
-                Quantitative Reward Evaluations</h3>
-            <div class="offline-eval-tabs" style="margin-top:0;">
-                <div class="tabs is-centered is-medium is-toggle" style="margin-bottom:1.5rem;">
-                    <ul id="offline-eval-tab-list">
-                        <li class="is-active" data-offline-tab="voc-ranking"><a>VOC + Trajectory Ranking</a></li>
-                        <li data-offline-tab="roborewardbench"><a>RoboRewardBench</a></li>
-                        <li data-offline-tab="preference-accuracy"><a>Preference Accuracy</a></li>
-                    </ul>
-                </div>
-
-                <!-- Tab: VOC + Trajectory Ranking -->
-                <div id="offline-tab-voc-ranking" class="offline-eval-tab-panel is-active">
-                    <div class="highlight-box is-info-light" style="margin-bottom:1.5rem;">
-                        <strong>Setting.</strong>
-                        Reward alignment is measured with Value Order Correlation (VOC Pearson $r$) between predicted
-                        rewards and ground-truth progress; trajectory ranking is measured with Kendall $\tau$ on
-                        RBM-EVAL (in-distribution and out-of-distribution). We compare baselines (GVL, VLAC,
-                        RoboDopamine, TOPReward), models trained on RoboReward data, and ReWiND / Robometer on full
-                        RBM-1M.
-                    </div>
-                    <div class="results-table"
-                        style="margin-bottom:1rem; overflow-x:auto; max-width:1400px; margin-left:auto; margin-right:auto;">
-                        <table class="table is-fullwidth is-bordered is-hoverable" style="min-width:800px;">
-                            <thead>
-                                <tr>
-                                    <th rowspan="2">Dataset</th>
-                                    <th colspan="4">Baselines</th>
-                                    <th colspan="3">w/ RoboReward Training Data</th>
-                                    <th colspan="2">w/ our RBM-1M data</th>
-                                </tr>
-                                <tr>
-                                    <th>GVL</th>
-                                    <th>VLAC</th>
-                                    <th>RoboDopamine-8B</th>
-                                    <th>TOPReward</th>
-                                    <th>RoboReward-4B</th>
-                                    <th>RoboReward-8B</th>
-                                    <th>Robometer</th>
-                                    <th>ReWiND</th>
-                                    <th>Robometer</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr class="separator-row">
-                                    <td colspan="10"><strong>(a) Reward alignment (VOC Pearson $r$) ↑</strong></td>
-                                </tr>
-                                <tr>
-                                    <td>RBM-EVAL-ID</td>
-                                    <td>0.16</td>
-                                    <td>0.16</td>
-                                    <td>0.79</td>
-                                    <td>0.42</td>
-                                    <td>0.77</td>
-                                    <td>0.82</td>
-                                    <td>0.84</td>
-                                    <td>0.46</td>
-                                    <td class="ours best"><strong>0.92</strong></td>
-                                </tr>
-                                <tr>
-                                    <td>RBM-EVAL-OOD</td>
-                                    <td>0.21</td>
-                                    <td>0.17</td>
-                                    <td>0.80</td>
-                                    <td>0.40</td>
-                                    <td>0.88</td>
-                                    <td>0.88</td>
-                                    <td>0.93</td>
-                                    <td>0.51</td>
-                                    <td class="ours best"><strong>0.94</strong></td>
-                                </tr>
-                                <tr class="separator-row">
-                                    <td colspan="10"><strong>(b) Trajectory ranking (Kendall $\tau$) ↑</strong></td>
-                                </tr>
-                                <tr>
-                                    <td>RBM-EVAL-OOD</td>
-                                    <td>0.19</td>
-                                    <td>0.08</td>
-                                    <td>0.45</td>
-                                    <td>0.13</td>
-                                    <td>0.50</td>
-                                    <td>0.47</td>
-                                    <td>0.55</td>
-                                    <td>0.01</td>
-                                    <td class="ours best"><strong>0.64</strong></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <p class="results-table-caption" style="max-width:1400px;margin-left:auto;margin-right:auto;">
-                        (a) <b>Reward alignment</b> (VOC Pearson $r$) and (b) <b>trajectory ranking</b> (Kendall
-                        $\tau_a$) on RBM-EVAL. Baselines by training data: GVL (w/ GPT-5-mini, unknown data), VLAC (300k
-                        trajectories), RoboDopamine (100k), TOPReward (Qwen3-VL-8B) We compare Robometer to
-                        RoboReward-4B/8B on their data, and ReWiND and Robometer on the full RBM-1M dataset.
-                    </p>
-                    <p style="text-align:center;margin-bottom:1rem;">
-                        <button type="button" class="button is-small is-light" id="toggle-full-eval"
-                            aria-expanded="false">Show full per-dataset results</button>
-                    </p>
-                    <div id="full-eval-panels" style="display:none;">
-                        <div class="eval-tabs" style="margin-bottom:1.5rem;">
-                            <div class="tabs is-centered is-medium is-toggle">
-                                <ul id="eval-split-tab-list">
-                                    <li class="is-active" data-eval-tab="id"><a>RBM-EVAL-ID</a></li>
-                                    <li data-eval-tab="ood"><a>RBM-EVAL-OOD</a></li>
-                                </ul>
-                            </div>
-                        </div>
-
-                        <!-- Panel: RBM-EVAL-ID -->
-                        <div id="eval-panel-id" class="eval-tab-panel is-active">
-                            <div class="results-table" style="margin-bottom:2rem; overflow-x:auto;">
-                                <table class="table is-fullwidth is-bordered is-hoverable">
-                                    <thead>
-                                        <tr>
-                                            <th rowspan="2">Dataset</th>
-                                            <th colspan="4">Baselines</th>
-                                            <th colspan="3">w/ RoboReward Training Data</th>
-                                            <th colspan="2">w/ our RBM-1M data</th>
-                                        </tr>
-                                        <tr>
-                                            <th>GVL</th>
-                                            <th>VLAC-8B</th>
-                                            <th>RoboDopamine-8B</th>
-                                            <th>TOPReward</th>
-                                            <th>RoboReward-4B</th>
-                                            <th>RoboReward-8B</th>
-                                            <th>Robometer</th>
-                                            <th>ReWiND</th>
-                                            <th>Robometer</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr>
-                                            <td>RACER</td>
-                                            <td>0.131</td>
-                                            <td>0.156</td>
-                                            <td>0.752</td>
-                                            <td>0.239</td>
-                                            <td>0.491</td>
-                                            <td>0.652</td>
-                                            <td>0.937</td>
-                                            <td>0.561</td>
-                                            <td class="ours best"><strong>0.950</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>OXE (BC-Z)</td>
-                                            <td>0.142</td>
-                                            <td>−0.150</td>
-                                            <td>0.767</td>
-                                            <td>0.413</td>
-                                            <td>0.643</td>
-                                            <td class="best">0.809</td>
-                                            <td>0.683</td>
-                                            <td>0.442</td>
-                                            <td class="ours">0.785</td>
-                                        </tr>
-                                        <tr>
-                                            <td>OXE (Berkeley Cable Routing)</td>
-                                            <td>0.075</td>
-                                            <td>−0.425</td>
-                                            <td>0.728</td>
-                                            <td>0.151</td>
-                                            <td>0.657</td>
-                                            <td>0.801</td>
-                                            <td>0.900</td>
-                                            <td>0.491</td>
-                                            <td class="ours best"><strong>0.915</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>OXE (Bridge V2)</td>
-                                            <td>0.143</td>
-                                            <td>−0.875</td>
-                                            <td>0.830</td>
-                                            <td>0.427</td>
-                                            <td>0.891</td>
-                                            <td class="best">0.898</td>
-                                            <td>0.633</td>
-                                            <td>0.526</td>
-                                            <td class="ours">0.878</td>
-                                        </tr>
-                                        <tr>
-                                            <td>OXE (Jaco Play)</td>
-                                            <td>0.114</td>
-                                            <td>−0.151</td>
-                                            <td>0.873</td>
-                                            <td>0.499</td>
-                                            <td>0.793</td>
-                                            <td>0.785</td>
-                                            <td>0.861</td>
-                                            <td>0.550</td>
-                                            <td class="ours best"><strong>0.894</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>OXE (Toto)</td>
-                                            <td>0.254</td>
-                                            <td>−0.416</td>
-                                            <td>0.732</td>
-                                            <td>0.734</td>
-                                            <td>0.886</td>
-                                            <td>0.939</td>
-                                            <td>0.947</td>
-                                            <td>0.340</td>
-                                            <td class="ours best"><strong>0.973</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>OXE (Viola)</td>
-                                            <td>0.264</td>
-                                            <td>0.479</td>
-                                            <td>0.750</td>
-                                            <td>0.463</td>
-                                            <td>0.915</td>
-                                            <td>0.896</td>
-                                            <td>0.967</td>
-                                            <td>−0.014</td>
-                                            <td class="ours best"><strong>0.988</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>Metaworld</td>
-                                            <td>0.134</td>
-                                            <td>0.211</td>
-                                            <td>0.773</td>
-                                            <td>0.238</td>
-                                            <td>0.746</td>
-                                            <td>0.779</td>
-                                            <td>0.737</td>
-                                            <td>0.630</td>
-                                            <td class="ours best"><strong>0.929</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>Libero (90)</td>
-                                            <td>0.254</td>
-                                            <td>0.217</td>
-                                            <td>0.876</td>
-                                            <td>0.586</td>
-                                            <td>0.874</td>
-                                            <td>0.846</td>
-                                            <td>0.912</td>
-                                            <td>0.592</td>
-                                            <td class="ours best"><strong>0.962</strong></td>
-                                        </tr>
-                                        <tr class="ours">
-                                            <td><strong>Average</strong></td>
-                                            <td>0.168</td>
-                                            <td>0.089</td>
-                                            <td>0.787</td>
-                                            <td>0.417</td>
-                                            <td>0.766</td>
-                                            <td>0.823</td>
-                                            <td>0.842</td>
-                                            <td>0.458</td>
-                                            <td class="best"><strong>0.919</strong></td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-
-                        <!-- Panel: RBM-EVAL-OOD (Pearson + Kendall) -->
-                        <div id="eval-panel-ood" class="eval-tab-panel">
-                            <div class="results-table" style="margin-bottom:2rem; overflow-x:auto;">
-                                <table class="table is-fullwidth is-bordered is-hoverable">
-                                    <thead>
-                                        <tr>
-                                            <th rowspan="2">Dataset</th>
-                                            <th colspan="4">Baselines</th>
-                                            <th colspan="3">w/ RoboReward Training Data</th>
-                                            <th colspan="2">w/ our RBM-1M data</th>
-                                        </tr>
-                                        <tr>
-                                            <th>GVL</th>
-                                            <th>VLAC-8B</th>
-                                            <th>RoboDopamine-8B</th>
-                                            <th>TOPReward</th>
-                                            <th>RoboReward-4B</th>
-                                            <th>RoboReward-8B</th>
-                                            <th>Robometer</th>
-                                            <th>ReWiND</th>
-                                            <th>Robometer</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr>
-                                            <td>USC Franka</td>
-                                            <td>0.102</td>
-                                            <td>0.356</td>
-                                            <td>0.842</td>
-                                            <td>0.480</td>
-                                            <td>0.909</td>
-                                            <td>0.909</td>
-                                            <td class="best">0.959</td>
-                                            <td>0.772</td>
-                                            <td class="ours">0.949</td>
-                                        </tr>
-                                        <tr>
-                                            <td>USC Koch</td>
-                                            <td>0.176</td>
-                                            <td>0.074</td>
-                                            <td>0.847</td>
-                                            <td>0.384</td>
-                                            <td>0.866</td>
-                                            <td>0.916</td>
-                                            <td class="best">0.969</td>
-                                            <td>0.585</td>
-                                            <td class="ours">0.967</td>
-                                        </tr>
-                                        <tr>
-                                            <td>USC Trossen</td>
-                                            <td>0.542</td>
-                                            <td>0.256</td>
-                                            <td>0.647</td>
-                                            <td>0.390</td>
-                                            <td>0.781</td>
-                                            <td>0.726</td>
-                                            <td class="best">0.925</td>
-                                            <td>0.226</td>
-                                            <td class="ours">0.910</td>
-                                        </tr>
-                                        <tr>
-                                            <td>USC xArm</td>
-                                            <td>0.282</td>
-                                            <td>0.454</td>
-                                            <td>0.840</td>
-                                            <td>0.160</td>
-                                            <td>0.896</td>
-                                            <td>0.914</td>
-                                            <td>0.951</td>
-                                            <td>0.435</td>
-                                            <td class="ours best"><strong>0.980</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>MIT Franka</td>
-                                            <td>0.268</td>
-                                            <td>0.601</td>
-                                            <td>0.733</td>
-                                            <td>0.471</td>
-                                            <td>0.896</td>
-                                            <td>0.899</td>
-                                            <td>0.868</td>
-                                            <td>0.531</td>
-                                            <td class="ours best"><strong>0.945</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>UT Dallas SO101</td>
-                                            <td>0.203</td>
-                                            <td>0.511</td>
-                                            <td>0.868</td>
-                                            <td>0.497</td>
-                                            <td>0.926</td>
-                                            <td class="best">0.930</td>
-                                            <td>0.888</td>
-                                            <td>0.497</td>
-                                            <td class="ours">0.916</td>
-                                        </tr>
-                                        <tr class="ours">
-                                            <td><strong>Average</strong></td>
-                                            <td>0.262</td>
-                                            <td>0.375</td>
-                                            <td>0.796</td>
-                                            <td>0.397</td>
-                                            <td>0.879</td>
-                                            <td>0.882</td>
-                                            <td>0.927</td>
-                                            <td>0.508</td>
-                                            <td class="best"><strong>0.94</strong></td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                            <h3 class="title is-5"
-                                style="margin-top:2rem;margin-bottom:1rem;text-align:center;color:#1a1a2e;">Kendall's
-                                $\tau$ (out-of-distribution)</h3>
-                            <p style="text-align:center;color:#555;margin-bottom:1rem;font-size:0.9rem;">Kendall's rank
-                                correlation. Higher is better.</p>
-                            <div class="results-table" style="margin-bottom:2rem; overflow-x:auto;">
-                                <table class="table is-fullwidth is-bordered is-hoverable">
-                                    <thead>
-                                        <tr>
-                                            <th rowspan="2">Dataset</th>
-                                            <th colspan="5">Baselines</th>
-                                            <th colspan="3">w/ RoboReward Training Data</th>
-                                            <th colspan="2">w/ our RBM-1M data</th>
-                                        </tr>
-                                        <tr>
-                                            <th>GVL</th>
-                                            <th>VLAC-2B</th>
-                                            <th>VLAC-8B</th>
-                                            <th>RoboDopamine-8B</th>
-                                            <th>TOPReward</th>
-                                            <th>RoboReward-4B</th>
-                                            <th>RoboReward-8B</th>
-                                            <th>Robometer</th>
-                                            <th>ReWiND</th>
-                                            <th>Robometer</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr>
-                                            <td>USC Franka</td>
-                                            <td>0.250</td>
-                                            <td>0.292</td>
-                                            <td>0.271</td>
-                                            <td>0.479</td>
-                                            <td>0.167</td>
-                                            <td>0.625</td>
-                                            <td>0.625</td>
-                                            <td>0.583</td>
-                                            <td>−0.125</td>
-                                            <td class="ours best"><strong>0.625</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>USC Koch</td>
-                                            <td>−0.008</td>
-                                            <td>0.167</td>
-                                            <td>0.064</td>
-                                            <td>0.442</td>
-                                            <td>0.183</td>
-                                            <td>0.332</td>
-                                            <td>0.264</td>
-                                            <td class="best">0.533</td>
-                                            <td>0.336</td>
-                                            <td class="ours">0.477</td>
-                                        </tr>
-                                        <tr>
-                                            <td>USC Trossen</td>
-                                            <td>0.292</td>
-                                            <td>−0.111</td>
-                                            <td>−0.417</td>
-                                            <td>0.333</td>
-                                            <td>−0.292</td>
-                                            <td>0.333</td>
-                                            <td>0.389</td>
-                                            <td class="best">0.646</td>
-                                            <td>0.028</td>
-                                            <td class="ours">0.569</td>
-                                        </tr>
-                                        <tr>
-                                            <td>USC xArm</td>
-                                            <td>0.056</td>
-                                            <td>0.167</td>
-                                            <td>0.139</td>
-                                            <td>0.431</td>
-                                            <td>−0.111</td>
-                                            <td>0.528</td>
-                                            <td>0.347</td>
-                                            <td>0.403</td>
-                                            <td>−0.167</td>
-                                            <td class="ours best"><strong>0.750</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>MIT Franka</td>
-                                            <td>0.306</td>
-                                            <td>−0.017</td>
-                                            <td>0.072</td>
-                                            <td>0.333</td>
-                                            <td>0.286</td>
-                                            <td>0.494</td>
-                                            <td>0.396</td>
-                                            <td>0.479</td>
-                                            <td>0.080</td>
-                                            <td class="ours best"><strong>0.572</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>UT Dallas SO101</td>
-                                            <td>0.300</td>
-                                            <td>−0.033</td>
-                                            <td>0.167</td>
-                                            <td>0.700</td>
-                                            <td>0.533</td>
-                                            <td>0.700</td>
-                                            <td>0.767</td>
-                                            <td>0.667</td>
-                                            <td>−0.067</td>
-                                            <td class="ours best"><strong>0.867</strong></td>
-                                        </tr>
-                                        <tr class="ours">
-                                            <td><strong>Average</strong></td>
-                                            <td>0.199</td>
-                                            <td>0.077</td>
-                                            <td>0.049</td>
-                                            <td>0.453</td>
-                                            <td>0.128</td>
-                                            <td>0.502</td>
-                                            <td>0.465</td>
-                                            <td>0.552</td>
-                                            <td>0.014</td>
-                                            <td class="best"><strong>0.643</strong></td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-
-                    </div><!-- #full-eval-panels -->
-                </div><!-- end offline-tab-voc-ranking -->
-
-                <!-- Tab: RoboRewardBench -->
-                <div id="offline-tab-roborewardbench" class="offline-eval-tab-panel">
-                    <div class="highlight-box is-info-light" style="margin-bottom:1.5rem;">
-                        <strong>Setting.</strong>
-                        We evaluate on the <a href="https://arxiv.org/abs/2601.00675" target="_blank"
-                            rel="noopener">RoboRewardBench</a> benchmark: mean absolute error (MAE) between predicted
-                        rewards and human-annotated progress labels. Lower is better.
-                    </div>
-                    <div class="results-table"
-                        style="margin-bottom:1rem; overflow-x:auto; max-width:720px; margin-left:auto; margin-right:auto;">
-                        <table class="table is-fullwidth is-bordered is-hoverable" style="min-width:480px;">
-                            <thead>
-                                <tr>
-                                    <th>Model Type</th>
-                                    <th>Model</th>
-                                    <th>RoboRewardBench MAE &darr;</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td rowspan="4" style="vertical-align:middle; font-weight:600;">Qwen3-4B Models</td>
-                                    <td>Robometer (ours)</td>
-                                    <td class="best"><strong>0.72</strong></td>
-                                </tr>
-                                <tr>
-                                    <td>Robometer (RoboReward data only)</td>
-                                    <td>0.75</td>
-                                </tr>
-                                <tr>
-                                    <td>RoboReward-4B</td>
-                                    <td>0.85</td>
-                                </tr>
-                                <tr>
-                                    <td>Qwen3-VL-4B-Instr.</td>
-                                    <td>1.03</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <p class="results-table-caption" style="max-width:720px;margin-left:auto;margin-right:auto;">
-                        Evaluation on the <b><a href="https://arxiv.org/abs/2601.00675">RoboRewardBench</a>
-                            benchmark</b> (mean absolute error, lower is better).
-                    </p>
-                </div><!-- end offline-tab-roborewardbench -->
-
-                <!-- Tab: Preference Accuracy -->
-                <div id="offline-tab-preference-accuracy" class="offline-eval-tab-panel">
-                    <div class="highlight-box is-info-light" style="margin-bottom:1.5rem;">
-                        <strong>Setting.</strong>
-                        We compare Robometer to RL-VLM-F on pairwise preference accuracy over 500 comparisons per
-                        RBM-EVAL-OOD dataset: (i) <em>Different Quality</em> — same task, different trajectory quality;
-                        (ii) <em>Different Task</em> — different tasks, model must prefer the trajectory matching the
-                        instruction.
-                    </div>
-                    <div class="columns" style="align-items:flex-start;gap:1.5rem;">
-                        <div class="column is-6">
-                            <p class="has-text-weight-semibold"
-                                style="margin-bottom:0.75rem;color:#1a1a2e;text-align:center;">Different Quality</p>
-                            <div class="results-table" style="overflow-x:auto;">
-                                <table class="table is-fullwidth is-bordered is-hoverable">
-                                    <thead>
-                                        <tr>
-                                            <th>Dataset</th>
-                                            <th>RL-VLM-F (%)</th>
-                                            <th>Robometer (%)</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr>
-                                            <td>USC Franka</td>
-                                            <td>52.1</td>
-                                            <td class="best"><strong>75.0</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>USC Koch</td>
-                                            <td>54.4</td>
-                                            <td class="best"><strong>79.4</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>USC Trossen</td>
-                                            <td>66.7</td>
-                                            <td class="best"><strong>76.2</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>USC xArm</td>
-                                            <td>48.6</td>
-                                            <td class="best"><strong>88.9</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>MIT Franka</td>
-                                            <td>54.4</td>
-                                            <td class="best"><strong>85.4</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>UT Dallas SO-101</td>
-                                            <td>56.7</td>
-                                            <td class="best"><strong>90.0</strong></td>
-                                        </tr>
-                                        <tr class="ours">
-                                            <td><strong>Average</strong></td>
-                                            <td>55.5</td>
-                                            <td class="best"><strong>82.5</strong></td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                            <p class="is-size-6" style="color:#666;margin-top:0.5rem;text-align:center;">Different
-                                quality trajectory pairwise preference accuracy.</p>
-                        </div>
-                        <div class="column is-6">
-                            <p class="has-text-weight-semibold"
-                                style="margin-bottom:0.75rem;color:#1a1a2e;text-align:center;">Different task</p>
-                            <div class="results-table" style="overflow-x:auto;">
-                                <table class="table is-fullwidth is-bordered is-hoverable">
-                                    <thead>
-                                        <tr>
-                                            <th>Dataset</th>
-                                            <th>RL-VLM-F (%)</th>
-                                            <th>Robometer (%)</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr>
-                                            <td>USC Franka</td>
-                                            <td>70.7</td>
-                                            <td class="best"><strong>100.0</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>USC Koch</td>
-                                            <td>54.7</td>
-                                            <td class="best"><strong>89.8</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>USC Trossen</td>
-                                            <td>64.0</td>
-                                            <td class="best"><strong>99.0</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>USC xArm</td>
-                                            <td>73.3</td>
-                                            <td class="best"><strong>98.2</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>MIT Franka</td>
-                                            <td>55.3</td>
-                                            <td class="best"><strong>98.4</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>UT Dallas SO-101</td>
-                                            <td>72.7</td>
-                                            <td class="best"><strong>100.0</strong></td>
-                                        </tr>
-                                        <tr class="ours">
-                                            <td><strong>Average</strong></td>
-                                            <td>65.1</td>
-                                            <td class="best"><strong>97.6</strong></td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                            <p class="is-size-6" style="color:#666;margin-top:0.5rem;text-align:center;">Different task
-                                trajectory pairwise preference accuracy.</p>
-                        </div>
-                    </div>
-                </div><!-- end offline-tab-preference-accuracy -->
-            </div><!-- end offline-eval-tabs -->
-            <hr class="offline-eval-separator" aria-hidden="true">
-
-            <!-- Reward curves by task (video) -->
-            <h3 class="title is-5" style="margin-top:2.5rem;text-align:center;color:#1a1a2e;">Reward curves by task</h3>
-            <p style="text-align:center;color:#555;margin-bottom:1.25rem;font-size:0.95rem;">Select a task to view the
-                reward curve video.</p>
-            <div class="reward-curves-viewer" style="max-width:900px;margin:0 auto 2rem;">
-                <div class="reward-curves-controls"
-                    style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:1rem;margin-bottom:1.5rem;padding:1rem;background:#f7f9fc;border-radius:10px;">
-                    <label
-                        style="display:flex;align-items:center;gap:0.5rem;font-size:0.9rem;font-weight:600;color:#333;">
-                        Task
-                        <div class="select is-small">
-                            <select id="reward-curves-task">
-                                <option value="">— Select —</option>
-                            </select>
-                        </div>
-                    </label>
-                </div>
-                <div class="result-card" style="overflow:hidden;">
-                    <video id="reward-curves-video" controls muted playsinline preload="metadata"
-                        style="width:100%;display:block;border-radius:8px 8px 0 0;vertical-align:top;background:#f5f5f5;">
-                        <source id="reward-curves-video-src" src="" type="video/mp4">
-                    </video>
-                </div>
-            </div>
-            <script>
-                (function () {
-                    var BASE = 'assets/reward_curves';
-                    var taskSelect = document.getElementById('reward-curves-task');
-                    var video = document.getElementById('reward-curves-video');
-                    var videoSrc = document.getElementById('reward-curves-video-src');
-                    function filenameToLabel(filename) {
-                        var name = filename.replace(/\.mp4$/i, '').replace(/_/g, ' ');
-                        return name;
-                    }
-                    function updateVideo() {
-                        var filename = taskSelect.value;
-                        if (!filename) {
-                            videoSrc.src = '';
-                            video.style.display = 'none';
-                            return;
-                        }
-                        videoSrc.src = BASE + '/' + encodeURIComponent(filename);
-                        video.style.display = 'block';
-                        video.load();
-                        function tryPlay() {
-                            var p = video.play();
-                            if (p && p.catch) p.catch(function () { });
-                        }
-                        video.addEventListener('canplay', tryPlay, { once: true });
-                        if (video.readyState >= 2) tryPlay();
-                    }
-                    taskSelect.addEventListener('change', updateVideo);
-                    fetch(BASE + '/config.json').then(function (r) { return r.json(); }).then(function (filenames) {
-                        if (!filenames || !filenames.length) return;
-                        filenames.forEach(function (filename) {
-                            if (!/\.mp4$/i.test(filename)) return;
-                            var o = document.createElement('option');
-                            o.value = filename;
-                            o.textContent = filenameToLabel(filename);
-                            taskSelect.appendChild(o);
-                        });
-                        taskSelect.value = filenames[0];
-                        updateVideo();
-                    }).catch(function () {
-                        var fallback = ['stack_the_red_cube_on_the_gray_cube.mp4'];
-                        fallback.forEach(function (filename) {
-                            var o = document.createElement('option');
-                            o.value = filename;
-                            o.textContent = filenameToLabel(filename);
-                            taskSelect.appendChild(o);
-                        });
-                        taskSelect.value = fallback[0];
-                        updateVideo();
-                    });
-                })();
-            </script>
-
         </div>
     </section>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <script src="assets/results_data.js"></script>
+    <script>
+        (function () {
+            var DATA = window.RESULTS_DATA;
+            if (!DATA) return;
+
+            var tabList = document.getElementById('results-series-tab-list');
+            var canvas = document.getElementById('results-chart');
+            var canvasWrap = canvas.parentElement;
+            var chart = null;
+
+            function hexToRgb(hex) {
+                hex = hex.replace('#', '');
+                return {
+                    r: parseInt(hex.substring(0, 2), 16),
+                    g: parseInt(hex.substring(2, 4), 16),
+                    b: parseInt(hex.substring(4, 6), 16)
+                };
+            }
+
+            function shade(hex, ratio) {
+                var c = hexToRgb(hex);
+                var r = Math.round(c.r + (255 - c.r) * ratio);
+                var g = Math.round(c.g + (255 - c.g) * ratio);
+                var b = Math.round(c.b + (255 - c.b) * ratio);
+                return 'rgb(' + r + ',' + g + ',' + b + ')';
+            }
+
+            var TINTS = [0, 0.38, 0.62, 0.8];
+
+            function buildChartData(series) {
+                var labels = DATA.models.map(function (m) { return m.name; });
+                var datasets = series.games.map(function (game, gameIdx) {
+                    var colors = DATA.models.map(function (m) {
+                        var base = DATA.providerColors[m.provider] || '#999999';
+                        return shade(base, TINTS[gameIdx % TINTS.length]);
+                    });
+                    return {
+                        label: game.name,
+                        data: DATA.models.map(function (m) { return series.rates[game.id][m.id]; }),
+                        backgroundColor: colors,
+                        borderRadius: 4,
+                        maxBarThickness: 46
+                    };
+                });
+                return { labels: labels, datasets: datasets };
+            }
+
+            function renderSeries(series) {
+                var chartData = buildChartData(series);
+                if (chart) chart.destroy();
+                canvasWrap.style.opacity = 0;
+                chart = new Chart(canvas, {
+                    type: 'bar',
+                    data: chartData,
+                    options: {
+                        responsive: true,
+                        animation: { duration: 650, easing: 'easeOutQuart' },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 100,
+                                title: { display: true, text: 'Task success rate (%)' }
+                            },
+                            x: {
+                                grid: { display: false }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                                labels: { usePointStyle: true, pointStyle: 'rect' }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    title: function (items) {
+                                        return items[0].label;
+                                    },
+                                    label: function (ctx) {
+                                        return ctx.dataset.label + ': ' + ctx.parsed.y + '% success';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+                requestAnimationFrame(function () {
+                    canvasWrap.style.transition = 'opacity 0.35s ease-out';
+                    canvasWrap.style.opacity = 1;
+                });
+            }
+
+            function selectSeries(li, series) {
+                var prev = tabList.querySelector('li.is-active');
+                if (prev) prev.classList.remove('is-active');
+                li.classList.add('is-active');
+                renderSeries(series);
+            }
+
+            DATA.series.forEach(function (series, idx) {
+                var li = document.createElement('li');
+                if (idx === 0) li.classList.add('is-active');
+                var a = document.createElement('a');
+                a.textContent = series.name;
+                li.appendChild(a);
+                li.addEventListener('click', function () { selectSeries(li, series); });
+                tabList.appendChild(li);
+
+                if (idx === 0) renderSeries(series);
+            });
+        })();
+    </script>
+
 
     <!-- ════════════════════════════════════════════════════════════
      DATASET — RBM-1M
@@ -2865,40 +2267,6 @@
                 /* activate clicked tab */
                 this.classList.add('is-active');
                 document.getElementById('tab-' + this.dataset.tab).style.display = 'block';
-            });
-        });
-
-        /* Toggle full per-dataset eval tables */
-        (function () {
-            var btn = document.getElementById('toggle-full-eval');
-            var panel = document.getElementById('full-eval-panels');
-            if (btn && panel) {
-                btn.addEventListener('click', function () {
-                    var isOpen = panel.style.display === 'block';
-                    panel.style.display = isOpen ? 'none' : 'block';
-                    btn.textContent = isOpen ? 'Show full per-dataset results' : 'Hide full per-dataset results';
-                    btn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
-                });
-            }
-        })();
-
-        /* Offline eval tabs (VOC+Ranking, RoboRewardBench, Preference Accuracy) */
-        document.querySelectorAll('#offline-eval-tab-list li').forEach(function (li) {
-            li.addEventListener('click', function () {
-                document.querySelectorAll('#offline-eval-tab-list li').forEach(function (el) { el.classList.remove('is-active'); });
-                document.querySelectorAll('.offline-eval-tab-panel').forEach(function (el) { el.classList.remove('is-active'); });
-                this.classList.add('is-active');
-                document.getElementById('offline-tab-' + this.dataset.offlineTab).classList.add('is-active');
-            });
-        });
-
-        /* Eval split tabs (RBM-EVAL-ID / OOD) */
-        document.querySelectorAll('#eval-split-tab-list li').forEach(function (li) {
-            li.addEventListener('click', function () {
-                document.querySelectorAll('#eval-split-tab-list li').forEach(function (el) { el.classList.remove('is-active'); });
-                document.querySelectorAll('.eval-tab-panel').forEach(function (el) { el.classList.remove('is-active'); });
-                this.classList.add('is-active');
-                document.getElementById('eval-panel-' + this.dataset.evalTab).classList.add('is-active');
             });
         });
 
