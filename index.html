@@ -1599,29 +1599,6 @@
         })();
     </script>
 
-    <!-- ════════════════════════════════════════════════════════════
-     ABSTRACT
-════════════════════════════════════════════════════════════ -->
-    <!--<section class="section is-white-alt" id="abstract">
-  <div class="container" style="max-width:860px;">
-    <h2 class="section-heading">Abstract</h2>
-    <div class="section-divider"></div>
-    <div class="abstract-box">
-      General-purpose robot reward models are typically trained to predict absolute task progress from expert demonstrations,
-      providing only local, frame-level supervision. While effective for expert demonstrations, this paradigm scales poorly
-      to large-scale real-world robotics datasets where failed and suboptimal trajectories are abundant, and assigning dense
-      progress labels is ambiguous or ill-defined. We introduce <strong>Robometer</strong>, a scalable reward modeling
-      framework that combines intra-trajectory progress supervision with inter-trajectory preference supervision.
-      Robometer is trained with a dual objective: a <em>frame-level progress loss</em> that anchors reward magnitude on
-      expert data, and a <em>trajectory-comparison preference loss</em> that imposes global ordering constraints across
-      trajectories of the same task, enabling effective learning from suboptimal and failed trajectories. To support this
-      formulation at scale, we curate <strong>RBM-1M</strong>, a large-scale reward-learning dataset comprising over one
-      million trajectories spanning diverse robot embodiments and tasks, including substantial suboptimal and failure data.
-      Across benchmarks and real-world evaluations, Robometer learns more generalizable reward functions than prior methods
-      and improves robot learning performance across a diverse set of downstream applications.
-    </div>
-  </div>
-</section> -->
 
     <!-- ════════════════════════════════════════════════════════════
      METHOD
@@ -1670,625 +1647,183 @@
     </section>
 
     <!-- ════════════════════════════════════════════════════════════
-     EXPERIMENTS
+     RESULTS — BASE VS IMPROVED BAR CHART
 ════════════════════════════════════════════════════════════ -->
     <section class="section is-light-alt" id="results">
         <div class="container">
             <h2 class="section-heading">Results</h2>
             <div class="section-divider"></div>
-
-            <p
-                style="text-align:center;color:#555;margin-bottom:2.5rem;max-width:700px;margin-left:auto;margin-right:auto;">
-                Robometer is evaluated across five diverse downstream applications.
-                In every setting Robometer is used as a <em>plug-in</em> reward function without task-specific
-                fine-tuning.
+            <p style="text-align:center;color:#555;margin-bottom:1.5rem;max-width:650px;margin-left:auto;margin-right:auto;">
+                Task success rates (%) before and after self-improvement, broken down by game series. Select a series below.
             </p>
-
-            <!-- ── Tab navigation ── -->
-            <div class="exp-tabs">
-                <div class="tabs is-centered is-medium is-toggle">
-                    <ul id="exp-tab-list">
-                        <li class="is-active" data-tab="online-rl"><a>Online RL</a></li>
-                        <li data-tab="offline-rl"><a>Offline RL</a></li>
-                        <li data-tab="model-based-rl"><a>Model-Based RL</a></li>
-                        <li data-tab="failure-detection"><a>Failure Detection</a></li>
-                        <li data-tab="data-retrieval"><a>Data Retrieval + IL</a></li>
-                    </ul>
+            <div class="results-chart-wrap">
+                <div class="results-chart-canvas-wrap">
+                    <canvas id="improvement-chart" height="120"></canvas>
                 </div>
-
-                <!-- ── ONLINE RL ── -->
-                <div id="tab-online-rl" class="tab-content">
-
-                    <!-- Sub-tab navigation -->
-                    <div class="sub-tabs" style="margin-bottom:1.5rem;">
-                        <div class="tabs is-centered is-small is-toggle">
-                            <ul id="online-rl-sub-tab-list">
-                                <li class="is-active" data-subtab="single-stage"><a>Single-Stage RL</a></li>
-                                <li data-subtab="multi-stage"><a>Multi-Stage RL</a></li>
-                            </ul>
-                        </div>
-                    </div>
-
-                    <!-- ── Single-Stage RL ── -->
-                    <div id="subtab-single-stage" class="sub-tab-content is-active">
-                        <div class="highlight-box is-info-light" style="margin-bottom:1.5rem;">
-                            <strong>Setting.</strong>
-                            Robometer rewards are used as dense reward signals for single-stage, online reinforcement
-                            learning with <a href="https://diffusion-steering.github.io/">DSRL</a> + $\pi_0$.
-                            Successes are *automatically* detected by the reward model.
-                        </div>
-                        <div class="columns is-multiline is-centered">
-                            <div class="column is-6">
-                                <div class="result-card">
-                                    <video controls muted playsinline autoplay loop preload="metadata">
-                                        <source src="assets/online_rl/roboreward_auto_online_rl_small.mp4"
-                                            type="video/mp4">
-                                    </video>
-                                    <div class="card-caption"><b>RoboReward</b> 100x speed real world training clip.
-                                        RoboReward consistently
-                                        falsely predicts success/full reward before the robot finishes the task, leading
-                                        to poor evaluation performance.
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="column is-6">
-                                <div class="result-card">
-                                    <video controls muted playsinline autoplay loop preload="metadata">
-                                        <source src="assets/online_rl/robometer_auto_online_rl_small.mp4"
-                                            type="video/mp4">
-                                    </video>
-                                    <div class="card-caption"><b>Robometer</b> 100x speed real world training clip.
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="results-table" style="margin-bottom:1.5rem;">
-                            <table class="table is-fullwidth is-bordered is-hoverable">
-                                <thead>
-                                    <tr>
-                                        <th>Method</th>
-                                        <th>Success Rate ↑</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr>
-                                        <td>$\pi_0$ base (before RL)</td>
-                                        <td>0.20</td>
-                                    </tr>
-                                    <tr>
-                                        <td>RoboReward</td>
-                                        <td>0.55</td>
-                                    </tr>
-                                    <tr class="ours">
-                                        <td><strong>Robometer (ours) ✓</strong></td>
-                                        <td class="best">0.85</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <!-- ── Multi-Stage RL ── -->
-                    <div id="subtab-multi-stage" class="sub-tab-content">
-                        <div class="highlight-box is-info-light" style="margin-bottom:1.5rem;">
-                            <strong>Setting.</strong>
-                            Robometer rewards are used as dense reward signals for multi-stage online policy learning
-                            with <a href="https://diffusion-steering.github.io/">DSRL</a> + $\pi_0$.
-                            We perform a long-horizon, multi-stage RL task by using a VLM to break down the task into 2
-                            sub-tasks, "put the corn in the pot on the dish rack" and "put the pot lid on the pot in the
-                            dish rack".
-                            Successes and stage advancement are *automatically* detected by the reward model.
-                        </div>
-                        <div class="columns is-multiline">
-                            <div class="column is-6">
-                                <div class="result-card">
-                                    <video controls muted playsinline autoplay loop preload="metadata">
-                                        <source src="assets/online_rl/roboreward_multistage_online_rl_small.mp4"
-                                            type="video/mp4">
-                                    </video>
-                                    <div class="card-caption"><b>RoboReward</b> Multi-stage RL at 100x speed. RoboReward
-                                        is
-                                        often falsely predicts success for the first stage when the robot drops the corn
-                                        next to but not into the pot, leading to poor downstream evaluation performance
-                                        where the robot rarely puts the corn into the pot.
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="column is-6">
-                                <div class="result-card">
-                                    <video controls muted playsinline autoplay loop preload="metadata">
-                                        <source src="assets/online_rl/robometer_multistage_online_rl_small.mp4"
-                                            type="video/mp4">
-                                    </video>
-                                    <div class="card-caption"><b>Robometer</b> Multi-stage RL at 100x speed. Robometer
-                                        is
-                                        robust to when the robot drops the corn next to but not into the pot, leading to
-                                        few false stage advancements.
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="results-table" style="margin-bottom:1.5rem;">
-                            <table class="table is-fullwidth is-bordered is-hoverable">
-                                <thead>
-                                    <tr>
-                                        <th>Method</th>
-                                        <th>Success Rate ↑</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr>
-                                        <td>$\pi_0$ base (before RL)</td>
-                                        <td>0.20</td>
-                                    </tr>
-                                    <tr>
-                                        <td>RoboReward</td>
-                                        <td>0.20</td>
-                                    </tr>
-                                    <tr class="ours">
-                                        <td><strong>Robometer (ours) ✓</strong></td>
-                                        <td class="best">0.70</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
+                <div class="results-series-tabs" style="margin-top:1.5rem;">
+                    <ul class="tabs is-centered is-toggle is-medium" id="improvement-tab-list"></ul>
                 </div>
-
-                <!-- ── OFFLINE RL ── -->
-                <div id="tab-offline-rl" class="tab-content" style="display:none;">
-                    <div class="highlight-box is-info-light" style="margin-bottom:1.5rem;">
-                        <strong>Setting.</strong>
-                        Robometer rewards serve as dense feedback for offline RL with IQL on mixed-expertise data. By
-                        providing intermediate
-                        supervision, they reduce long-horizon credit assignment and enable effective trajectory
-                        stitching at lower discount
-                        factors $\gamma$; we sweep $\gamma$ for each reward model and report the best-performing
-                        configuration.
-                    </div>
-                    <div class="results-table" style="margin-bottom:1.5rem;">
-                        <table class="table is-fullwidth is-bordered is-hoverable">
-                            <thead>
-                                <tr>
-                                    <th>Task</th>
-                                    <th>Sparse</th>
-                                    <th>RoboReward</th>
-                                    <th>Robometer</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>Put the bread in the oven (Setting 1)</td>
-                                    <td>0.50</td>
-                                    <td>0.55</td>
-                                    <td class="best"><strong>0.85</strong></td>
-                                </tr>
-                                <tr>
-                                    <td>Put red bowl on the blue plate (Setting 2)</td>
-                                    <td>0.05</td>
-                                    <td>0.00</td>
-                                    <td class="best"><strong>0.15</strong></td>
-                                </tr>
-                                <tr class="ours">
-                                    <td><strong>Average</strong></td>
-                                    <td>0.275</td>
-                                    <td>0.275</td>
-                                    <td class="best"><strong>0.50</strong></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <p style="text-align:center; color:#555; margin-bottom:1rem; font-size:0.95rem;">We observe that
-                        Robometer performs best at a
-                        lower discount factor $\gamma=0.9$. Compared to sparse rewards and prior reward models,
-                        Robometer achieves up to a 2.4× higher
-                        success rate by providing temporally aligned feedback that enables more effective trajectory
-                        stitching.
-                    </p>
-                    <div class="columns">
-                        <div class="column is-6">
-                            <div class="result-card">
-                                <div style="min-height:240px;">
-                                    <video controls muted playsinline autoplay loop preload="metadata"
-                                        style="border-radius:8px 8px 0 0; width:100%;">
-                                        <source src="assets/offline_rl/setting_1.mp4" type="video/mp4">
-                                    </video>
-                                </div>
-                                <div class="card-caption">Policy trained on Robometer rewards on Setting 1.</div>
-                            </div>
-                        </div>
-                        <div class="column is-6">
-                            <div class="result-card">
-                                <div style="min-height:240px;">
-                                    <video controls muted playsinline autoplay loop preload="metadata"
-                                        style="border-radius:8px 8px 0 0; width:100%;">
-                                        <source src="assets/offline_rl/setting_2.mp4" type="video/mp4">
-                                    </video>
-                                </div>
-                                <div class="card-caption">Policy trained on Robometer rewards on Setting 2.</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ── MODEL-BASED RL ── -->
-                <div id="tab-model-based-rl" class="tab-content" style="display:none;">
-                    <div class="highlight-box is-info-light" style="margin-bottom:1.5rem;">
-                        <strong>Setting.</strong>
-                        Robometer is used as a reward model to guide model-based planning with <a
-                            href="https://dreamzero0.github.io/">DreamZero</a>
-                        via using Robometer rewards on imagined trajectories to choose the best next action chunk.
-                    </div>
-                    <div class="results-table" style="margin-bottom:1.5rem;">
-                        <table class="table is-fullwidth is-bordered is-hoverable">
-                            <thead>
-                                <tr>
-                                    <th>Method</th>
-                                    <th>Task: "Put the ice cream cone in the pink plate"</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>DreamZero Base</td>
-                                    <td>0.20</td>
-                                </tr>
-                                <tr class="ours">
-                                    <td><strong>+Robometer (ours) ✓</strong></td>
-                                    <td class="best">0.70</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="columns">
-                        <div class="column is-6">
-                            <div class="result-card">
-                                <div style="min-height:240px;">
-                                    <video controls muted playsinline autoplay loop preload="metadata"
-                                        style="border-radius:8px 8px 0 0; width:100%;">
-                                        <source src="assets/mbrl/mbrl_dreamzero.mov" type="video/mp4">
-                                    </video>
-                                </div>
-                                <div class="card-caption">Model-based planning with <b>DreamZero</b>. It mostly fails to
-                                    put the ice cream cone in the correct plate. Video plays at 30x speed.</div>
-                            </div>
-                        </div>
-                        <div class="column is-6">
-                            <div class="result-card">
-                                <div style="min-height:240px;">
-                                    <video controls muted playsinline autoplay loop preload="metadata"
-                                        style="border-radius:8px 8px 0 0; width:100%;">
-                                        <source src="assets/mbrl/mbrl_robometer.mov" type="video/mp4">
-                                    </video>
-                                </div>
-                                <div class="card-caption">Model-based planning guided by <b>Robometer</b> reward. It
-                                    successfully guides DreamZero to execute the action chunk
-                                    corresponding to putting the ice cream cone in the correct plate. Video plays at
-                                    100x speed -- inference delay comes from sampling multiple action chunks and not
-                                    from the model itself.</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ── FAILURE DETECTION ── -->
-                <div id="tab-failure-detection" class="tab-content" style="display:none;">
-                    <div class="highlight-box is-info-light" style="margin-bottom:1.5rem;">
-                        <strong>Setting.</strong>
-                        Robometer rewards are used for zero-shot failure detection on various real-world manipulation
-                        trajectories from an unseen robot platform,
-                        spanning seven tasks and including both irreversible and insufficient-progress failures.
-                        Failures are detected via temporal inconsistencies
-                        in predicted per-frame rewards. Evaluated with precision, recall and F1 against human-labeled
-                        outcomes.
-                    </div>
-                    <p style="margin-bottom:1rem;font-size:0.95rem;color:#555;">Per-task TPR, TNR, and F1 for failure
-                        detection. Best F1 per task in <span style="color:#0a6b2e;font-weight:700;">green</span>.</p>
-                    <div class="results-table" style="margin-bottom:1.5rem; overflow-x:auto;">
-                        <table class="table is-fullwidth is-bordered is-hoverable failure-detection-task-table">
-                            <thead>
-                                <tr>
-                                    <th rowspan="2">Task</th>
-                                    <th colspan="3">GPT-5-mini</th>
-                                    <th colspan="3">RoboReward-4B</th>
-                                    <th colspan="3">Robometer</th>
-                                </tr>
-                                <tr>
-                                    <th>TPR</th>
-                                    <th>TNR</th>
-                                    <th>F1</th>
-                                    <th>TPR</th>
-                                    <th>TNR</th>
-                                    <th>F1</th>
-                                    <th>TPR</th>
-                                    <th>TNR</th>
-                                    <th>F1</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>move banana</td>
-                                    <td>0.31</td>
-                                    <td>1.00</td>
-                                    <td>0.48</td>
-                                    <td>1.00</td>
-                                    <td>0.62</td>
-                                    <td>0.91</td>
-                                    <td>1.00</td>
-                                    <td>0.75</td>
-                                    <td class="best"><strong>0.94</strong></td>
-                                </tr>
-                                <tr>
-                                    <td>move mouse</td>
-                                    <td>0.80</td>
-                                    <td>1.00</td>
-                                    <td>0.89</td>
-                                    <td>0.80</td>
-                                    <td>0.75</td>
-                                    <td>0.80</td>
-                                    <td>1.00</td>
-                                    <td>0.75</td>
-                                    <td class="best"><strong>0.91</strong></td>
-                                </tr>
-                                <tr>
-                                    <td>pour pebble</td>
-                                    <td>0.14</td>
-                                    <td>1.00</td>
-                                    <td>0.25</td>
-                                    <td>0.57</td>
-                                    <td>1.00</td>
-                                    <td>0.73</td>
-                                    <td>0.71</td>
-                                    <td>1.00</td>
-                                    <td class="best"><strong>0.83</strong></td>
-                                </tr>
-                                <tr>
-                                    <td>fold towel</td>
-                                    <td>0.15</td>
-                                    <td>1.00</td>
-                                    <td>0.27</td>
-                                    <td>0.31</td>
-                                    <td>0.67</td>
-                                    <td>0.40</td>
-                                    <td>0.54</td>
-                                    <td>0.56</td>
-                                    <td class="best"><strong>0.58</strong></td>
-                                </tr>
-                                <tr>
-                                    <td>pull tissue</td>
-                                    <td>0.00</td>
-                                    <td>1.00</td>
-                                    <td>0.00</td>
-                                    <td>0.55</td>
-                                    <td>0.00</td>
-                                    <td>0.57</td>
-                                    <td>0.73</td>
-                                    <td>0.50</td>
-                                    <td class="best"><strong>0.76</strong></td>
-                                </tr>
-                                <tr>
-                                    <td>put spoon</td>
-                                    <td>0.14</td>
-                                    <td>1.00</td>
-                                    <td>0.25</td>
-                                    <td>0.57</td>
-                                    <td>1.00</td>
-                                    <td class="best"><strong>0.73</strong></td>
-                                    <td>0.57</td>
-                                    <td>1.00</td>
-                                    <td>0.73</td>
-                                </tr>
-                                <tr>
-                                    <td>stir pot</td>
-                                    <td>0.09</td>
-                                    <td>1.00</td>
-                                    <td>0.17</td>
-                                    <td>0.91</td>
-                                    <td>1.00</td>
-                                    <td class="best"><strong>0.95</strong></td>
-                                    <td>0.82</td>
-                                    <td>1.00</td>
-                                    <td>0.90</td>
-                                </tr>
-                                <tr class="ours">
-                                    <td><strong>Average</strong></td>
-                                    <td>0.20</td>
-                                    <td>1.00</td>
-                                    <td>0.33</td>
-                                    <td>0.69</td>
-                                    <td>0.63</td>
-                                    <td>0.74</td>
-                                    <td>0.77</td>
-                                    <td>0.70</td>
-                                    <td class="best"><strong>0.81</strong></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="columns is-centered" style="display: flex; flex-wrap: nowrap; gap: 0.15rem;">
-                        <div class="column" style="flex: 1;">
-                            <div class="result-card" style="height:100%;">
-                                <video controls muted playsinline autoplay loop preload="metadata"
-                                    style="border-radius:8px 8px 0 0; width:100%;">
-                                    <source src="assets/failure_detection/failure_detection_1.mp4" type="video/mp4">
-                                </video>
-                                <div class="card-caption">Robometer detects a failure when the pebbles are spilled
-                                    during pouring.</div>
-                            </div>
-                        </div>
-                        <div class="column" style="flex: 1;">
-                            <div class="result-card" style="height:100%;">
-                                <video controls muted playsinline autoplay loop preload="metadata"
-                                    style="border-radius:8px 8px 0 0; width:100%;">
-                                    <source src="assets/failure_detection/failure_detection_2.mp4" type="video/mp4">
-                                </video>
-                                <div class="card-caption">Robometer detects a failure when the spoon is dropped.</div>
-                            </div>
-                        </div>
-                        <!-- <div class="column" style="flex: 1;">
-            <div class="result-card" style="height:100%;">
-              <video controls muted playsinline preload="metadata" style="border-radius:8px 8px 0 0; width:100%;">
-                <source src="assets/failure_detection/failure_detection_3.mp4" type="video/mp4">
-              </video>
-              <div class="card-caption"><b>$\pi_{0.5}$ LoRA-finetuned on Robometer-retrieved data.</b></div>
             </div>
-          </div> -->
-                    </div>
-                </div>
-
-                <!-- ── DATA RETRIEVAL + IL ── -->
-                <div id="tab-data-retrieval" class="tab-content" style="display:none;">
-                    <div class="highlight-box is-info-light" style="margin-bottom:1.5rem;">
-                        <strong>Setting.</strong>
-                        Given a multi-task, unlabeled play dataset, Robometer retrieves the most relevant
-                        subtrajectories for a task instruction using either
-                        (i) preference-based pairwise trajectory comparisons or (ii) progress-based ranking via
-                        per-timestep reward predictions and
-                        value–order correlation.
-                    </div>
-                    <div class="result-card"
-                        style="margin-bottom:1.5rem;max-width:75%;margin-left:auto;margin-right:auto;">
-                        <img src="assets/retrieval/retrieval_setup.png"
-                            alt="Data retrieval and imitation learning results"
-                            style="width:100%; display:block; border-radius:8px 8px 0 0;">
-                    </div>
-                    <p style="text-align:center; color:#555; margin-bottom:1rem; font-size:0.95rem;">Task success rates
-                        of LoRA-finetuned $\pi_{0.5}$ on 100 retrieved segments with highest similarity.</p>
-                    <div class="results-table task-success-rates-table"
-                        style="margin-bottom:1.5rem; overflow-x:auto; max-width:75%; margin-left:auto; margin-right:auto;">
-                        <table class="table is-fullwidth is-bordered is-hoverable">
-                            <thead>
-                                <tr>
-                                    <th>Task</th>
-                                    <th>$\pi_{0.5}$ Base</th>
-                                    <th>SigLIP</th>
-                                    <th>STRAP</th>
-                                    <th>RoboReward-4B</th>
-                                    <th>Robometer-Pref</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td><strong>Stir Pot</strong></td>
-                                    <td>0/20</td>
-                                    <td>3/20</td>
-                                    <td>2/20</td>
-                                    <td>0/20</td>
-                                    <td class="best"><strong>13/20</strong></td>
-                                </tr>
-                                <tr>
-                                    <td><strong>Open Red Drawer</strong></td>
-                                    <td>0/20</td>
-                                    <td>0/20</td>
-                                    <td>3/20</td>
-                                    <td>0/20</td>
-                                    <td class="best"><strong>14/20</strong></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="columns is-multiline">
-                        <div class="column is-8">
-                            <div class="result-card">
-                                <div
-                                    style="display: flex; flex-wrap: nowrap; justify-content: space-between; align-items: flex-start;">
-                                    <img src="assets/retrieval/retrieved1.gif" alt="Stir Pot Example 1"
-                                        style="width: 32%; border-radius:8px; background:#eee;">
-                                    <img src="assets/retrieval/wrist1.gif" alt="Stir Pot Example 2"
-                                        style="width: 32%; border-radius:8px; background:#eee;">
-                                    <img src="assets/retrieval/retrieved2.gif" alt="Open Drawer Example 1"
-                                        style="width: 32%; border-radius:8px; background:#eee;">
-                                </div>
-                                <div class="card-caption">
-                                    <strong>Instruction:</strong> Open the red drawer<br>
-                                    Example retrieved subtrajectories by Robometer. Note that, this task requires 2-arm
-                                    coordination to open the drawer, with one arm pushing down on the drawer and the
-                                    other arm pulling down on the drawer handle.
-                                </div>
-                            </div>
-                        </div>
-                        <div class="column is-4">
-                            <div class="result-card">
-                                <video controls muted playsinline autoplay loop preload="metadata"
-                                    style="border-radius:8px 8px 0 0;">
-                                    <source src="assets/retrieval/open_drawer.mp4" type="video/mp4">
-                                </video>
-                                <div class="card-caption"><b>$\pi_{0.5}$ LoRA-finetuned on Robometer-retrieved data.</b>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-            </div><!-- end .exp-tabs -->
         </div>
     </section>
+
+    <script src="assets/improvement_data.js"></script>
+    <script>
+        (function () {
+            var DATA = window.IMPROVEMENT_DATA;
+            if (!DATA) return;
+
+            var tabList = document.getElementById('improvement-tab-list');
+            var canvas = document.getElementById('improvement-chart');
+            var canvasWrap = canvas.parentElement;
+            var chart = null;
+
+            function renderSeries(series) {
+                var labels = series.games.map(function (g) { return g.name; });
+                var chartData = {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Base',
+                            data: series.games.map(function (g) { return g.base; }),
+                            backgroundColor: '#94a3b8',
+                            borderRadius: 4,
+                            maxBarThickness: 52
+                        },
+                        {
+                            label: 'Improved',
+                            data: series.games.map(function (g) { return g.improved; }),
+                            backgroundColor: '#3273dc',
+                            borderRadius: 4,
+                            maxBarThickness: 52
+                        }
+                    ]
+                };
+
+                if (chart) chart.destroy();
+                canvasWrap.style.opacity = 0;
+                chart = new Chart(canvas, {
+                    type: 'bar',
+                    data: chartData,
+                    options: {
+                        responsive: true,
+                        animation: { duration: 650, easing: 'easeOutQuart' },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 100,
+                                title: { display: true, text: 'Task success rate (%)' }
+                            },
+                            x: { grid: { display: false } }
+                        },
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                                labels: { usePointStyle: true, pointStyle: 'rect' }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function (ctx) {
+                                        return ctx.dataset.label + ': ' + ctx.parsed.y + '%';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+                requestAnimationFrame(function () {
+                    canvasWrap.style.transition = 'opacity 0.35s ease-out';
+                    canvasWrap.style.opacity = 1;
+                });
+            }
+
+            function selectSeries(li, series) {
+                var prev = tabList.querySelector('li.is-active');
+                if (prev) prev.classList.remove('is-active');
+                li.classList.add('is-active');
+                renderSeries(series);
+            }
+
+            DATA.forEach(function (series, idx) {
+                var li = document.createElement('li');
+                if (idx === 0) li.classList.add('is-active');
+                var a = document.createElement('a');
+                a.textContent = series.name;
+                li.appendChild(a);
+                li.addEventListener('click', function () { selectSeries(li, series); });
+                tabList.appendChild(li);
+                if (idx === 0) renderSeries(series);
+            });
+        })();
+    </script>
 
     <!-- ════════════════════════════════════════════════════════════
-     LOW-RANK FINETUNING
+     RESULTS ROLLOUT VIEWER
 ════════════════════════════════════════════════════════════ -->
-    <section class="section is-white-alt" id="finetuning">
+    <section class="section is-white-alt" id="results-rollouts">
         <div class="container">
-            <h2 class="section-heading">Low-rank Finetuning of Robometer</h2>
+            <h2 class="section-heading">Example Rollouts</h2>
             <div class="section-divider"></div>
-
-            <p
-                style="color:#555;margin-bottom:1.5rem;max-width:640px;margin-left:auto;margin-right:auto;text-align:center;">
-                Robometer serves as a strong initialization for domain-specific reward fine-tuning: practitioners can
-                adapt it to new tasks or embodiments with limited data and compute (e.g., LoRA with a single GPU)
-                instead of training a reward model from scratch. We demonstrate this on <a
-                    href="https://huggingface.co/datasets/MINT-SJTU/RoboFAC-dataset" target="_blank"
-                    rel="noopener">RoboFAC</a>; fine-tuning from Robometer substantially outperforms fine-tuning the
-                base VLM across reward and ranking metrics.
+            <p style="text-align:center;color:#555;margin-bottom:1.5rem;max-width:600px;margin-left:auto;margin-right:auto;">
+                Watch a rollout from the base agent versus the self-improved agent on the same Pokemon Red task.
             </p>
-
-            <div class="results-table" style="margin-bottom:1.5rem; overflow-x:auto;">
-                <table class="table is-fullwidth is-bordered is-hoverable">
-                    <thead>
-                        <tr>
-                            <th>Method</th>
-                            <th>VOC $r$ ↑</th>
-                            <th>Kendall $\tau$ ↑</th>
-                            <th>Succ-Fail Diff ↑</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Robometer-4B (Zero-shot)</td>
-                            <td>0.652</td>
-                            <td>0.436</td>
-                            <td>0.141</td>
-                        </tr>
-                        <tr>
-                            <td>Qwen3-VL (LoRA)</td>
-                            <td>0.701</td>
-                            <td>0.067</td>
-                            <td>0.005</td>
-                        </tr>
-                        <tr>
-                            <td>Qwen3-VL (Full FT)</td>
-                            <td>0.727</td>
-                            <td>0.102</td>
-                            <td>0.008</td>
-                        </tr>
-                        <tr>
-                            <td>Robometer-4B (LoRA)</td>
-                            <td>0.875</td>
-                            <td>0.786</td>
-                            <td>0.271</td>
-                        </tr>
-                        <tr class="ours">
-                            <td><strong>Robometer-4B (Full FT)</strong></td>
-                            <td class="best"><strong>0.884</strong></td>
-                            <td class="best"><strong>0.802</strong></td>
-                            <td class="best"><strong>0.302</strong></td>
-                        </tr>
-                    </tbody>
-                </table>
+            <div class="rollout-viewer" style="max-width:900px;margin:0 auto 2rem;">
+                <div class="rollout-viewer-controls"
+                    style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:1rem;margin-bottom:1.5rem;padding:1rem;background:#f7f9fc;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,.08);">
+                    <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.9rem;font-weight:600;color:#333;">
+                        Agent
+                        <div class="select is-small">
+                            <select id="results-rollout-select"></select>
+                        </div>
+                    </label>
+                </div>
+                <div class="result-card" style="overflow:hidden;width:60%;margin:0 auto;">
+                    <video id="results-rollout-video" controls muted playsinline preload="metadata"
+                        style="width:100%;display:block;border-radius:8px 8px 0 0;background:#000;">
+                        <source id="results-rollout-src" src="" type="video/mp4">
+                    </video>
+                </div>
             </div>
         </div>
     </section>
+
+    <script>
+        (function () {
+            var ROLLOUTS = [
+                { file: 'gemini_fail_catch_pidgey.mp4', label: 'Base' },
+                { file: 'gemini_success_exit_cave.mp4', label: 'Improved' }
+            ];
+            var BASE = 'assets';
+            var select = document.getElementById('results-rollout-select');
+            var video = document.getElementById('results-rollout-video');
+            var src = document.getElementById('results-rollout-src');
+
+            function updateVideo() {
+                var r = ROLLOUTS[select.selectedIndex];
+                if (!r) return;
+                src.src = BASE + '/' + encodeURIComponent(r.file);
+                video.load();
+                function tryPlay() {
+                    var p = video.play();
+                    if (p && p.catch) p.catch(function () { });
+                }
+                video.addEventListener('canplay', tryPlay, { once: true });
+                if (video.readyState >= 2) tryPlay();
+            }
+
+            ROLLOUTS.forEach(function (r, i) {
+                var o = document.createElement('option');
+                o.value = i;
+                o.textContent = r.label;
+                select.appendChild(o);
+            });
+            select.addEventListener('change', updateVideo);
+            updateVideo();
+        })();
+    </script>
+
+
+
 
 
     <!-- ════════════════════════════════════════════════════════════
@@ -2313,8 +1848,7 @@
     <footer class="footer">
         <div class="container has-text-centered">
             <p style="margin-top:0.5rem;font-size:0.85rem;">
-                Website template adapted from
-                <a href="https://robometer.github.io/" target="_blank">Robometer</a>.
+                Website template inspired by academic project pages.
             </p>
         </div>
     </footer>
