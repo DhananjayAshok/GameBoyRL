@@ -75,7 +75,7 @@ from gameboy_worlds import get_environment
 from execution.registry import AVAILABLE_EXECUTORS
 from execution.report import EnvironmentStepRecord, attach_next_frames
 from execution.supervisor import SimpleCheckerSupervisor
-from utils import log_info, log_error, VLM, HuggingFaceModel
+from utils import log_info, log_warn, log_error, VLM, HuggingFaceModel
 from vlm_scripts.attempt_tasks import _derive_hint
 
 
@@ -235,6 +235,14 @@ def _practice_episode(
     help="Number of independent attempts per task.",
 )
 @click.option(
+    "--max_total_practice_runs",
+    default=4000,
+    show_default=True,
+    help="Cap on total practice episodes (tasks x n_attempts). If tasks x n_attempts "
+    "exceeds this, n_attempts is truncated to the largest value that keeps the total "
+    "under this cap (min 1 attempt per task). Sized so a run finishes in ~5 days.",
+)
+@click.option(
     "--n_random_actions",
     default=5,
     show_default=True,
@@ -295,6 +303,7 @@ def practice_tasks_cmd(
     obj,
     guidance_path,
     n_attempts,
+    max_total_practice_runs,
     n_random_actions,
     score_mode,
     max_steps,
@@ -343,6 +352,22 @@ def practice_tasks_cmd(
         guidance_data = {str(k): v for k, v in json.load(f).items()}
 
     guidance_strs = {g: _format_guidance(rec.get("guidance", {})) for g, rec in guidance_data.items()}
+
+    # Cap the total practice loop so a run finishes in a bounded amount of wall-clock
+    # time (~5 days at current rates == ~4000 episodes). If tasks x n_attempts blows
+    # past the cap, shrink n_attempts to the largest value that keeps the total under
+    # max_total_practice_runs, keeping at least 1 attempt per task.
+    n_tasks = len(guidance_data)
+    if n_tasks > 0 and n_tasks * n_attempts > max_total_practice_runs:
+        revised_n_attempts = max(1, max_total_practice_runs // n_tasks)
+        log_warn(
+            f"Total practice episodes ({n_tasks} tasks x {n_attempts} attempts = "
+            f"{n_tasks * n_attempts}) exceeds max_total_practice_runs "
+            f"({max_total_practice_runs}). Truncating n_attempts {n_attempts} -> "
+            f"{revised_n_attempts} (new total {n_tasks * revised_n_attempts}).",
+            parameters,
+        )
+        n_attempts = revised_n_attempts
 
     all_jobs = [(g, a) for g in guidance_data for a in range(n_attempts)]
     jobs = [j for j in all_jobs if j not in done]

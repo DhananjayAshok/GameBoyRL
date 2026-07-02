@@ -1,6 +1,6 @@
 source scripts/core/utils.sh
 max_steps=2
-games=("harvest_moon_1" "harvest_moon_2" "harvest_moon_3")
+games=("survival_kids_1")
 
 models=(
     "gpt-4o-mini"

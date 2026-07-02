@@ -372,6 +372,10 @@ def attempt_tasks_cmd(
     checkpoint_json = os.path.join(out_dir, "checkpoint.json")
     checkpoint_pkl = os.path.join(out_dir, "checkpoint.pkl")
 
+    if os.path.exists(csv_path) and not overwrite:
+        log_info(f"Skipping attempts — output already exists at {csv_path}. Use --overwrite to rerun.")
+        return
+
     if os.path.exists(checkpoint_json) and not overwrite:
         with open(checkpoint_json, "r") as f:
             results = json.load(f)

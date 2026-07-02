@@ -6,7 +6,7 @@ games=("pokemon_red" "sword_of_hope_1" "sword_of_hope_2" "deja_vu_1" "deja_vu_2"
 #games=("pokemon_red")
 
 models=(
-    "google/gemini-3.1-pro-preview"
+    "Qwen/Qwen3-VL-32B-Instruct"
 )
 
 #games=()
@@ -14,7 +14,7 @@ models=(
 #    "openai/gpt-4o-mini"
 #)
 
-executors=("reflective")
+executors=("reflective" "history" "simple")
 
 for game in "${games[@]}"; do
     echo "Running benchmark for game: $game"
@@ -23,7 +23,7 @@ for game in "${games[@]}"; do
         echo "  Running benchmark for model: $model"
         for executor in "${executors[@]}"; do
             echo "    Running benchmark for executor: $executor"
-            bash scripts/benchmark.sh --game $game --executor $executor --executor_vlm_model "$model" --executor_vlm_kind openrouter --max_steps 75
+            bash scripts/benchmark.sh --game $game --executor $executor --executor_vlm_model "$model" --executor_vlm_kind vllm --max_steps 75 --regenerate true
         done
     done
 done

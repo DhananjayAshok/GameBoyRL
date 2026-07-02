@@ -189,7 +189,6 @@ def do(
         df = pd.DataFrame(results, columns=columns)
         df.to_csv(save_path, index=False)
         log_info(f"Saved benchmark results to {save_path}")
-        print(df.to_string(index=False))
 
 
 if __name__ == "__main__":
