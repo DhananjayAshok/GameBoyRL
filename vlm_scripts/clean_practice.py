@@ -312,7 +312,7 @@ def _run_filter_pass(
 
     with ThreadPoolExecutor(max_workers=effective_workers) as executor:
         future_to_job = {
-            executor.submit(_filterd_record, task, record, vlm, game, max_new_tokens):
+            executor.submit(_filter_record, task, record, vlm, game, max_new_tokens):
                 (group_idx, attempt, call_idx)
             for group_idx, attempt, call_idx, task, record in jobs
         }
