@@ -289,7 +289,10 @@ def _run_filter_pass(
     jobs = []
     missing_pkls = 0
     for _, row in successful.iterrows():
-        group_idx = str(int(row["group_idx"]))
+        # group_idx is a string id like "10_0", not a number. Do NOT int() it:
+        # int() treats underscores as digit separators (int("10_0") == 100), which
+        # mangles the pkl path (100_0.pkl) so every lookup misses.
+        group_idx = str(row["group_idx"])
         attempt = int(row["attempt"])
         pkl_path = os.path.join(practice_path, f"{group_idx}_{attempt}.pkl")
         if not os.path.exists(pkl_path):

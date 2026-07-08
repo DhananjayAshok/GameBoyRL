@@ -129,7 +129,7 @@ def _load_decisions(practice_path: str) -> dict:
         return {}
     df = pd.read_csv(path)
     return {
-        (str(int(r['group_idx'])), int(r['attempt']), int(r['call_idx'])): bool(r['accept'])
+        (str(r['group_idx']), int(r['attempt']), int(r['call_idx'])): bool(r['accept'])
         for _, r in df.iterrows()
     }
 
@@ -209,7 +209,9 @@ def create_dataset(practice_path, overwrite, safety_margin, val_frac, seed, scor
     missing_pkls = 0
     n_rejected = 0
     for _, row in tqdm(successful.iterrows(), total=len(successful), desc='episodes'):
-        group_idx = str(int(row['group_idx']))
+        # group_idx is a string id like "10_0"; int() would mangle it via underscore
+        # digit-separator parsing (int("10_0") == 100). Keep it as a raw string.
+        group_idx = str(row['group_idx'])
         attempt = int(row['attempt'])
         episode_id = (group_idx, attempt)
         pkl_path = os.path.join(practice_path, f'{group_idx}_{attempt}.pkl')

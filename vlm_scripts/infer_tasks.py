@@ -417,6 +417,35 @@ def _dedup_task_groups(trajectory_output: dict, trajectory_data_output: dict):
 
 
 # ---------------------------------------------------------------------------
+# Grouped-trajectory loading
+# ---------------------------------------------------------------------------
+
+
+def load_grouped_trajectories(path):
+    """Yield groups from a grouped-trajectory pkl, one group at a time.
+
+    Handles two on-disk formats transparently:
+      - Manifest (written by combine_grouped_trajectories.py): a list[str] of
+        paths to per-init_state grouped pkls. Each path is loaded in turn and its
+        groups yielded, so only one input file is resident at a time.
+      - Plain list[group] (written by group_trajectories.py for a single state):
+        each element is already a group and is yielded directly.
+
+    Group order is positional across the whole sequence, matching what a single
+    pickle.load of a concatenated list would have produced.
+    """
+    with open(path, "rb") as f:
+        items = pickle.load(f)
+    for item in items:
+        if isinstance(item, str):
+            with open(item, "rb") as g:
+                for group in pickle.load(g):
+                    yield group
+        else:
+            yield item
+
+
+# ---------------------------------------------------------------------------
 # Click interface
 # ---------------------------------------------------------------------------
 
@@ -507,8 +536,7 @@ def infer_task_cmd(
         trajectory_output = {}
         trajectory_data_output = {}
 
-    with open(trajectory_path, "rb") as f:
-        grouped_trajectories = pickle.load(f)
+    grouped_trajectories = load_grouped_trajectories(trajectory_path)
 
     # infer_task pipelines are independent across groups and across trajectories
     # within a group, so submit them all to one shared pool. --verbose runs
