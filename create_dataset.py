@@ -13,8 +13,8 @@ same directory (run clean_practice first):
   paraphrases.json     — {task_string: [paraphrase, ...]} used to augment train.
   clean_decisions.csv  — group_idx, attempt, call_idx, accept (bool); rows with
     accept == False are dropped from the dataset.
-Both are optional: a missing paraphrases.json means no augmentation; a missing
-clean_decisions.csv means no filtering (all calls kept). A warning is logged.
+Both are required: a missing paraphrases.json or clean_decisions.csv is an error
+(run clean_practice on the practice dir first).
 
 Output
 ------
@@ -61,7 +61,7 @@ import pandas as pd
 from PIL import Image
 from tqdm import tqdm
 
-from utils import log_info
+from utils import log_error, log_info
 
 
 HINT_RE = re.compile(r'\n?\[HINT_START\].*?\[HINT_END\]', re.DOTALL)
@@ -124,12 +124,13 @@ def _load_decisions(practice_path: str) -> dict:
     """Load clean_decisions.csv into {(group_idx, attempt, call_idx): accept_bool}."""
     path = os.path.join(practice_path, 'clean_decisions.csv')
     if not os.path.exists(path):
-        log_info(f"Warning: clean_decisions.csv not found at {path} — keeping all calls "
-                 "(run clean_practice to enable filtering).")
-        return {}
+        log_error(
+            f"clean_decisions.csv not found at {path}. Run clean_practice on this "
+            "practice dir before create_dataset."
+        )
     df = pd.read_csv(path)
     return {
-        (str(int(r['group_idx'])), int(r['attempt']), int(r['call_idx'])): bool(r['accept'])
+        (str(r['group_idx']), int(r['attempt']), int(r['call_idx'])): bool(r['accept'])
         for _, r in df.iterrows()
     }
 
@@ -138,9 +139,10 @@ def _load_paraphrases(practice_path: str) -> dict:
     """Load paraphrases.json into {task_string: [paraphrase, ...]}."""
     path = os.path.join(practice_path, 'paraphrases.json')
     if not os.path.exists(path):
-        log_info(f"Warning: paraphrases.json not found at {path} — train will not be "
-                 "augmented (run clean_practice to enable augmentation).")
-        return {}
+        log_error(
+            f"paraphrases.json not found at {path}. Run clean_practice on this "
+            "practice dir before create_dataset."
+        )
     with open(path, 'r') as f:
         return json.load(f)
 
@@ -183,7 +185,7 @@ def create_dataset(practice_path, overwrite, safety_margin, val_frac, seed, scor
     """Build train/validation VLA datasets from successful practice episodes."""
     results_csv = os.path.join(practice_path, 'results.csv')
     if not os.path.exists(results_csv):
-        raise FileNotFoundError(f"results.csv not found in {practice_path}")
+        log_error(f"results.csv not found in {practice_path}")
 
     images_dir = os.path.join(practice_path, 'images')
     train_path = os.path.join(practice_path, 'train_dataset.csv')
@@ -209,7 +211,9 @@ def create_dataset(practice_path, overwrite, safety_margin, val_frac, seed, scor
     missing_pkls = 0
     n_rejected = 0
     for _, row in tqdm(successful.iterrows(), total=len(successful), desc='episodes'):
-        group_idx = str(int(row['group_idx']))
+        # group_idx is a string id like "10_0"; int() would mangle it via underscore
+        # digit-separator parsing (int("10_0") == 100). Keep it as a raw string.
+        group_idx = str(row['group_idx'])
         attempt = int(row['attempt'])
         episode_id = (group_idx, attempt)
         pkl_path = os.path.join(practice_path, f'{group_idx}_{attempt}.pkl')

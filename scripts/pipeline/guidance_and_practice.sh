@@ -71,12 +71,18 @@ else
     practice_flags=$(args_to_flags_subset ARGS PRACTICE_TASKS_ARG_KEYS)
     bash scripts/vlm/practice_tasks.sh $practice_flags || exit 1
 
-    # practice_tasks writes to dirname(guidance_path)/practice_{executor}; clean it.
+    # practice_tasks writes to dirname(guidance_path)/practice_{executor}.
+    ARGS["practice_path"]="$(dirname "${ARGS["guidance_path"]}")/practice_${ARGS["executor"]}"
+
+    # Clean it (paraphrases + accept/reject filter), then build the train/validation
+    # CSVs from those artifacts. create_dataset requires them, so it only runs here.
     if [[ "${ARGS["do_clean"]}" == "true" || "${ARGS["do_clean"]}" == "yes" || "${ARGS["do_clean"]}" == "y" || "${ARGS["do_clean"]}" == "t" ]]; then
-        ARGS["practice_path"]="$(dirname "${ARGS["guidance_path"]}")/practice_${ARGS["executor"]}"
         clean_flags=$(args_to_flags_subset ARGS CLEAN_PRACTICE_ARG_KEYS)
         bash scripts/vlm/clean_practice.sh $clean_flags || exit 1
+
+        create_dataset_flags=$(args_to_flags_subset ARGS CREATE_DATASET_ARG_KEYS)
+        bash scripts/vlm/create_dataset.sh $create_dataset_flags || exit 1
     else
-        echo "do_clean=false: skipping clean_practice."
+        echo "do_clean=false: skipping clean_practice and create_dataset."
     fi
 fi

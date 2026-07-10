@@ -21,6 +21,7 @@ MODEL_MAP = {
     "gpt-4o-mini":                  "GPT-4o-mini",
     "qwen3-vl-235b-a22b-instruct":  "Qwen3-235B",
     "sweep_attempt-gemma-4-31b-it": "GamerBoy",
+    "qwen3-vl-32b-instruct": "Qwen3-32B"
 }
 
 GAME_MAP = {

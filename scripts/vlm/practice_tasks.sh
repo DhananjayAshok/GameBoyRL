@@ -81,6 +81,7 @@ python vlm.py \
     practice_tasks \
     --guidance_path "${ARGS["guidance_path"]}" \
     --n_attempts "${ARGS["n_attempts"]}" \
+    --max_total_practice_runs "${ARGS["max_total_practice_runs"]}" \
     --n_random_actions "${ARGS["n_random_actions"]}" \
     --max_steps "${ARGS["max_steps"]}" \
     --max_tool_calls "${ARGS["max_tool_calls"]}" \

@@ -127,3 +127,15 @@ else
 fi
 
 bash scripts/rl/group_trajectories.sh --game ${ARGS["game"]} --replay_buffer_folder $replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/${ARGS["run_name"]}/${init_state_group}/ --z_min ${ARGS["z_min"]}
+group_status=$?
+
+# Only reclaim disk once grouping has succeeded and the grouped file is on disk; the
+# replay buffers and models are just intermediate inputs to grouping, so they are safe
+# to remove afterwards. Bail without deleting if grouping failed.
+if [[ $group_status -ne 0 || ! -f "$grouped_file" ]]; then
+    echo "Grouping failed (exit $group_status) or output missing at $grouped_file; NOT clearing replay buffers/models."
+    exit $group_status
+fi
+
+echo "Grouping succeeded. Clearing replay buffers for ${ARGS["game"]}/${ARGS["run_name"]}/${init_state_group}..."
+rm -rf "$storage_dir/replay_buffers/${ARGS["game"]}/$replay_buffer_save_folder"
