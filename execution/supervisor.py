@@ -287,6 +287,11 @@ Safe success point: <frame number, or N/A if never completed or unknown>
         total = len(all_frames)
         slice_size = self._DESCRIBE_SLICE_SIZE
 
+        # Use only the last frame of each segment as the representative image.
+        # This keeps each VLM call to a single image, which is required for
+        # backends (e.g. vLLM 0.7.3) that enforce a 1-image-per-request limit.
+        # Calls are sequential (not batched) for the same reason.
+
         if total <= slice_size:
             output = self._checker_vlm.infer(
                 texts=self.DESCRIBE_SLICE_PROMPT
@@ -294,7 +299,7 @@ Safe success point: <frame number, or N/A if never completed or unknown>
                     .replace("[START_IDX]", "1")
                     .replace("[END_IDX]", str(total))
                     .replace("[TOTAL]", str(total)),
-                images=all_frames,
+                images=[all_frames[-1]],
                 max_new_tokens=self._checker_max_new_tokens,
             )
             return parse_key_value(output, "Description") or output.strip()
@@ -313,13 +318,14 @@ Safe success point: <frame number, or N/A if never completed or unknown>
             )
             segment_ranges.append((start, end))
             segment_prompts.append(prompt)
-            segment_images.append(all_frames[start:end])
+            segment_images.append([all_frames[end - 1]])  # one frame per segment
 
-        outputs = self._checker_vlm.infer(
-            texts=segment_prompts,
-            images=segment_images,
-            max_new_tokens=self._checker_max_new_tokens,
-        )
+        # Sequential calls — never batch to avoid concurrent-request issues
+        outputs = [
+            self._checker_vlm.infer(texts=prompt, images=imgs,
+                                    max_new_tokens=self._checker_max_new_tokens)
+            for prompt, imgs in zip(segment_prompts, segment_images)
+        ]
 
         segment_descriptions = []
         for (start, end), output in zip(segment_ranges, outputs):
@@ -355,8 +361,12 @@ Safe success point: <frame number, or N/A if never completed or unknown>
         # Stage 1: describe full trajectory in slices
         description = self._describe_trajectory(env_steps)
 
-        # Stage 2: judge using final k frames + full description
-        final_frames = [s.frame_after for s in env_steps[-k:]]
+        # Stage 2: judge using the single last frame + full description.
+        # Sending multiple frames to the judge triggers the vLLM 0.7.3
+        # 1-image-per-request limit; the text description already captures
+        # what happened across the trajectory, so one representative frame
+        # (the last one) is sufficient for visual grounding.
+        last_frame = [env_steps[-1].frame_after]
         goal_condition_block = (
             f"This task is considered complete if: {self._goal_condition}\n\n"
             if self._goal_condition else ""
@@ -374,7 +384,7 @@ Safe success point: <frame number, or N/A if never completed or unknown>
         )
         judge_output = self._checker_vlm.infer(
             texts=judge_prompt,
-            images=final_frames,
+            images=last_frame,
             max_new_tokens=self._checker_max_new_tokens,
         )
 

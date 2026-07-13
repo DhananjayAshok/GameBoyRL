@@ -148,9 +148,16 @@ def _derive_hint(
         )
         segment_ranges.append((start, end))
         segment_prompts.append(prompt)
-        segment_images.append(frames[start:end])
+        # vLLM supports at most 1 image per request — use the last frame of each segment
+        # as a representative snapshot of what happened in that window.
+        segment_images.append([frames[end - 1]])
 
-    outputs = vlm.infer(texts=segment_prompts, images=segment_images, max_new_tokens=max_new_tokens)
+    # vLLM 0.7.3 only supports 1 image per request and may reject concurrent
+    # multi-image batches — call one segment at a time to be safe.
+    outputs = [
+        vlm.infer(texts=prompt, images=imgs, max_new_tokens=max_new_tokens)
+        for prompt, imgs in zip(segment_prompts, segment_images)
+    ]
 
     segment_summaries = []
     for (start, end), output in zip(segment_ranges, outputs):
@@ -438,7 +445,11 @@ def attempt_tasks_cmd(
 
         for future in tqdm(as_completed(future_to_group), total=len(future_to_group), desc="Attempting tasks"):
             group_idx = future_to_group[future]
-            result_record, trajectory = future.result()
+            try:
+                result_record, trajectory = future.result()
+            except Exception as exc:
+                log_info(f"Task {group_idx} raised an exception and will be skipped: {exc}")
+                continue
             results[group_idx] = result_record
             trajectories[group_idx] = trajectory
 

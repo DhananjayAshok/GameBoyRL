@@ -124,16 +124,37 @@ def get_extra_context(
 
 
 def _parse_task_list(text: str) -> list[str]:
+    import re
     tasks = []
     in_tasks = False
-    for line in text.lower().splitlines():
+    # Patterns: "- item", "* item", "• item", "1. item", "1) item"
+    _ITEM_RE = re.compile(r'^(?:[-*•]|\d+[.):])\s+(.+)$')
+    # Headers that signal the start of the task list
+    _HEADER_RE = re.compile(r'^(tasks?(?:\s+list)?|proposed\s+tasks?)\s*:')
+    lowered = text.lower()
+    for line in lowered.splitlines():
         if "[stop]" in line:
             break
-        if line.strip().startswith("tasks:"):
+        stripped = line.strip()
+        if _HEADER_RE.match(stripped):
             in_tasks = True
             continue
-        if in_tasks and line.strip().startswith("- "):
-            tasks.append(line.strip()[2:].strip())
+        if in_tasks:
+            m = _ITEM_RE.match(stripped)
+            if m:
+                tasks.append(m.group(1).strip())
+            elif stripped and not stripped.startswith("reasoning") and in_tasks:
+                # Non-empty, non-bullet line after header — could be end of list
+                if tasks:  # stop collecting if we already have tasks and hit prose
+                    break
+    # Fallback: no header found — collect any bullet/numbered lines from the whole text
+    if not tasks:
+        for line in lowered.splitlines():
+            if "[stop]" in line:
+                break
+            m = _ITEM_RE.match(line.strip())
+            if m:
+                tasks.append(m.group(1).strip())
     return tasks
 
 
