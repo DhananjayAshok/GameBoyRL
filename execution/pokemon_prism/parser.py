@@ -54,6 +54,7 @@ class PrismActionParser:
 
     A_BUTTON: str = "__A__"
     B_BUTTON: str = "__B__"
+    START_BUTTON: str = "__START__"
 
     _STEP_MAP: Dict[str, Tuple[str, int]] = {
         "up": ("up", 1),    "u": ("up", 1),
@@ -68,6 +69,7 @@ class PrismActionParser:
 
     _A_TOKENS = frozenset({"a", "press_a", "button_a", "press a"})
     _B_TOKENS = frozenset({"b", "press_b", "button_b", "press b"})
+    _START_TOKENS = frozenset({"start", "press_start", "start_button", "press start"})
 
     def parse(self, action_str: str) -> Optional[Tuple[Any, Dict[str, Any]]]:
         """
@@ -89,6 +91,8 @@ class PrismActionParser:
             return self.A_BUTTON, {}
         if sl in self._B_TOKENS:
             return self.B_BUTTON, {}
+        if sl in self._START_TOKENS:
+            return self.START_BUTTON, {}
 
         # Semantic actions (require parens)
         if "(" not in sl or ")" not in sl:

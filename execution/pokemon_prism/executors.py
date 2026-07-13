@@ -15,6 +15,8 @@ from gameboy_worlds.interface.pokemon.actions import (
     BattleMenuAction, InteractAction, MenuAction, MoveStepsAction,
     OpenMenuAction, PassDialogueAction, PickAttackAction,
 )
+from gameboy_worlds.interface.action import LowLevelAction
+from gameboy_worlds.emulation.emulator import LowLevelActions
 from gameboy_worlds.emulation.pokemon.parsers import AgentState
 
 from execution.executor import HistoryAwareExecutor, SimpleExecutor
@@ -304,50 +306,43 @@ End with [STOP].
 # Harness executor — low-level + semantic hybrid
 # ---------------------------------------------------------------------------
 
-_HARNESS_KNOWLEDGE = """
-[POKEMON PRISM — GAME KNOWLEDGE]
-Goal: earn the Magma Badge from Brimstone City Gym (Fire-type leader Tansy).
+_HARNESS_KNOWLEDGE = """\
+[GAME REFERENCE — Pokemon Prism]
+Long-term goal: earn the Magma Badge (first Naljo gym, Brimstone City, Fire-type leader Tansy).
+Route: starting area → head SOUTH → Brimstone City → Gym.
 
-MAP:
-  Starting point (Naljo Route 1) → head SOUTH → Brimstone City
-  In Brimstone City: Gym is marked by a badge symbol.
+Navigation: walk with down/up/left/right. Enter buildings by walking into the door.
+Talk to NPCs or read signs: face them, press A (interact()).
+Text box on screen: press B (passdialogue()).
+No change after a move = wall; try a DIFFERENT direction immediately.
 
-NAVIGATION:
-  Use single-step actions (down/up/left/right) for precise control.
-  If a step produces NO change, you hit a wall — try a DIFFERENT direction.
-  To enter a building: walk directly into its door tile (no interact needed).
-  To talk to NPCs or read signs: face them, then press A.
+Menu: start opens the game menu. openmenu(pokemon/bag/trainer) opens a submenu directly.
+Battle: battlemenu(fight) → pickattack(N). Water/Rock moves beat Fire.
 
-DIALOGUE: When a text box is on screen press B to advance it.
+INVALID ACTIONS — these do not exist and will always fail:
+  locate(), check_items(), check_bag(), check_status(), look(), scan()
+[END REFERENCE]"""
 
-BATTLE (Gym):
-  Use battlemenu(fight) → pickattack(N) to attack.
-  Use Water or Rock moves — they are super-effective against Fire.
-  You cannot run from trainer battles — defeat all their Pokémon.
-  If your Pokémon is low on HP: battlemenu(bag) to use a Potion.
-
-MENUS:
-  openmenu(pokemon) to check party HP.
-  openmenu(bag)     to use items in the overworld.
-  menu(up/down/confirm/back) to navigate any open menu.
-
-STUCK RULE: If the same action gives no change twice in a row → immediately
-try a different direction or a different approach.
-[END KNOWLEDGE]
-"""
-
-_HARNESS_STEP_PROMPT = """Task: [TASK][HINT_BLOCK]
+_HARNESS_STEP_PROMPT = """\
+━━ CURRENT TASK ━━
+[TASK][HINT_BLOCK]
+━━━━━━━━━━━━━━━━━
 
 [HARNESS_KNOWLEDGE]
-Screen shown in the image. Game state: [GAME_STATE]
 
-[LAST_OUTCOME][ERROR_BLOCK][TOOL_RESULT_BLOCK]Available actions:
+Screen: see image. Game state: [GAME_STATE]
+[LAST_OUTCOME][ERROR_BLOCK][TOOL_RESULT_BLOCK]
+Actions you may use:
 [ACTION_LIST]
 
-[TOOLS_BLOCK][HISTORY_SECTION][PLAN_SECTION]Look at the screen carefully and choose ONE action.
-Reasoning: <specific reasoning about what you see and why this action>
+[TOOLS_BLOCK][HISTORY_SECTION][PLAN_SECTION]\
+CRITICAL FORMAT RULE: Your response must be EXACTLY these two lines and nothing else:
+Thought: <one short sentence about what you observe>
 Action: <one action from the list above>
-[STOP]"""
+[STOP]
+
+Do NOT write ### headers, paragraphs, or reasoning blocks. Do NOT use locate().\
+"""
 
 _HARNESS_REFLECTION_PROMPT = """Task: [TASK][HINT_BLOCK]
 
@@ -431,11 +426,12 @@ class PrismHarnessExecutor(HistoryAwareExecutor):
             "  down / up / left / right      — one step in that direction",
             "  a                             — interact / confirm (A button)",
             "  b                             — back / advance dialogue (B button)",
+            "  start                         — press Start to open/close the game menu",
             # Semantic batch moves
             "  move(down 3)                  — move N steps (1-5) in a direction",
             "  interact()                    — press A to talk or open door",
             "  passdialogue()                — press B to advance a text box",
-            "  openmenu(pokemon)             — open menu (pokemon / bag / trainer)",
+            "  openmenu(pokemon)             — open menu directly (pokemon / bag / trainer)",
         ]
         try:
             action_strs = self._get_action_strings()
@@ -460,6 +456,9 @@ class PrismHarnessExecutor(HistoryAwareExecutor):
     # ------------------------------------------------------------------
     # Context-sensitive A/B button resolution
     # ------------------------------------------------------------------
+
+    def _resolve_start(self) -> Tuple[Any, Dict[str, Any]]:
+        return LowLevelAction, {"low_level_action": LowLevelActions.PRESS_BUTTON_START}
 
     def _resolve_button(self, sentinel: str) -> Tuple[Any, Dict[str, Any]]:
         try:
@@ -494,8 +493,9 @@ class PrismHarnessExecutor(HistoryAwareExecutor):
     )
     _ACTION_TOKENS = frozenset({
         "up", "down", "left", "right", "north", "south", "east", "west",
-        "u", "d", "l", "r", "n", "s", "e", "w",
+        "u", "d", "l", "r", "n", "e", "w",
         "a", "b", "press_a", "press_b", "button_a", "button_b",
+        "start", "press_start", "start_button",
     })
 
     @staticmethod
@@ -510,27 +510,27 @@ class PrismHarnessExecutor(HistoryAwareExecutor):
 
     def _pick_action(self, vlm_output) -> Optional[str]:
         """
-        Tolerant action extractor:
-          - Handles markdown headers (### Action:) and code-block wrapping.
-          - Strips bold/italic markers (**left** → left).
+        Tolerant action extractor. Handles:
+          - New format: Thought: ... \\n Action: <token>
+          - Markdown headers: ### Action: <token>
+          - Code-block wrapping, bold/italic markers.
           - Rejects reasoning sentences masquerading as actions.
         """
         lines = vlm_output.splitlines()
         for i, line in enumerate(lines):
             cleaned = re.sub(r"^[#*\-\s]+", "", line).strip()
-            if not cleaned.lower().startswith("action:"):
+            if not re.match(r"action\s*:", cleaned, re.IGNORECASE):
                 continue
-            inline = cleaned[len("action:"):].strip().replace("[STOP]", "").strip()
-            # Strip code-fence, then all backtick/bold/italic markers (multiple passes
-            # handles orderings like ** `move(left 1)` → move(left 1))
+            colon_pos = cleaned.index(":") + 1
+            inline = cleaned[colon_pos:].strip().replace("[STOP]", "").strip()
             inline = re.sub(r"^```\w*\s*", "", inline)
             inline = re.sub(r"[`*_]", "", inline).strip()
             if inline and self._looks_like_action(inline):
                 return inline
-            # Value on following line(s) — skip fences and blank lines
+            # Value on following line(s)
             for j in range(i + 1, min(i + 5, len(lines))):
                 nxt = lines[j].strip()
-                if not nxt or nxt.startswith("```"):
+                if not nxt or nxt.startswith("```") or re.match(r"thought\s*:", nxt, re.IGNORECASE):
                     continue
                 nxt = re.sub(r"[`*_]", "", nxt.replace("[STOP]", "")).strip()
                 if nxt and self._looks_like_action(nxt):
@@ -550,6 +550,8 @@ class PrismHarnessExecutor(HistoryAwareExecutor):
                 return self._resolve_button(PrismActionParser.A_BUTTON)
             if cls == PrismActionParser.B_BUTTON:
                 return self._resolve_button(PrismActionParser.B_BUTTON)
+            if cls == PrismActionParser.START_BUTTON:
+                return self._resolve_start()
             return cls, kw
         # Fallback: delegate to the environment's state_wise controller
         return self._env.string_to_high_level_action(action_str)
@@ -574,6 +576,25 @@ class PrismHarnessExecutor(HistoryAwareExecutor):
             state = self._get_state()
             frame = state["core"]["current_frame"]
             self._on_step_start(frame)
+
+            # Auto-recovery: after 4 no-change steps the model is ignoring hints.
+            # Take a forced perpendicular step to physically change the situation.
+            if self._no_change_streak >= 4:
+                recovery_dir = self._get_recovery_direction()
+                self._take_action(MoveStepsAction, direction=recovery_dir, steps=2)
+                self._last_outcome_msg = (
+                    f"[AUTO-RECOVERY] Forced move({recovery_dir} 2) after "
+                    f"{self._no_change_streak} stuck steps."
+                )
+                self._no_change_streak = 0
+                n_env_steps += 1
+                if self._last_terminated:
+                    self.report.termination_reason = "terminated"
+                    return 1
+                if self._last_truncated:
+                    self.report.termination_reason = "truncated"
+                    return 2
+                continue
 
             tool_calls_exceeded = self._n_tool_calls >= self._max_tool_calls
             prompt = self._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
@@ -719,15 +740,27 @@ class PrismHarnessExecutor(HistoryAwareExecutor):
     # Prompt building
     # ------------------------------------------------------------------
 
+    def _get_recovery_direction(self) -> str:
+        """Return a direction perpendicular to the last attempted movement."""
+        for _, action_str, _, _ in reversed(self._action_history or []):
+            s = action_str.lower()
+            if "down" in s or "up" in s:
+                return "right"
+            if "left" in s or "right" in s:
+                return "down"
+        return "right"
+
     def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
         game_state = _get_agent_state_str(self._env)
         plan_section = f"Current plan: {self._plan_summary}\n\n" if self._plan_summary else ""
 
         if self._no_change_streak >= 2:
+            recovery_dir = self._get_recovery_direction()
+            opp_dir = {"right": "left", "left": "right", "down": "up", "up": "down"}.get(recovery_dir, "left")
             stuck_msg = (
-                f"[STUCK — {self._no_change_streak} no-change steps in a row] "
-                f"Your last {self._no_change_streak} actions produced NO visible change. "
-                f"Try a DIFFERENT direction or action immediately.\n\n"
+                f"[STUCK × {self._no_change_streak}] Your last {self._no_change_streak} actions had NO effect. "
+                f"You MUST change direction. Try: {recovery_dir} or {opp_dir}. "
+                f"Or passdialogue() if a text box is visible.\n\n"
             )
             plan_section = stuck_msg + plan_section
 
