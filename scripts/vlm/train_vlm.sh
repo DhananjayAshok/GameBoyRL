@@ -10,7 +10,7 @@ source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 # These should be specific to this script and not shared across scripts (that is handled below).
 declare -A ARGS
 ARGS["batch_size"]="8"
-ARGS["num_train_epochs"]="20"
+ARGS["num_train_epochs"]="2"
 ARGS["lora_rank"]="32"
 ARGS["lora_alpha"]="32"
 ARGS["learning_rate"]="2e-4"
@@ -135,7 +135,7 @@ bash scripts/core/llm-utils.sh python train.py --training_kind sft --modality vl
         --logging_strategy steps --logging_steps 200 \
         --save_strategy epoch --save_steps 0.5 \
         --eval_strategy epoch --eval_steps 0.5 \
-        --early_stopping_patience 5 --load_best_model_at_end \
+        --early_stopping_patience 2 --load_best_model_at_end \
         --num_train_epochs ${ARGS["num_train_epochs"]} \
         --lora_r ${ARGS["lora_rank"]} \
         --lora_alpha ${ARGS["lora_alpha"]} \

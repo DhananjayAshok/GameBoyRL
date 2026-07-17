@@ -72,6 +72,66 @@ def load_results(game: str, executor: str) -> dict[str, pd.DataFrame]:
 
     return dfs
 
+def load_executor_results(game: str, model: str) -> dict[str, pd.DataFrame]:
+    """Load every executor CSV for a single (game, model), keyed by executor name.
+
+    Files are named ``{executor}_{model}.csv``; executors contain no underscores,
+    so the executor name is whatever precedes the ``_{model}.csv`` suffix.
+    """
+    results_dir = load_parameters()["results_dir"]
+    game_dir = os.path.join(results_dir, "benchmark", game)
+    suffix = f"_{model}.csv"
+
+    dfs = {}
+    for filename in os.listdir(game_dir):
+        if not filename.endswith(suffix):
+            continue
+        executor = filename[: -len(suffix)]
+        dfs[executor] = pd.read_csv(os.path.join(game_dir, filename))
+
+    if not dfs:
+        return dfs
+
+    row_counts = {name: len(df) for name, df in dfs.items()}
+    max_rows = max(row_counts.values())
+    to_drop = [name for name, count in row_counts.items() if count < max_rows]
+    for name in to_drop:
+        log_warn(f"Dropping {name}: {row_counts[name]} rows (expected {max_rows})")
+        del dfs[name]
+
+    return dfs
+
+
+def plot_executor_results(game: str, model: str, plotter: Plotter = None) -> pd.DataFrame | None:
+    """Single panel comparing every executor variant side by side for one (game, model)."""
+    dfs = load_executor_results(game, model)
+    if not dfs:
+        log_error(f"No valid result files found for game '{game}' and model '{model}'")
+        return None
+
+    rows = []
+    for executor, df in dfs.items():
+        success_pct = df["success"].mean() * 100
+        rows.append({"Executor": executor, "Success": success_pct, "Failure": 100 - success_pct})
+    summary_df = (
+        pd.DataFrame(rows)
+        .sort_values("Success", ascending=False)
+        .reset_index(drop=True)
+    )
+
+    if plotter is None:
+        plotter = Plotter()
+    plot_func = plotter.get_stacked_bar_plot_func(
+        df=summary_df,
+        x_col="Executor",
+        stacked_cols=["Success", "Failure"],
+        colours=["#2ecc71", "#e74c3c"],
+    )
+    plot_func()
+    plotter.show(save_path=f"{game}/executors_{model}_results")
+    return summary_df
+
+
 def plot_results(game: str, executor: str, plotter: Plotter = None) -> pd.DataFrame | None:
     dfs = load_results(game, executor)
     if not dfs:
@@ -153,6 +213,7 @@ def plot_all_results():
     seen = set()
     executor_summaries: dict[str, dict[str, pd.DataFrame]] = {}
 
+    seen_game_model = set()
     for game in os.listdir(benchmark_dir):
         game_dir = os.path.join(benchmark_dir, game)
         if not os.path.isdir(game_dir):
@@ -166,6 +227,11 @@ def plot_all_results():
                 summary = plot_results(game, executor, plotter=plotter)
                 if summary is not None:
                     executor_summaries.setdefault(executor, {})[game] = summary
+
+            model = filename[len(executor) + 1:-len(".csv")]
+            if model in MODEL_MAP and (game, model) not in seen_game_model:
+                seen_game_model.add((game, model))
+                plot_executor_results(game, model, plotter=plotter)
 
     for executor, game_summaries in executor_summaries.items():
         _plot_all_games(plotter, executor, game_summaries)
