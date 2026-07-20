@@ -67,7 +67,7 @@ user_do_guidance="${ARGS["do_guidance_and_practice"]}"
 # regenerated; do_guidance_and_practice=false since we only need the annotation prior.
 saved_overwrite="${ARGS["overwrite"]}"
 ARGS["overwrite"]="false"
-ARGS["do_guidance_and_practice"]="false"
+ARGS["do_guidance_and_practice"]="true"
 curiosity_flags=$(args_to_flags_subset ARGS CURIOSITY_TASKS_ARG_KEYS)
 bash scripts/pipeline/curiosity_all_tasks.sh $curiosity_flags || exit 1
 ARGS["overwrite"]="$saved_overwrite"
