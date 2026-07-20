@@ -339,3 +339,44 @@ PROPOSE_AND_ATTEMPT_DEFAULTS["attempt_only"]=false
 PROPOSE_AND_ATTEMPT_DEFAULTS["do_guidance_and_practice"]=true
 
 PROPOSE_AND_ATTEMPT_ARG_KEYS=("${PROPOSE_AND_ATTEMPT_ESSENTIALS[@]}" "${!PROPOSE_AND_ATTEMPT_DEFAULTS[@]}")
+
+# debug.py: read-only diagnostics over saved artifacts (scripts/debug/*.sh).
+# These map to debug.py's *group* options, which every subcommand shares. Per-subcommand
+# options (n_samples, n_frames, extra, ...) stay local to their own script.
+DEBUG_ESSENTIALS=()
+populate_array ESSENTIAL_ARGS DEBUG_ESSENTIALS
+declare -A DEBUG_DEFAULTS=(
+    ["run_name"]="my_run"
+    ["executor"]="history"
+    ["output_dir"]="none"
+)
+DEBUG_ARG_KEYS=("${DEBUG_ESSENTIALS[@]}" "${!DEBUG_DEFAULTS[@]}")
+
+# Same, plus model_name — required by every debug subcommand except curiosity, whose
+# artifacts are not keyed on a model. model_name is a *subcommand* option in debug.py, so
+# debug_group_flags deliberately does not emit it.
+DEBUG_MODEL_ESSENTIALS=("model_name")
+populate_array DEBUG_ESSENTIALS DEBUG_MODEL_ESSENTIALS
+declare -A DEBUG_MODEL_DEFAULTS
+populate_dict DEBUG_DEFAULTS DEBUG_MODEL_DEFAULTS
+
+DEBUG_MODEL_ARG_KEYS=("${DEBUG_MODEL_ESSENTIALS[@]}" "${!DEBUG_MODEL_DEFAULTS[@]}")
+
+# debug_group_flags <assoc_array_name>
+#
+# Build the flag string for debug.py's group options from an ARGS dict. Handles what
+# args_to_flags cannot: --output_dir uses the `none` sentinel and must be omitted when
+# absent. Debug reports are always regenerated, so --overwrite (a click is_flag) is
+# always passed and is not exposed as a script argument.
+#
+# Usage:
+#   group_flags=$(debug_group_flags ARGS)
+#   python debug.py $group_flags curiosity --n_frames 5
+function debug_group_flags() {
+    local -n _dict="$1"
+    local result="--game ${_dict["game"]} --run_name ${_dict["run_name"]} --executor ${_dict["executor"]} --overwrite"
+    if [[ "${_dict["output_dir"]}" != "none" ]]; then
+        result+=" --output_dir ${_dict["output_dir"]}"
+    fi
+    echo "$result"
+}

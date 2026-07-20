@@ -120,13 +120,12 @@ fi
 echo "GPUs available: ${n_gpus:-override} -> tensor-parallel-size: $tp"
 
 # --- Serve the checkpoint. Guarantee the server is stopped on any exit. ---
-bash scripts/core/serve_vllm.sh \
-    --model "$checkpoint" \
+bash ~/vllm_scripts/serve_vllm_12.sh "$checkpoint" \
     --served-model-name "$served_model_name" \
     --tensor-parallel-size "$tp" \
     --port "${ARGS["port"]}" || { echo "Error: vLLM failed to start"; exit 1; }
 
-trap 'echo "Stopping vLLM server..."; bash scripts/core/stop_vllm.sh' EXIT
+trap 'echo "Stopping vLLM server..."; bash ~/vllm_scripts/stop_vllm.sh' EXIT
 
 # --- Benchmark every game in the series for the single requested executor ---
 status=0

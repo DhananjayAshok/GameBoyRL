@@ -152,26 +152,29 @@ def _practice_episode(
         for action in random_actions:
             env.step(action)
 
-        supervisor = SimpleCheckerSupervisor(
-            task=task_str,
-            executor_class=executor_class,
-            env=env,
-            game=game,
-            max_steps=max_steps,
-            max_tool_calls=max_tool_calls,
-            evaluation_lookback=lookback,
-            allow_self_termination=False,
-            score_mode=score_mode,
-            guidance=guidance_str or None,
-            hint=guidance_str or None,
-            goal_condition=goal_condition,
-            checker_vlm_model=model_name,
-            checker_vlm_kind=vlm_kind,
-            checker_max_new_tokens=checker_max_new_tokens,
-            parameters=parameters,
-            vlm_model=model_name,
-            vlm_kind=vlm_kind,
-        )
+        def _make_supervisor(hint):
+            return SimpleCheckerSupervisor(
+                task=task_str,
+                executor_class=executor_class,
+                env=env,
+                game=game,
+                max_steps=max_steps,
+                max_tool_calls=max_tool_calls,
+                evaluation_lookback=lookback,
+                allow_self_termination=False,
+                score_mode=score_mode,
+                guidance=guidance_str or None,
+                hint=hint,
+                goal_condition=goal_condition,
+                checker_vlm_model=model_name,
+                checker_vlm_kind=vlm_kind,
+                checker_max_new_tokens=checker_max_new_tokens,
+                parameters=parameters,
+                vlm_model=model_name,
+                vlm_kind=vlm_kind,
+            )
+
+        supervisor = _make_supervisor(guidance_str or None)
 
         result = supervisor.evaluate()
 
@@ -179,11 +182,15 @@ def _practice_episode(
         if failed:
             env_steps = [s for s in result["steps"] if isinstance(s, EnvironmentStepRecord)]
             derived_hint = _derive_hint(env_steps, task_str, game, supervisor._checker_vlm, max_new_tokens)
+            hint_str = f"{guidance_str}\nSpecific hint: {derived_hint}" if guidance_str else f"Specific hint: {derived_hint}"
+            # Rebuild rather than assigning supervisor._hint: Supervisor copies hint into
+            # _executor_kwargs at construction time and call_executor splats that frozen
+            # dict into every executor, so a later attribute write never reaches the
+            # executor's prompt. Mirrors attempt_tasks.py's per-attempt reconstruction.
+            supervisor = _make_supervisor(hint_str)
             supervisor._env.reset()
             for action in random_actions:
                 supervisor._env.step(action)
-            hint_str = f"{guidance_str}\nSpecific hint: {derived_hint}" if guidance_str else f"Specific hint: {derived_hint}"
-            supervisor._hint = hint_str
             result = supervisor.evaluate()
 
         # Backfill each action call's resulting frame onto its VLMCallRecord, so

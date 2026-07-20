@@ -11,13 +11,14 @@ source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 declare -A ARGS
 ARGS["batch_size"]="8"
 ARGS["num_train_epochs"]="2"
-ARGS["lora_rank"]="32"
-ARGS["lora_alpha"]="32"
+ARGS["lora_rank"]="64"
+ARGS["lora_alpha"]="128"
 ARGS["learning_rate"]="2e-4"
 ARGS["weight_decay"]="0.01"
 ARGS["overwrite"]=false
 ARGS["push_to_hub"]=false
 ARGS["validation_file"]=none
+ARGS["action_loss_weight"]=0.25
 
 REQUIRED_ARGS=("train_file" "model_name" "run_name")
 
@@ -123,6 +124,14 @@ else
     validation_flag="--train_validation_split 0.85"
 fi
 
+# If an action_loss_weight is provided, upweight the "Action:" tokens in the completion
+# loss (see llm-utils train.py --action_loss_weight). Otherwise weight all tokens equally.
+if [[ "${ARGS["action_loss_weight"]}" != "none" ]]; then
+    action_loss_flag="--action_loss_weight ${ARGS["action_loss_weight"]}"
+else
+    action_loss_flag=""
+fi
+
 
 
 
@@ -140,4 +149,4 @@ bash scripts/core/llm-utils.sh python train.py --training_kind sft --modality vl
         --lora_r ${ARGS["lora_rank"]} \
         --lora_alpha ${ARGS["lora_alpha"]} \
         --learning_rate ${ARGS["learning_rate"]} \
-        --weight_decay ${ARGS["weight_decay"]} $overwrite_flag $push_to_hub_flag || exit 1
+        --weight_decay ${ARGS["weight_decay"]} $action_loss_flag $overwrite_flag $push_to_hub_flag || exit 1

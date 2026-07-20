@@ -80,6 +80,8 @@ if [[ ! -f "$train_file" ]]; then
     exit 1
 fi
 
+bash ~/vllm_scripts/stop_vllm.sh # If the VLM server is still running, stop it before fine-tuning. If we error out here its fine.
+
 bash scripts/vlm/train_vlm.sh \
     --train_file "$train_file" \
     --validation_file "$validation_file" \
