@@ -19,6 +19,8 @@ ARGS["max_steps"]=75
 ARGS["regenerate"]=false
 ARGS["port"]=8000
 ARGS["tensor_parallel"]=none   # none => auto-pick from available GPUs
+ARGS["mode"]="both"            # must match the --mode full.sh trained under
+ARGS["checkpoint"]=none        # none => derive from game/run_name/mode; set to benchmark any checkpoint
 
 REQUIRED_ARGS=("game" "model_name" "run_name" "executor")
 
@@ -78,14 +80,26 @@ model_save_name="${model_name#*/}"   # strip any org/ prefix, matching train_vlm
 # identity — not just the base model — or a fine-tuned run would clobber the base model's
 # results (both would be "gemma-4-31b-it"). Mirror the checkpoint dir (${game}-${run_name})
 # so it is unique per checkpoint and self-describing across cross-game evals.
-served_model_name="${model_save_name}-${game}-${run_name}"
+# The mode is part of the identity: full.sh trains under "${game}-${run_name}-${mode}", so two
+# modes sharing a --run_name would otherwise resolve to the same checkpoint, the same served
+# name and the same benchmark CSV, silently overwriting each other.
+mode="${ARGS["mode"]}"
+served_model_name="${model_save_name}-${game}-${run_name}-${mode}"
 
 # --- Derive and validate the checkpoint path (mirrors train_vlm.sh output_dir) ---
-checkpoint="$storage_dir/models/${game}-${run_name}/${model_save_name}/final_checkpoint"
+# --checkpoint overrides the derivation so an arbitrary checkpoint can be benchmarked without
+# reverse-engineering the naming; the served name still describes what is being served.
+if [[ "${ARGS["checkpoint"]}" != "none" ]]; then
+    checkpoint="${ARGS["checkpoint"]}"
+    echo "Using explicit --checkpoint (skipping the game/run_name/mode derivation)"
+else
+    checkpoint="$storage_dir/models/${game}-${run_name}-${mode}/${model_save_name}/final_checkpoint"
+fi
 if [[ ! -d "$checkpoint" ]]; then
     echo "Error: checkpoint not found at $checkpoint"; exit 1
 fi
 echo "Checkpoint: $checkpoint"
+echo "Served model name: $served_model_name"
 
 # --- Resolve the game series -> the set of games to benchmark ---
 # Find the series CSV whose `game` column (col 1) contains --game, then collect every
@@ -120,12 +134,18 @@ fi
 echo "GPUs available: ${n_gpus:-override} -> tensor-parallel-size: $tp"
 
 # --- Serve the checkpoint. Guarantee the server is stopped on any exit. ---
-bash ~/vllm_scripts/serve_vllm_12.sh "$checkpoint" \
+# NOTE: serve_vllm.sh routes through ~/vllm_scripts if present (cluster-specific CUDA
+# modules/venvs), otherwise launches `vllm serve` from the current environment directly.
+# Either way it blocks until the server is healthy.
+bash scripts/core/serve_vllm.sh "$checkpoint" \
     --served-model-name "$served_model_name" \
     --tensor-parallel-size "$tp" \
     --port "${ARGS["port"]}" || { echo "Error: vLLM failed to start"; exit 1; }
 
-trap 'echo "Stopping vLLM server..."; bash ~/vllm_scripts/stop_vllm.sh' EXIT
+# NOTE: stop_vllm.sh routes through ~/vllm_scripts if present, else SIGTERMs the vllm
+# process group its generic serve path recorded at launch. It must be passed the same
+# port we served on, or it will look for the wrong tracking file.
+trap 'echo "Stopping vLLM server..."; bash scripts/core/stop_vllm.sh "${ARGS["port"]}"' EXIT
 
 # --- Benchmark every game in the series for the single requested executor ---
 status=0

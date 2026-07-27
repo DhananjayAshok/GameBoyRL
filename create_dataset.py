@@ -46,7 +46,13 @@ too few episodes to yield at least one validation episode
 
 Usage
 -----
-python create_dataset.py --practice_path <dir> [--overwrite] [--val_frac 0.2]
+This module is a click group with two commands, so the command name is required:
+
+  python create_dataset.py create_dataset  --practice_path <dir> [--overwrite] [--val_frac 0.2]
+  python create_dataset.py merge_practices --practice_paths <dir,dir,...> --save_path <dir>
+
+merge_practices combines the train/validation CSVs of several practice dirs (one per
+pipeline leg) into a single dataset, tagging each row with a `source` column.
 """
 
 import json
@@ -70,6 +76,25 @@ STEP_INFO_RE = re.compile(r'\n?\[STEP_INFO\].*?\[STEP_INFO_END\]', re.DOTALL)
 
 def _strip_blocks(text: str) -> str:
     return STEP_INFO_RE.sub('', HINT_RE.sub('', text))
+
+
+# The low_level controller's legal buttons. A training target whose Action: line names
+# anything else (or has no parseable Action: line) could never be executed, so such calls
+# are dropped when building rows. This is the source of truth: the debug dataset report no
+# longer audits action validity because create_dataset now guarantees it.
+VALID_ACTIONS = {"A", "B", "UP", "DOWN", "LEFT", "RIGHT", "START", "SELECT"}
+
+
+def _parsed_action(response):
+    """The `Action:` value from a VLM response, or None when there is no parseable line."""
+    if not isinstance(response, str):
+        return None
+    for line in response.splitlines():
+        stripped = line.strip()
+        if stripped.lower().startswith("action:"):
+            value = stripped[len("action:"):].replace("[STOP]", "").strip()
+            return value if value else None
+    return None
 
 
 def _episode_cutoff(safe_success_point, n_calls: int, safety_margin: int) -> int:
@@ -166,7 +191,12 @@ def _split_episodes_by_task(episodes_by_task: dict, val_frac: float, seed: int) 
     return val_episodes
 
 
-@click.command()
+@click.group()
+def cli():
+    """Dataset construction from practice output."""
+
+
+@cli.command(name='create_dataset')
 @click.option('--practice_path', required=True, type=str,
               help='Path to the practice output directory (contains results.csv and *.pkl).')
 @click.option('--overwrite', is_flag=True, default=False,
@@ -210,6 +240,8 @@ def create_dataset(practice_path, overwrite, safety_margin, val_frac, seed, scor
     episodes_by_task = defaultdict(set)
     missing_pkls = 0
     n_rejected = 0
+    n_unparseable = 0
+    n_illegal = 0
     for _, row in tqdm(successful.iterrows(), total=len(successful), desc='episodes'):
         # group_idx is a string id like "10_0"; int() would mangle it via underscore
         # digit-separator parsing (int("10_0") == 100). Keep it as a raw string.
@@ -230,6 +262,17 @@ def create_dataset(practice_path, overwrite, safety_margin, val_frac, seed, scor
         for call_idx, record in enumerate(vlm_call_log[:cutoff]):
             if decisions.get((group_idx, attempt, call_idx)) is False:
                 n_rejected += 1
+                continue
+
+            # Drop calls whose response has no parseable Action: line, or names an action
+            # the environment cannot execute. Checked before saving images so dropped rows
+            # leave no orphan files behind.
+            action = _parsed_action(record.response)
+            if action is None:
+                n_unparseable += 1
+                continue
+            if action.strip().upper() not in VALID_ACTIONS:
+                n_illegal += 1
                 continue
 
             image_paths = []
@@ -287,6 +330,8 @@ def create_dataset(practice_path, overwrite, safety_margin, val_frac, seed, scor
     if missing_pkls:
         log_info(f"Warning: {missing_pkls} pkl files not found (skipped).")
     log_info(f"Dropped {n_rejected} rejected calls.")
+    log_info(f"Dropped {n_unparseable} calls with no parseable Action and "
+             f"{n_illegal} calls with an illegal action.")
     log_info(f"Episodes: {len(val_episodes)} validation / "
              f"{sum(len(e) for e in episodes_by_task.values()) - len(val_episodes)} train.")
     log_info(f"Saved {len(train_rows)} train rows -> {train_path}")
@@ -294,5 +339,133 @@ def create_dataset(practice_path, overwrite, safety_margin, val_frac, seed, scor
     log_info(f"Images -> {images_dir}/")
 
 
+TRAIN_NAME = 'train_dataset.csv'
+VALIDATION_NAME = 'validation_dataset.csv'
+
+
+def _source_label(practice_path: str) -> str:
+    """
+    Short provenance label for a practice dir, derived from its path.
+
+    The two verticals lay their practice dirs out differently:
+      curiosity  .../curiosity/<run_name>/practice_<executor>            -> "curiosity"
+      zeroshot   .../zeroshot/zeroshot_tasks_<executor>_attempts/...     -> "zeroshot"
+                 .../zeroshot_tasks_prior_<extra>_<executor>_attempts/.. -> "<extra>"
+
+    Falls back to the parent directory name for anything unrecognised, so an unusual layout
+    still produces a distinguishable label rather than crashing.
+    """
+    parts = os.path.normpath(practice_path).split(os.sep)
+    if len(parts) >= 3 and parts[-3] == 'curiosity':
+        return 'curiosity'
+    stem = parts[-2] if len(parts) >= 2 else os.path.basename(practice_path)
+    if stem.endswith('_attempts'):
+        stem = stem[: -len('_attempts')]
+        stem = stem.rsplit('_', 1)[0]  # drop the trailing _<executor>
+    if stem.startswith('zeroshot_tasks'):
+        rest = stem[len('zeroshot_tasks'):].lstrip('_')
+        if rest.startswith('prior_'):
+            rest = rest[len('prior_'):]
+        if not rest:
+            return 'zeroshot'
+        # Keep the zeroshot vertical distinguishable: --extra curiosity would otherwise
+        # label its rows "curiosity" and collide with the curiosity vertical proper.
+        return rest if rest.startswith('zeroshot') else f'zeroshot_{rest}'
+    return stem or 'unknown'
+
+
+def _load_split(practice_path: str, filename: str, label: str) -> pd.DataFrame:
+    path = os.path.join(practice_path, filename)
+    if not os.path.exists(path):
+        log_error(
+            f"{filename} not found at {path}. Run create_dataset on this practice dir first."
+        )
+    frame = pd.read_csv(path)
+    frame['source'] = label
+    return frame
+
+
+def _balance_equal(frame: pd.DataFrame, seed: int) -> pd.DataFrame:
+    """Downsample every source to the smallest source's row count."""
+    if frame.empty:
+        return frame
+    counts = frame['source'].value_counts()
+    target = int(counts.min())
+    return pd.concat([
+        group.sample(n=target, random_state=seed)
+        for _, group in frame.groupby('source', sort=False)
+    ])
+
+
+@cli.command(name='merge_practices')
+@click.option('--practice_paths', required=True, type=str,
+              help='Comma-separated practice dirs, each holding train/validation_dataset.csv.')
+@click.option('--save_path', required=True, type=str,
+              help='Directory to write the merged train/validation pair into.')
+@click.option('--balance', default='none', show_default=True,
+              type=click.Choice(['none', 'equal']),
+              help="'equal' downsamples every source to the smallest source's row count, "
+                   'applied to train and validation independently.')
+@click.option('--seed', default=0, show_default=True, type=int,
+              help='Seed for balancing and the final shuffle.')
+def merge_practices(practice_paths, save_path, balance, seed):
+    """Merge the datasets of several practice dirs into one train/validation pair.
+
+    Rows keep their images by reference — the ``image`` column holds absolute paths into each
+    source's images/ dir, so nothing is copied and the merged CSV points at the originals.
+    A ``source`` column records which practice dir each row came from.
+
+    Always regenerates. There is no skip-if-exists guard: the merge is a pure function of its
+    inputs and takes seconds, against upstream legs that take days, so the only thing a guard
+    could buy is silently training on a merge that predates the latest practice data.
+    """
+    paths = [p.strip() for p in practice_paths.split(',') if p.strip()]
+    if not paths:
+        log_error('--practice_paths is empty.')
+    for path in paths:
+        if not os.path.isdir(path):
+            log_error(f'practice path does not exist: {path}')
+
+    train_path = os.path.join(save_path, TRAIN_NAME)
+    val_path = os.path.join(save_path, VALIDATION_NAME)
+
+    labels = [_source_label(p) for p in paths]
+    if len(set(labels)) != len(labels):
+        log_info(f'Warning: duplicate source labels {labels} — rows will share a source value.')
+
+    train_parts, val_parts = [], []
+    for path, label in zip(paths, labels):
+        train = _load_split(path, TRAIN_NAME, label)
+        validation = _load_split(path, VALIDATION_NAME, label)
+        log_info(f'{label}: {len(train)} train / {len(validation)} validation  <- {path}')
+        train_parts.append(train)
+        val_parts.append(validation)
+
+    merged = {}
+    for split, parts in (('train', train_parts), ('validation', val_parts)):
+        frame = pd.concat(parts, ignore_index=True)
+        before = len(frame)
+        # `image` is part of the dedup key: the prompt text alone is not the input to a VLM.
+        # Different episodes of the same task routinely reach an identical prompt and emit an
+        # identical response while showing a different frame — deduping on (input, output)
+        # alone silently drops those, which are legitimately distinct training examples.
+        frame = frame.drop_duplicates(subset=['input', 'output', 'image'], keep='first')
+        log_info(f'{split}: {before} rows -> {len(frame)} after dedup '
+                 f'({before - len(frame)} duplicates dropped)')
+        if balance == 'equal':
+            frame = _balance_equal(frame, seed)
+            log_info(f'{split}: balanced to {len(frame)} rows '
+                     f'({frame["source"].value_counts().to_dict()})')
+        merged[split] = frame.sample(frac=1.0, random_state=seed).reset_index(drop=True)
+
+    os.makedirs(save_path, exist_ok=True)
+    merged['train'].to_csv(train_path, index=False)
+    merged['validation'].to_csv(val_path, index=False)
+
+    log_info(f'Saved {len(merged["train"])} train rows      -> {train_path}')
+    log_info(f'Saved {len(merged["validation"])} validation rows -> {val_path}')
+    log_info(f'Sources: {merged["train"]["source"].value_counts().to_dict()}')
+
+
 if __name__ == '__main__':
-    create_dataset()
+    cli()

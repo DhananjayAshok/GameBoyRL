@@ -96,7 +96,7 @@ def _figure_by_init_state(frame: pd.DataFrame, out_path: str):
 
 @click.command(name="attempt")
 @click.option("--model_name", required=True, help="Full VLM name (e.g. google/gemma-4-31b-it)")
-@click.option("--extra", default="zeroshot_with_curiosity", show_default=True,
+@click.option("--extra", default="none", show_default=True,
               help="Which proposal variant's attempts to report.")
 @click.option("--n_frames", default=8, show_default=True, help="Frames per trajectory strip.")
 @click.option("--max_trajectories", default=40, show_default=True,
@@ -106,7 +106,7 @@ def debug_attempt(obj, model_name, extra, n_frames, max_trajectories):
     """Attempt funnel, hint-escalation analysis, and successful-trajectory strips."""
     paths = Paths(
         parameters=obj["parameters"], game=obj["game"], run_name=obj["run_name"],
-        executor=obj["executor"], model_name=model_name, output_dir=obj["output_dir"],
+        executor=obj["executor"], model_name=model_name, output_dir=obj["output_dir"], mode=obj["mode"],
     )
     overwrite = obj["overwrite"]
     report_dir = paths.debug_dir("attempt")

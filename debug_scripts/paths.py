@@ -53,12 +53,13 @@ class Paths:
     """
 
     def __init__(self, parameters=None, game=None, run_name="my_run", executor="history",
-                 model_name=None, output_dir=None):
+                 model_name=None, output_dir=None, mode="both"):
         self.parameters = load_parameters(parameters)
         self.game = game
         self.run_name = run_name
         self.executor = executor
         self.model_name = model_name
+        self.mode = mode
         self.storage_dir = self.parameters["storage_dir"]
         self.results_dir = self.parameters["results_dir"]
         self._output_dir = output_dir
@@ -76,8 +77,12 @@ class Paths:
 
     @property
     def finetuned_model_name(self) -> str:
-        """Served-model name a fine-tuned checkpoint is benchmarked under (serve_and_benchmark.sh)."""
-        return f"{self.model_save_name}-{self.game}-{self.run_name}"
+        """
+        Served-model name a fine-tuned checkpoint is benchmarked under.
+
+        Mirrors serve_and_benchmark.sh's ``${model_save_name}-${game}-${run_name}-${mode}``.
+        """
+        return f"{self.model_save_name}-{self.game}-{self.run_name}-{self.mode}"
 
     def require(self, path: str, kind: str) -> str:
         """Return *path* if it exists, otherwise raise naming the producing script."""
@@ -136,7 +141,7 @@ class Paths:
     def zeroshot_dir(self) -> str:
         return os.path.join(self.proposed_tasks_dir(), "zeroshot")
 
-    def tasks_file(self, extra: str = "zeroshot_with_curiosity") -> str:
+    def tasks_file(self, extra: str = "none") -> str:
         if extra not in EXTRA_SUFFIXES:
             log_error(f"Unknown --extra '{extra}'. Choose from {sorted(EXTRA_SUFFIXES)}.", self.parameters)
         return os.path.join(self.zeroshot_dir(), f"zeroshot_tasks{EXTRA_SUFFIXES[extra]}.jsonl")
@@ -145,42 +150,81 @@ class Paths:
         """Every --extra variant whose tasks jsonl is actually on disk."""
         return [e for e in EXTRA_SUFFIXES if os.path.exists(self.tasks_file(e))]
 
-    def attempts_dir(self, extra: str = "zeroshot_with_curiosity") -> str:
+    def attempts_dir(self, extra: str = "none") -> str:
         stem = self.tasks_file(extra)[: -len(".jsonl")]
         return f"{stem}_{self.executor}_attempts"
 
-    def all_trajectories_csv(self, extra: str = "zeroshot_with_curiosity") -> str:
+    def all_trajectories_csv(self, extra: str = "none") -> str:
         return os.path.join(self.attempts_dir(extra), "all_trajectories.csv")
 
-    def success_trajectories_json(self, extra: str = "zeroshot_with_curiosity") -> str:
+    def success_trajectories_json(self, extra: str = "none") -> str:
         return os.path.join(self.attempts_dir(extra), "success_trajectories.json")
 
-    def success_trajectories_pkl(self, extra: str = "zeroshot_with_curiosity") -> str:
+    def success_trajectories_pkl(self, extra: str = "none") -> str:
         return os.path.join(self.attempts_dir(extra), "success_trajectories.pkl")
 
-    def guidance_json(self, extra: str = "zeroshot_with_curiosity") -> str:
+    def guidance_json(self, extra: str = "none") -> str:
         return os.path.join(self.attempts_dir(extra), "success_trajectories_guidance.json")
 
-    def practice_dir(self, extra: str = "zeroshot_with_curiosity") -> str:
+    def practice_dir(self, extra: str = "none") -> str:
         return os.path.join(self.attempts_dir(extra), f"practice_{self.executor}")
 
-    def practice_results_csv(self, extra: str = "zeroshot_with_curiosity") -> str:
-        return os.path.join(self.practice_dir(extra), "results.csv")
+    def curiosity_practice_dir(self) -> str:
+        """The curiosity vertical's practice dir — dirname(trajectory_annotation)/practice_<executor>."""
+        return os.path.join(os.path.dirname(self.curiosity_annotation()),
+                            f"practice_{self.executor}")
 
-    def clean_decisions_csv(self, extra: str = "zeroshot_with_curiosity") -> str:
-        return os.path.join(self.practice_dir(extra), "clean_decisions.csv")
+    def merged_dataset_dir(self) -> str:
+        """Where merge_practices writes; mirrors merged_dataset_dir() in scripts/core/utils.sh."""
+        return os.path.join(self.storage_dir, "datasets", self.game,
+                            self.model_save_name, self.run_name, "merged")
 
-    def paraphrases_json(self, extra: str = "zeroshot_with_curiosity") -> str:
-        return os.path.join(self.practice_dir(extra), "paraphrases.json")
+    def leg_dir(self, leg: str, extra: str = "none") -> str:
+        """
+        Resolve a data-collection leg to its practice dir.
 
-    def practice_episode_pkl(self, group_idx, attempt, extra: str = "zeroshot_with_curiosity") -> str:
-        return os.path.join(self.practice_dir(extra), f"{group_idx}_{attempt}.pkl")
+        A *leg* is a vertical that produces practice output: ``curiosity`` or ``zeroshot``.
+        The merged dataset is deliberately not a leg — it is an *output* of merging the two,
+        holds only train/validation CSVs (no results.csv, clean_decisions.csv or episode
+        pkls), and carries a ``source`` column that reconstructs the per-leg split. Inspect
+        the legs; the merge is their concatenation.
 
-    def train_csv(self, extra: str = "zeroshot_with_curiosity") -> str:
-        return os.path.join(self.practice_dir(extra), "train_dataset.csv")
+        This is the selector the debug commands expose, because ``--extra`` can only name
+        variants *within* the zeroshot vertical — it cannot address the curiosity vertical.
+        """
+        if leg == "curiosity":
+            return self.curiosity_practice_dir()
+        if leg == "zeroshot":
+            return self.practice_dir(extra)
+        log_error(f"Unknown leg '{leg}'. Choose from: curiosity, zeroshot.", self.parameters)
 
-    def validation_csv(self, extra: str = "zeroshot_with_curiosity") -> str:
-        return os.path.join(self.practice_dir(extra), "validation_dataset.csv")
+    # The files inside a practice dir. Keyed on the *directory* rather than on --extra, so
+    # they work for both verticals: the curiosity leg's practice dir is not addressable by
+    # --extra at all. Use leg_dir() to obtain the directory.
+
+    @staticmethod
+    def practice_results_csv(practice_dir: str) -> str:
+        return os.path.join(practice_dir, "results.csv")
+
+    @staticmethod
+    def clean_decisions_csv(practice_dir: str) -> str:
+        return os.path.join(practice_dir, "clean_decisions.csv")
+
+    @staticmethod
+    def paraphrases_json(practice_dir: str) -> str:
+        return os.path.join(practice_dir, "paraphrases.json")
+
+    @staticmethod
+    def practice_episode_pkl(practice_dir: str, group_idx, attempt) -> str:
+        return os.path.join(practice_dir, f"{group_idx}_{attempt}.pkl")
+
+    @staticmethod
+    def train_csv(practice_dir: str) -> str:
+        return os.path.join(practice_dir, "train_dataset.csv")
+
+    @staticmethod
+    def validation_csv(practice_dir: str) -> str:
+        return os.path.join(practice_dir, "validation_dataset.csv")
 
     # ------------------------------------------------------------------
     # Benchmark

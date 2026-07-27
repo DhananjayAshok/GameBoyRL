@@ -37,7 +37,7 @@ import numpy as np
 import click
 from PIL import Image
 
-from utils import load_parameters, log_info, log_warn, VLM, parse_key_value, HuggingFaceModel
+from utils import load_parameters, log_info, log_warn, log_error, VLM, parse_key_value, HuggingFaceModel
 from show_trajectories import plot_transitions
 
 SAVE_FRAMES_DIR = "save_frames"
@@ -87,13 +87,21 @@ End: <integer index of frame where task is performed or executed or completed or
 REFINE_PROMPT = """You are given a description of what a player did over the course of some game frames:
 "[CANDIDATE_TASK]"
 
-Rewrite this as a concise imperative instruction (e.g. "Walk into the building", "Open the menu", "Talk to the NPC").
+First judge whether this is a well-formed task. A VALID task is SPECIFIC and CONCRETE — a
+clearly-defined action with an unambiguous completion state that could be checked from the
+screen (e.g. "select the diamond from the inventory", "open the cellar door", "exit the taxi").
+Judge it INVALID if it is too generic or vague to complete exactly — e.g. "navigate the game
+environment", "interact with an object", "explore the area", "manage inventory", "pick up an
+object" — cases where many different behaviours would all satisfy it.
+
+If VALID, rewrite it as a concise imperative instruction:
 - Use second-person imperative tone (no subject).
 - Keep it short (under 10 words if possible).
 - Do not add any detail that was not in the original description.
 
 Respond in exactly this format:
-Task: <imperative task string>
+Verdict: <VALID or INVALID>
+Task: <imperative task string if VALID, or NONE if INVALID>
 [STOP]"""
 
 CONSOLIDATE_PROMPT = """You are given several candidate descriptions of a task performed in a game of [GAME], all inferred from similar game states:
@@ -126,6 +134,8 @@ DISTILL_PROMPT = """You are given several candidate descriptions of a task perfo
 [CANDIDATE_LIST]
 
 Generate a single, unifying task string that captures the core commonality between all of these candidates, while omitting any extraneous detail or noise. Use imperative tone.
+
+The distilled task must stay SPECIFIC, CONCRETE and UNAMBIGUOUS — a clearly-defined action with a checkable completion state (e.g. "select the diamond from the inventory", "open the cellar door"). Do not over-generalise into a vague or generic instruction (e.g. "interact with an object", "navigate the environment", "manage inventory") that many different behaviours would satisfy. Keep the most specific meaning shared by the candidates.
 
 Respond in exactly this format:
 Reasoning: <one single, short sentence describing your thinking. Reference the commonalities between the candidates that led you to infer this distilled task.>
@@ -307,7 +317,7 @@ def infer_task(
         return None
     task_description = parse_key_value(infer_output, "Visual Description")
 
-    # --- Stage 3: REFINE (text only) ---
+    # --- Stage 3: REFINE + validity gate (text only) ---
     refine_prompt = REFINE_PROMPT.replace("[CANDIDATE_TASK]", parsed_block["task"])
     refine_output = vlm.infer(
         texts=refine_prompt,
@@ -315,11 +325,23 @@ def infer_task(
     ).lower()
     if verbose:
         print(f"REFINE output:\n{refine_output}\n---")
+
+    # Reject INVALID (too generic to complete exactly) AND any malformed output that does
+    # not clearly say VALID — both are treated exactly like NO TASK (return None). Output is
+    # lowercased and "invalid" contains "valid", so test for "invalid" first, then require an
+    # explicit "valid".
+    verdict = parse_key_value(refine_output, "Verdict") or ""
+    if "invalid" in verdict or "valid" not in verdict:
+        if verbose:
+            print(f"REFINE rejected task (verdict={verdict!r}) — treating as NO TASK.")
+        return None
+
     refined_task = parse_key_value(refine_output, "Task")
-    if refined_task is None:
-        refined_task = (
-            refine_output.lower().split("[stop]")[0].strip()
-        )  # fallback: take everything before [stop]
+    if refined_task is None or refined_task.strip() in ("", "none"):
+        # Malformed: VALID verdict but no usable Task string. Reject rather than salvage.
+        if verbose:
+            print("REFINE gave no usable Task despite VALID verdict — treating as NO TASK.")
+        return None
     task = parsed_block["task"]
     if got_bigger(task, refined_task):
         refined_task = task
@@ -604,6 +626,22 @@ def infer_task_cmd(
                     f"(task: {trajectory_output[keep]!r})"
                 )
         log_info(f"Dedup: {before} groups → {len(trajectory_output)} unique tasks.")
+
+    # Fail here rather than let an empty annotation propagate. Everything downstream
+    # (infer_guidance -> practice_tasks -> create_dataset) keys off this file, and an empty
+    # one surfaces four stages later as an opaque pandas EmptyDataError on a 0-byte
+    # results.csv. Checked BEFORE writing: traj_path existing is this command's
+    # skip-if-exists marker, so writing an empty one would make every later run skip it.
+    # The checkpoint is left in place so a rerun resumes instead of re-annotating.
+    if not trajectory_output:
+        log_error(
+            f"infer_tasks produced 0 task annotations from {trajectory_path}. "
+            "Nothing was written, so downstream guidance/practice cannot run. "
+            "Check that the grouped trajectory file actually contains trajectories "
+            "(a 'manifest' pkl holds paths, not frames) and that the VLM returned parseable "
+            "output.",
+            parameters,
+        )
 
     with open(traj_path, "w") as f:
         json.dump(trajectory_output, f, indent=2)

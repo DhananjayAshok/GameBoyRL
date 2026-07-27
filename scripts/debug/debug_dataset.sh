@@ -13,7 +13,8 @@ REQUIRED_ARGS=()
 populate_array DEBUG_MODEL_ESSENTIALS REQUIRED_ARGS
 populate_dict DEBUG_MODEL_DEFAULTS ARGS
 
-ARGS["extra"]="zeroshot_with_curiosity"
+ARGS["leg"]="both"
+ARGS["extra"]="none"
 ARGS["n_samples"]=50
 ARGS["seed"]=0
 
@@ -64,6 +65,7 @@ group_flags=$(debug_group_flags ARGS)
 
 python debug.py $group_flags dataset \
     --model_name "${ARGS["model_name"]}" \
+    --leg "${ARGS["leg"]}" \
     --extra "${ARGS["extra"]}" \
     --n_samples "${ARGS["n_samples"]}" \
     --seed "${ARGS["seed"]}" || exit 1

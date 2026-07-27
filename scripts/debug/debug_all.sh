@@ -3,9 +3,10 @@
 # so a missing artifact is reported against the earliest stage that lacks it rather than
 # being masked by later errors. All reports land under <results_dir>/debug/<game>/.
 #
-# Ordering is the pipeline's own: curiosity -> zeroshot -> attempt -> practice -> dataset
-# -> benchmark. Note that debug_curiosity has to load very large pickles and debug_zeroshot
-# starts an emulator, so this is not instant on a first run; both cache their outputs.
+# Ordering is the pipeline's own: curiosity -> infer -> zeroshot -> attempt -> practice ->
+# dataset -> benchmark. Note that debug_curiosity has to load very large pickles and
+# debug_zeroshot starts an emulator, so this is not instant on a first run; both cache
+# their outputs.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 
@@ -15,7 +16,8 @@ REQUIRED_ARGS=()
 populate_array DEBUG_MODEL_ESSENTIALS REQUIRED_ARGS
 populate_dict DEBUG_MODEL_DEFAULTS ARGS
 
-ARGS["extra"]="zeroshot_with_curiosity"
+ARGS["leg"]="both"
+ARGS["extra"]="none"
 ARGS["n_samples"]=50
 ARGS["n_audit"]=40
 ARGS["max_gb"]=8.0
@@ -70,32 +72,35 @@ done
 shared=$(args_to_flags_subset ARGS DEBUG_MODEL_ARG_KEYS)
 
 if [[ "${ARGS["skip_curiosity"]}" == "true" ]]; then
-    echo "=== [1/6] curiosity — skipped ==="
+    echo "=== [1/7] curiosity — skipped ==="
 else
-    echo "=== [1/6] curiosity ==="
+    echo "=== [1/7] curiosity ==="
     curiosity_args=$(args_to_flags_subset ARGS DEBUG_ARG_KEYS)
     bash scripts/debug/debug_curiosity.sh $curiosity_args --max_gb "${ARGS["max_gb"]}" || exit 1
 fi
 
+echo "=== [2/7] infer ==="
+bash scripts/debug/debug_infer.sh $shared || exit 1
+
 if [[ "${ARGS["skip_zeroshot"]}" == "true" ]]; then
-    echo "=== [2/6] zeroshot — skipped ==="
+    echo "=== [3/7] zeroshot — skipped ==="
 else
-    echo "=== [2/6] zeroshot (starts an emulator) ==="
+    echo "=== [3/7] zeroshot (starts an emulator) ==="
     bash scripts/debug/debug_zeroshot.sh $shared || exit 1
 fi
 
-echo "=== [3/6] attempt ==="
+echo "=== [4/7] attempt ==="
 bash scripts/debug/debug_attempt.sh $shared --extra "${ARGS["extra"]}" || exit 1
 
-echo "=== [4/6] practice ==="
-bash scripts/debug/debug_practice.sh $shared --extra "${ARGS["extra"]}" \
+echo "=== [5/7] practice ==="
+bash scripts/debug/debug_practice.sh $shared --leg "${ARGS["leg"]}" --extra "${ARGS["extra"]}" \
     --n_audit "${ARGS["n_audit"]}" || exit 1
 
-echo "=== [5/6] dataset ==="
-bash scripts/debug/debug_dataset.sh $shared --extra "${ARGS["extra"]}" \
+echo "=== [6/7] dataset ==="
+bash scripts/debug/debug_dataset.sh $shared --leg "${ARGS["leg"]}" --extra "${ARGS["extra"]}" \
     --n_samples "${ARGS["n_samples"]}" || exit 1
 
-echo "=== [6/6] benchmark ==="
+echo "=== [7/7] benchmark ==="
 bash scripts/debug/debug_benchmark.sh $shared || exit 1
 
 # Index linking whatever was produced, so the folder has one entry point.
@@ -114,11 +119,14 @@ index="$debug_root/index.md"
 } > "$index"
 for report in \
     "curiosity/report.md" \
+    "infer/report.md" \
     "zeroshot/report_none.md" \
     "zeroshot/report_zeroshot_with_curiosity.md" \
     "attempt/report.md" \
-    "practice/report.md" \
-    "dataset/report.md" \
+    "practice/report_curiosity.md" \
+    "practice/report_zeroshot.md" \
+    "dataset/report_curiosity.md" \
+    "dataset/report_zeroshot.md" \
     "benchmark/comparison.md"; do
     [[ -f "$debug_root/$report" ]] && echo "- [$report]($report)" >> "$index"
 done

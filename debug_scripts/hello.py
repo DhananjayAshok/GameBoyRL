@@ -27,7 +27,7 @@ def hello(obj, model_name):
         run_name=obj["run_name"],
         executor=obj["executor"],
         model_name=model_name,
-        output_dir=obj["output_dir"],
+        output_dir=obj["output_dir"], mode=obj["mode"],
     )
 
     print(f"game       : {paths.game}")

@@ -175,7 +175,7 @@ def debug_benchmark(obj, model_name, compare_model, bench_game, max_episodes, ma
     """Per-episode trajectories plus a paired base-vs-fine-tuned comparison."""
     paths = Paths(
         parameters=obj["parameters"], game=obj["game"], run_name=obj["run_name"],
-        executor=obj["executor"], model_name=model_name, output_dir=obj["output_dir"],
+        executor=obj["executor"], model_name=model_name, output_dir=obj["output_dir"], mode=obj["mode"],
     )
     report_dir = paths.debug_dir("benchmark")
     game = paths.game if bench_game == "none" else bench_game

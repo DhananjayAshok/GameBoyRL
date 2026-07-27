@@ -11,6 +11,7 @@ disk.
 
 from debug_scripts.hello import hello
 from debug_scripts.curiosity import debug_curiosity
+from debug_scripts.infer import debug_infer
 from debug_scripts.zeroshot import debug_zeroshot
 from debug_scripts.attempt import debug_attempt
 from debug_scripts.practice import debug_practice
@@ -20,6 +21,7 @@ from debug_scripts.benchmark import debug_benchmark
 __all__ = [
     "hello",
     "debug_curiosity",
+    "debug_infer",
     "debug_zeroshot",
     "debug_attempt",
     "debug_practice",

@@ -284,6 +284,10 @@ def _attempt_task(
         "description": result.get("description", ""),
         "reasoning": result.get("reasoning", ""),
         "n_tries": attempt + 1,
+        # The hint in force on the final attempt. n_tries alone says a hint was derived but
+        # not what it said, and this is the information the retained trajectory was actually
+        # produced under.
+        "final_hint": hint,
     }
     return result_record, trajectory
 
@@ -447,11 +451,12 @@ def attempt_tasks_cmd(
             with open(checkpoint_pkl, "wb") as f:
                 pickle.dump(trajectories, f)
 
-    # Write final outputs
-    success_trajectories = {gid: traj for gid, traj in trajectories.items() if results.get(gid, {}).get("success")}
-    with open(pkl_path, "wb") as f:
-        pickle.dump(success_trajectories, f)
-
+    # Write final outputs. all_trajectories.csv goes first and unconditionally: it is the
+    # record of what was attempted and why it failed, and the debug tooling reads it.
+    # description/reasoning/final_hint are carried through to the CSV because the only other
+    # copy lives in checkpoint.json, which is deleted a few lines below on a successful run.
+    # They are the judge's stated rationale and the hint the final attempt ran under — the
+    # evidence for why a task failed, or why a "success" should be believed.
     pd.DataFrame([
         {
             "group_idx": group_idx,
@@ -459,11 +464,36 @@ def attempt_tasks_cmd(
             "task_string": res["task_string"],
             "success": res["success"],
             "n_tries": res["n_tries"],
+            # TODO(legacy-cols): the .get defaults exist only so a run resuming from a
+            # checkpoint.json written before 2026-07-20 (which has no final_hint key) does
+            # not KeyError. Once every in-flight job has finished and no pre-2026-07-20
+            # checkpoint remains on disk, index these directly.
+            "final_hint": res.get("final_hint", ""),
+            "judge_description": res.get("description", ""),
+            "judge_reasoning": res.get("reasoning", ""),
         }
         for group_idx, res in results.items()
     ]).to_csv(csv_path, index=False)
 
+    success_trajectories = {gid: traj for gid, traj in trajectories.items() if results.get(gid, {}).get("success")}
     success_json = {gid: res["task_string"] for gid, res in results.items() if res.get("success")}
+
+    # Fail here rather than let an empty success set propagate. guidance_and_practice keys
+    # off success_trajectories, and an empty one surfaces three stages later as an opaque
+    # pandas EmptyDataError on a 0-byte practice results.csv. The success files are NOT
+    # written, so infer_guidance fails loudly on a missing input rather than silently
+    # producing empty guidance; the checkpoints are left for inspection.
+    if not success_json:
+        log_error(
+            f"attempt_tasks: 0 of {len(results)} attempted tasks succeeded, so there are no "
+            f"trajectories to derive guidance from. Attempt records were still written to "
+            f"{csv_path} — inspect them before rerunning. Rerunning this stage needs "
+            "--overwrite, since that CSV is its skip-if-exists marker.",
+            parameters,
+        )
+
+    with open(pkl_path, "wb") as f:
+        pickle.dump(success_trajectories, f)
     with open(json_path, "w") as f:
         json.dump(success_json, f, indent=2)
 

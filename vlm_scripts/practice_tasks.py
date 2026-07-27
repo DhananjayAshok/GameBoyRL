@@ -179,6 +179,7 @@ def _practice_episode(
         result = supervisor.evaluate()
 
         failed = (not result.get("success")) if not score_mode else (result.get("score", 0) < 6)
+        derived_hint = ""
         if failed:
             env_steps = [s for s in result["steps"] if isinstance(s, EnvironmentStepRecord)]
             derived_hint = _derive_hint(env_steps, task_str, game, supervisor._checker_vlm, max_new_tokens)
@@ -220,6 +221,18 @@ def _practice_episode(
             "success": result.get("success", float("nan")),
             "score": result.get("score", float("nan")),
             "safe_success_point": result.get("safe_success_point"),
+            # Everything below describes *how* this episode was produced. Without it the
+            # retained data is indistinguishable from an unaided run: used_retry says
+            # whether the kept episode is the first draw or the hint-carried second one,
+            # derived_hint is the failure-specific hint the executor actually saw on that
+            # retry, and the judge's own words are the only record of why it ruled as it
+            # did. All of these were previously computed and then thrown away.
+            "used_retry": bool(failed),
+            "derived_hint": derived_hint,
+            "guidance": guidance_str or "",
+            "goal_condition": goal_condition or "",
+            "judge_description": result.get("description", ""),
+            "judge_reasoning": result.get("reasoning", ""),
         }
         return row, result["vlm_call_log"]
     except Exception:

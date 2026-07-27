@@ -61,7 +61,7 @@ else
     overwrite_flag=""
 fi
 
-python create_dataset.py \
+python create_dataset.py create_dataset \
     --practice_path "${ARGS["practice_path"]}" \
     --safety_margin "${ARGS["safety_margin"]}" \
     --val_frac "${ARGS["val_frac"]}" \

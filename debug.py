@@ -20,6 +20,7 @@ from utils import load_parameters
 from debug_scripts import (
     hello,
     debug_curiosity,
+    debug_infer,
     debug_zeroshot,
     debug_attempt,
     debug_practice,
@@ -34,12 +35,15 @@ from debug_scripts import (
               help="Run name used by the RL/curiosity stages and the fine-tuned model name.")
 @click.option("--executor", default="history", show_default=True,
               help="Executor short name; selects the attempts/practice dirs and benchmark CSVs.")
+@click.option("--mode", default="both", show_default=True,
+              type=click.Choice(["curiosity_only", "zeroshot_only", "both"]),
+              help="Which full.sh --mode produced the fine-tuned model; part of its served name.")
 @click.option("--output_dir", default=None,
               help="Report root. Defaults to <results_dir>/debug/<game>.")
 @click.option("--overwrite", is_flag=True, default=False,
               help="Re-render images that already exist instead of reusing them.")
 @click.pass_context
-def main(ctx, game, run_name, executor, output_dir, overwrite):
+def main(ctx, game, run_name, executor, output_dir, overwrite, mode):
     parameters = load_parameters()
     ctx.obj = dict(
         game=game,
@@ -47,12 +51,14 @@ def main(ctx, game, run_name, executor, output_dir, overwrite):
         executor=executor,
         output_dir=output_dir,
         overwrite=overwrite,
+        mode=mode,
         parameters=parameters,
     )
 
 
 main.add_command(hello, name="hello")
 main.add_command(debug_curiosity, name="curiosity")
+main.add_command(debug_infer, name="infer")
 main.add_command(debug_zeroshot, name="zeroshot")
 main.add_command(debug_attempt, name="attempt")
 main.add_command(debug_practice, name="practice")

@@ -1,30 +1,49 @@
 #!/bin/bash
 #
-# Usage: 
-#   bash scripts/serve_vllm.sh [VLLM_ARGS...]
+# Usage:
+#   bash scripts/core/serve_vllm.sh [MODEL] [VLLM_ARGS...]
 #
 # Description:
-#   A blocking wrapper around 'vllm serve'. It launches the server in the 
-#   background, transparently forwards all command-line arguments to vLLM, 
-#   and holds the terminal execution until the server health check passes 
-#   or the process crashes.
+#   Entry point the pipeline uses to bring up a vLLM server, blocking until the
+#   server is healthy (or dies). Two paths:
 #
-# Examples:
-#   bash scripts/serve_vllm.sh --model facebook/opt-125m
-#   bash scripts/serve_vllm.sh --model meta-llama/Meta-Llama-3-8B-Instruct --port 8085 --tensor-parallel-size 2
+#   1. If ~/vllm_scripts/serve_vllm_auto.sh exists, pass everything through to
+#      it. This is the author's-cluster path: on that cluster (USC CARC), vLLM
+#      needs GPU-specific CUDA modules + venvs (CUDA 12 for A40/A100, CUDA 13
+#      for H100/H200, plus a TRITON_ATTN workaround on H200), which those
+#      scripts handle. None of that is portable, so it lives outside the repo.
 #
-# Outputs:
-#   vllm.pid         - Stores the active background process ID (used by stop_vllm.sh)
-#   vllm_server.log  - Standard output and error logs from the server
+#   2. Otherwise, fall back to the generic path below: assume `vllm` is already
+#      on PATH in the current environment and launch `vllm serve` directly,
+#      backgrounded, waiting for the /health endpoint. If your environment just
+#      works with a plain `vllm serve`, this is all you need.
 #
-source setup/.venv/bin/activate
-module load gcc/13.3.0 cuda/12.6.3
-export TRITON_CACHE_DIR=/dev/shm/${USER}_triton_cache/
-PORT=8000
-LOG_FILE="vllm_server.log"
-TIMEOUT=1200 # 20 minute timeout, lol
+# Outputs (generic path):
+#   Tracking files live in $VLLM_STATE_DIR (default ~/vllm_state), keyed on
+#   host + port so stop_vllm.sh can find the right process from any cwd:
+#     vllm_[HOST]_[PORT].pid  - background process ID
+#     vllm_[HOST]_[PORT].log  - stdout/stderr of the server
+#
 
-# Extract the port if provided in the args, otherwise fallback to 8000
+# --- Path 1: cluster-specific wrapper, if present ---
+if [ -f "$HOME/vllm_scripts/serve_vllm_auto.sh" ]; then
+    echo "Found ~/vllm_scripts; routing through serve_vllm_auto.sh"
+    exec bash "$HOME/vllm_scripts/serve_vllm_auto.sh" "$@"
+fi
+
+# --- Path 2: generic `vllm serve` (assumes vllm is on PATH) ---
+echo "~/vllm_scripts not found; launching \`vllm serve\` directly from the current environment"
+
+if ! command -v vllm > /dev/null 2>&1; then
+    echo "❌ ERROR: vllm not found on PATH. Activate the environment that has vLLM installed,"
+    echo "   or create ~/vllm_scripts/serve_vllm_auto.sh with your environment-specific setup."
+    exit 1
+fi
+
+PORT=8000
+TIMEOUT=1800  # 20+ min: hybrid/Mamba models can take ~16+ min to warm up
+
+# Extract the port from the forwarded arguments
 ARGS=("$@")
 for ((i=0; i<${#ARGS[@]}; i++)); do
     if [[ "${ARGS[i]}" == "--port" ]]; then
@@ -34,10 +53,19 @@ for ((i=0; i<${#ARGS[@]}; i++)); do
     fi
 done
 
-echo "Launching vLLM on port $PORT..."
+STATE_DIR="${VLLM_STATE_DIR:-$HOME/vllm_state}"
+mkdir -p "$STATE_DIR"
+HOST=$(hostname -s)
+LOG_FILE="$STATE_DIR/vllm_${HOST}_${PORT}.log"
+PID_FILE="$STATE_DIR/vllm_${HOST}_${PORT}.pid"
 
-# Start vLLM in the background and pass ALL arguments through
-nohup vllm serve "$@" > "$LOG_FILE" 2>&1 &
+echo "Launching vLLM on port $PORT (host $HOST)..."
+echo "  log: $LOG_FILE"
+echo "  pid: $PID_FILE"
+
+# Start vLLM in its own session/process group so the whole tree (APIServer +
+# EngineCore workers, which hold the VRAM) can be killed together later.
+setsid nohup vllm serve "$@" > "$LOG_FILE" 2>&1 &
 VLLM_PID=$!
 
 # Block until the health endpoint responds or the process crashes
@@ -49,14 +77,27 @@ while [ $SECONDS -lt $END_TIME ]; do
     fi
 
     if curl -s -f http://localhost:${PORT}/health > /dev/null; then
-        echo "✅ SUCCESS: vLLM is healthy!"
-        echo $VLLM_PID > vllm.pid
+        echo "✅ SUCCESS: vLLM is healthy on port $PORT (host $HOST, pid $VLLM_PID)!"
+        echo $VLLM_PID > "$PID_FILE"
+        echo "   Stop it with: bash scripts/core/stop_vllm.sh $PORT"
         exit 0
     fi
 
     sleep 2
 done
 
-echo "❌ ERROR: Timed out waiting for vLLM to start."
-kill -9 $VLLM_PID
+echo "❌ ERROR: Timed out waiting for vLLM to start on port $PORT. Check $LOG_FILE"
+# Kill the entire process group so EngineCore workers don't orphan and leak VRAM.
+# Guard: never group-kill our own group (would take down an interactive shell).
+PGID=$(ps -o pgid= -p "$VLLM_PID" | tr -d ' ')
+MYPGID=$(ps -o pgid= -p $$ | tr -d ' ')
+if [ -n "$PGID" ] && [ "$PGID" != "$MYPGID" ]; then
+    kill -TERM -"$PGID" 2>/dev/null
+    sleep 5
+    kill -KILL -"$PGID" 2>/dev/null
+else
+    kill -TERM "$VLLM_PID" 2>/dev/null
+    sleep 5
+    kill -KILL "$VLLM_PID" 2>/dev/null
+fi
 exit 1

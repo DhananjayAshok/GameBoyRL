@@ -298,6 +298,30 @@ declare -A CREATE_DATASET_DEFAULTS=(
 )
 CREATE_DATASET_ARG_KEYS=("${CREATE_DATASET_ESSENTIALS[@]}" "${!CREATE_DATASET_DEFAULTS[@]}")
 
+# merge_practices: combines the train/validation CSVs of several practice dirs into one
+# dataset. NOTE: "none" is a *legitimate* value of --balance here, not the absent sentinel.
+# There is no overwrite flag — the merge always regenerates (it costs seconds, and a stale
+# merged dataset would silently be trained on).
+MERGE_PRACTICES_ESSENTIALS=("practice_paths" "save_path")
+declare -A MERGE_PRACTICES_DEFAULTS=(
+    ["balance"]="none"
+    ["seed"]=0
+)
+MERGE_PRACTICES_ARG_KEYS=("${MERGE_PRACTICES_ESSENTIALS[@]}" "${!MERGE_PRACTICES_DEFAULTS[@]}")
+
+# merged_dataset_dir <game> <model_save_name> <run_name>
+#
+# Where merge_practices writes the merged train/validation pair. Defined here because
+# curiosity_and_zeroshot_all.sh writes it and full.sh reads it, and the two must
+# not drift — neither passes the path to the other, both derive it from this function.
+#
+# model_save_name is part of the path for the same reason it is part of proposed_tasks/:
+# the merged dataset is built from one model's practice output, so two models sharing a
+# game and run_name must not share a merged dataset.
+function merged_dataset_dir() {
+    echo "$storage_dir/datasets/$1/$2/$3/merged"
+}
+
 GUIDANCE_AND_PRACTICE_ESSENTIALS=("trajectory_path")
 populate_array VLM_ESSENTIALS GUIDANCE_AND_PRACTICE_ESSENTIALS
 declare -A GUIDANCE_AND_PRACTICE_DEFAULTS
@@ -349,6 +373,7 @@ declare -A DEBUG_DEFAULTS=(
     ["run_name"]="my_run"
     ["executor"]="history"
     ["output_dir"]="none"
+    ["mode"]="both"
 )
 DEBUG_ARG_KEYS=("${DEBUG_ESSENTIALS[@]}" "${!DEBUG_DEFAULTS[@]}")
 
@@ -374,7 +399,7 @@ DEBUG_MODEL_ARG_KEYS=("${DEBUG_MODEL_ESSENTIALS[@]}" "${!DEBUG_MODEL_DEFAULTS[@]
 #   python debug.py $group_flags curiosity --n_frames 5
 function debug_group_flags() {
     local -n _dict="$1"
-    local result="--game ${_dict["game"]} --run_name ${_dict["run_name"]} --executor ${_dict["executor"]} --overwrite"
+    local result="--game ${_dict["game"]} --run_name ${_dict["run_name"]} --executor ${_dict["executor"]} --mode ${_dict["mode"]} --overwrite"
     if [[ "${_dict["output_dir"]}" != "none" ]]; then
         result+=" --output_dir ${_dict["output_dir"]}"
     fi

@@ -20,7 +20,7 @@ pretend to.
 
 Output
 ------
-<results_dir>/debug/<game>/practice/report.md plus a stratified judge-audit image pack.
+<results_dir>/debug/<game>/practice/report_<leg>.md plus a stratified judge-audit image pack.
 """
 
 import os
@@ -105,33 +105,45 @@ def _figure_task_success(frame: pd.DataFrame, out_path: str):
 
 @click.command(name="practice")
 @click.option("--model_name", required=True, help="Full VLM name (e.g. google/gemma-4-31b-it)")
-@click.option("--extra", default="zeroshot_with_curiosity", show_default=True,
+@click.option("--leg", default="both", show_default=True,
+              type=click.Choice(["curiosity", "zeroshot", "both"]),
+              help="Which data-collection leg's practice run to report. 'both' writes one "
+                   "report per leg. The merged dataset is not a leg — it holds only the two "
+                   "dataset CSVs, none of the practice artifacts this report reads.")
+@click.option("--extra", default="none", show_default=True,
               help="Which proposal variant's practice run to report.")
 @click.option("--n_audit", default=40, show_default=True,
               help="Episodes rendered for the manual judge audit (half success, half fail).")
 @click.option("--n_frames", default=8, show_default=True, help="Frames per audit strip.")
 @click.option("--seed", default=0, show_default=True, help="Seed for the audit sample.")
 @click.pass_obj
-def debug_practice(obj, model_name, extra, n_audit, n_frames, seed):
+def debug_practice(obj, model_name, leg, extra, n_audit, n_frames, seed):
     """Judge reliability, episode cutoffs, clean-filter behaviour, and an audit pack."""
     paths = Paths(
         parameters=obj["parameters"], game=obj["game"], run_name=obj["run_name"],
-        executor=obj["executor"], model_name=model_name, output_dir=obj["output_dir"],
+        executor=obj["executor"], model_name=model_name, output_dir=obj["output_dir"], mode=obj["mode"],
     )
+    legs = ["curiosity", "zeroshot"] if leg == "both" else [leg]
+    for name in legs:
+        print(_practice_report(paths, obj, name, extra, n_audit, n_frames, seed))
+
+
+def _practice_report(paths, obj, leg, extra, n_audit, n_frames, seed):
     overwrite = obj["overwrite"]
     report_dir = paths.debug_dir("practice")
-    images_dir = paths.debug_dir("practice", "images")
+    images_dir = paths.debug_dir("practice", "images", leg)
+    practice_dir = paths.leg_dir(leg, extra)
 
-    results_path = paths.require(paths.practice_results_csv(extra), "practice")
+    results_path = paths.require(paths.practice_results_csv(practice_dir), "practice")
     frame = pd.read_csv(results_path)
     score_mode = "success" in frame.columns and frame["success"].isna().all()
     if not score_mode:
         frame["success"] = frame["success"].astype(bool)
     else:
         frame["success"] = frame["score"] >= 6
-    log_info(f"[practice] {len(frame)} episodes from {results_path}")
+    log_info(f"[practice/{leg}] {len(frame)} episodes from {results_path}")
 
-    decisions_path = paths.require(paths.clean_decisions_csv(extra), "clean")
+    decisions_path = paths.require(paths.clean_decisions_csv(practice_dir), "clean")
     decisions = pd.read_csv(decisions_path)
     decisions["accept"] = decisions["accept"].astype(bool)
 
@@ -176,7 +188,7 @@ def debug_practice(obj, model_name, extra, n_audit, n_frames, seed):
 
     audit_entries = []
     for _, row in audit.iterrows():
-        pkl_path = paths.practice_episode_pkl(row["group_idx"], int(row["attempt"]), extra)
+        pkl_path = paths.practice_episode_pkl(practice_dir, row["group_idx"], int(row["attempt"]))
         if not os.path.exists(pkl_path):
             continue
         with open(pkl_path, "rb") as handle:
@@ -194,22 +206,41 @@ def debug_practice(obj, model_name, extra, n_audit, n_frames, seed):
             "n_calls": len(call_log),
             "actions": " ".join(actions[:20]),
             "image": out,
+            # TODO(legacy-cols): results.csv gained used_retry/derived_hint/judge_reasoning
+            # on 2026-07-20. .get keeps this report working on practice runs made before
+            # that; drop the fallbacks once every practice dir has been regenerated.
+            "used_retry": row.get("used_retry"),
+            "derived_hint": row.get("derived_hint", ""),
+            "judge_reasoning": row.get("judge_reasoning", ""),
         })
-    log_info(f"[practice] rendered {len(audit_entries)} audit strips")
+    log_info(f"[practice/{leg}] rendered {len(audit_entries)} audit strips")
 
     audit_blocks = []
     for entry in audit_entries:
+        # TODO(legacy-cols): three-way on purpose — True/False are real verdicts, None
+        # means the column predates 2026-07-20. Collapse to a two-way check once no
+        # pre-2026-07-20 practice dirs remain.
+        retry = entry.get("used_retry")
+        retry_note = ""
+        if retry is True:
+            retry_note = " · ⚠ **hint-carried retry**"
+        elif retry is False:
+            retry_note = " · unaided first draw"
         audit_blocks.append(
-            f"**`{entry['episode']}`** — judged **{entry['judged']}** · "
+            f"**`{entry['episode']}`** — judged **{entry['judged']}**{retry_note} · "
             f"safe_point `{entry['safe_point']}` · {entry['n_calls']} calls · your verdict: ______\n\n"
             f"task: _{entry['task']}_\n\n"
             f"actions: `{entry['actions']}`\n"
         )
+        if entry.get("derived_hint"):
+            audit_blocks.append(md.details("hint the retry ran under", md.code(entry["derived_hint"])))
+        if entry.get("judge_reasoning"):
+            audit_blocks.append(md.details("judge's reasoning", md.code(entry["judge_reasoning"])))
         audit_blocks.append(md.img(entry["episode"], entry["image"], report_dir))
 
     blocks = [
-        md.h1(f"Practice — {paths.game} / {paths.model_save_name} / extra={extra}"),
-        md.para(f"Source: `{paths.practice_dir(extra)}`"),
+        md.h1(f"Practice — {paths.game} / {paths.model_save_name} / leg={leg}"),
+        md.para(f"Leg: **{leg}** · source: `{practice_dir}`"),
         md.h2("Judged success"),
         md.bullets([
             f"episodes: **{n_episodes}** over **{frame['task_string'].nunique()}** unique tasks",
@@ -263,12 +294,14 @@ def debug_practice(obj, model_name, extra, n_audit, n_frames, seed):
             "in this whole debug suite."
         ),
         md.note(
-            "`results.csv` records no retry provenance, so a first-draw success and a "
-            "post-retry success are indistinguishable here. Do not infer one from the other."
+            # TODO(legacy-cols): drop this caveat once no pre-2026-07-20 practice dirs remain.
+            "`used_retry` distinguishes a first-draw success from a hint-carried retry. It is "
+            "absent from practice runs made before that column was added — those rows show "
+            "neither annotation."
         ),
         "\n".join(audit_blocks) if audit_blocks else md.para("_(no audit strips rendered)_"),
     ]
 
-    report_path = md.write_report(os.path.join(report_dir, "report.md"), blocks)
-    log_info(f"[practice] wrote {report_path}")
-    print(report_path)
+    report_path = md.write_report(os.path.join(report_dir, f"report_{leg}.md"), blocks)
+    log_info(f"[practice/{leg}] wrote {report_path}")
+    return report_path

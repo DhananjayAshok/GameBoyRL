@@ -7,16 +7,21 @@ Input (produced by scripts/vlm/create_dataset.sh)
     task_string, input, output, image, score
     `image` is a comma-joined list of absolute paths into <practice_dir>/images/.
 
-Images are **reused**, never re-rendered — create_dataset already wrote the JPEGs and the
-CSV points straight at them. They are linked relative to the report.
+Images are **copied** into the report's own ``images/<leg>/`` dir and linked from there.
+create_dataset already wrote the JPEGs, but under ``storage_dir`` (``/project2/...``), which
+is outside the VS Code workspace root — markdown preview will not load out-of-workspace
+images, so a relative link straight to them renders blank. Copying the sampled frames
+in-workspace (like every other report) is what makes them show. Only the sampled rows are
+copied, so the cost is bounded by ``--n_samples``.
 
 Output
 ------
-<results_dir>/debug/<game>/dataset/report.md
+<results_dir>/debug/<game>/dataset/report_<leg>.md
 """
 
 import os
 import re
+import shutil
 
 import click
 import pandas as pd
@@ -26,10 +31,9 @@ from debug_scripts import markdown as md
 from debug_scripts.paths import Paths
 from debug_scripts.stats import gini
 
-# Environment actions the low_level controller accepts; anything else in an `Action:` line
-# is a target the agent could never execute.
-VALID_ACTIONS = {"A", "B", "UP", "DOWN", "LEFT", "RIGHT", "START", "SELECT"}
-
+# create_dataset now drops any call with an unparseable or illegal `Action:` (its
+# VALID_ACTIONS is the source of truth), so this report no longer audits action validity —
+# every row's action is valid by construction. It still shows the action *distribution*.
 PROMPT_BLOCKS = {
     "Recent actions": "history section (HistoryAwareExecutor)",
     "[ERROR]": "parse-failure feedback",
@@ -52,40 +56,49 @@ def _parsed_action(output: str):
     return None
 
 
-def _audit(frame: pd.DataFrame) -> dict:
-    actions = frame["output"].map(_parsed_action)
-    unparseable = int(actions.isna().sum())
-    normalised = actions.dropna().str.strip().str.upper()
-    invalid = normalised[~normalised.isin(VALID_ACTIONS)]
-    return {
-        "counts": normalised.value_counts(),
-        "unparseable": unparseable,
-        "invalid": invalid.value_counts(),
-        "n_invalid": int(len(invalid)),
-    }
+def _action_counts(frame: pd.DataFrame) -> pd.Series:
+    """Distribution of parsed `Action:` values across training targets. create_dataset
+    guarantees every row has a valid, parseable action, so this is a coverage view, not a
+    validity check."""
+    return frame["output"].map(_parsed_action).dropna().str.strip().str.upper().value_counts()
 
 
 @click.command(name="dataset")
 @click.option("--model_name", required=True, help="Full VLM name (e.g. google/gemma-4-31b-it)")
-@click.option("--extra", default="zeroshot_with_curiosity", show_default=True,
-              help="Which proposal variant's dataset to report.")
+@click.option("--leg", default="both", show_default=True,
+              type=click.Choice(["curiosity", "zeroshot", "both"]),
+              help="Which data-collection leg's dataset to report. 'both' writes one report "
+                   "per leg. The merged dataset is not a leg — it is the concatenation of "
+                   "these two and carries a `source` column that reconstructs the split.")
+@click.option("--extra", default="none", show_default=True,
+              help="Which proposal variant, within the zeroshot leg only.")
 @click.option("--n_samples", default=50, show_default=True,
               help="Random rows to show, split across train and validation.")
 @click.option("--seed", default=0, show_default=True, help="Seed for the sample.")
 @click.pass_obj
-def debug_dataset(obj, model_name, extra, n_samples, seed):
+def debug_dataset(obj, model_name, leg, extra, n_samples, seed):
     """Show random train/validation rows verbatim, with an automatic target audit."""
     paths = Paths(
         parameters=obj["parameters"], game=obj["game"], run_name=obj["run_name"],
-        executor=obj["executor"], model_name=model_name, output_dir=obj["output_dir"],
+        executor=obj["executor"], model_name=model_name, output_dir=obj["output_dir"], mode=obj["mode"],
     )
-    report_dir = paths.debug_dir("dataset")
+    legs = ["curiosity", "zeroshot"] if leg == "both" else [leg]
+    written = [_dataset_report(paths, obj, name, extra, n_samples, seed) for name in legs]
+    for path in written:
+        print(path)
 
-    train_path = paths.require(paths.train_csv(extra), "dataset")
-    val_path = paths.require(paths.validation_csv(extra), "dataset")
+
+def _dataset_report(paths, obj, leg, extra, n_samples, seed):
+    report_dir = paths.debug_dir("dataset")
+    # Per-leg so curiosity/zeroshot copies never collide on a shared basename.
+    images_dir = paths.debug_dir("dataset", "images", leg)
+    practice_dir = paths.leg_dir(leg, extra)
+
+    train_path = paths.require(paths.train_csv(practice_dir), "dataset")
+    val_path = paths.require(paths.validation_csv(practice_dir), "dataset")
     train = pd.read_csv(train_path)
     val = pd.read_csv(val_path)
-    log_info(f"[dataset] {len(train)} train / {len(val)} validation rows")
+    log_info(f"[dataset/{leg}] {len(train)} train / {len(val)} validation rows")
 
     if n_samples > len(train) + len(val):
         log_error(
@@ -93,15 +106,14 @@ def debug_dataset(obj, model_name, extra, n_samples, seed):
             paths.parameters,
         )
 
-    audit = _audit(train)
+    counts = _action_counts(train)
     total = len(train)
     rows_per_task = train["task_string"].value_counts()
 
     action_table = pd.DataFrame({
-        "action": audit["counts"].index,
-        "rows": audit["counts"].values,
-        "share_%": audit["counts"].values / max(total, 1) * 100,
-        "valid": [a in VALID_ACTIONS for a in audit["counts"].index],
+        "action": counts.index,
+        "rows": counts.values,
+        "share_%": counts.values / max(total, 1) * 100,
     }).head(25)
 
     block_rows = []
@@ -140,17 +152,17 @@ def debug_dataset(obj, model_name, extra, n_samples, seed):
         if isinstance(image_field, str) and image_field.strip():
             for image_path in [p.strip() for p in image_field.split(",") if p.strip()]:
                 if os.path.exists(image_path):
-                    parts.append(md.img("frame", image_path, report_dir))
+                    # Copy in-workspace so the link renders in markdown preview (the source
+                    # lives under /project2, outside the workspace root). Basenames are
+                    # unique per call, so this is idempotent across re-runs.
+                    local = os.path.join(images_dir, os.path.basename(image_path))
+                    if obj["overwrite"] or not os.path.exists(local):
+                        shutil.copyfile(image_path, local)
+                    parts.append(md.img("frame", local, report_dir))
                 else:
                     missing_images += 1
                     parts.append(md.para(f"_(image missing: `{image_path}`)_"))
-        action = _parsed_action(row["output"])
-        flag = ""
-        if action is None:
-            flag = "  ⚠ **no parseable `Action:` line**"
-        elif action.strip().upper() not in VALID_ACTIONS:
-            flag = f"  ⚠ **`{action}` is not a valid environment action**"
-        parts.append(md.para(f"**input**{flag}"))
+        parts.append(md.para("**input**"))
         parts.append(md.code(row["input"]))
         parts.append(md.para("**output**"))
         parts.append(md.code(row["output"]))
@@ -160,8 +172,8 @@ def debug_dataset(obj, model_name, extra, n_samples, seed):
         log_warn(f"[dataset] {missing_images} referenced images are missing on disk")
 
     report_blocks = [
-        md.h1(f"SFT dataset — {paths.game} / {paths.model_save_name} / extra={extra}"),
-        md.para(f"Source: `{paths.practice_dir(extra)}`"),
+        md.h1(f"SFT dataset — {paths.game} / {paths.model_save_name} / leg={leg}"),
+        md.para(f"Leg: **{leg}** · source: `{practice_dir}`"),
         md.h2("Size"),
         md.bullets([
             f"train rows: **{len(train)}** over **{train['task_string'].nunique()}** task strings",
@@ -170,23 +182,12 @@ def debug_dataset(obj, model_name, extra, n_samples, seed):
             f"rows-per-task Gini: **{gini(rows_per_task.values):.3f}** "
             f"(top 10 tasks hold {rows_per_task.head(10).sum() / max(total, 1) * 100:.1f}% of rows)",
         ]),
-        md.h2("Target audit (train)"),
-        md.bullets([
-            f"rows with **no parseable `Action:` line**: **{audit['unparseable']}** "
-            f"({audit['unparseable'] / max(total, 1) * 100:.2f}%)",
-            f"rows whose action is **not a valid environment action**: **{audit['n_invalid']}** "
-            f"({audit['n_invalid'] / max(total, 1) * 100:.2f}%)",
-        ]),
+        md.h2("Action distribution (train)"),
         md.para(
-            "Both categories are targets the agent is trained to emit but the environment can "
-            "never execute; at benchmark time they surface as `n_invalid`."
+            "create_dataset drops any call with an unparseable or illegal `Action:`, so every "
+            "training target here is a valid environment action by construction."
         ),
         md.table(action_table),
-        md.details("invalid action strings",
-                   md.table(pd.DataFrame({
-                       "action": audit["invalid"].index,
-                       "rows": audit["invalid"].values,
-                   }))),
         md.h2("Prompt blocks present in training inputs"),
         md.table(blocks_table),
         md.para(
@@ -206,6 +207,6 @@ def debug_dataset(obj, model_name, extra, n_samples, seed):
         "\n\n".join(sample_blocks),
     ]
 
-    report_path = md.write_report(os.path.join(report_dir, "report.md"), report_blocks)
-    log_info(f"[dataset] wrote {report_path}")
-    print(report_path)
+    report_path = md.write_report(os.path.join(report_dir, f"report_{leg}.md"), report_blocks)
+    log_info(f"[dataset/{leg}] wrote {report_path}")
+    return report_path

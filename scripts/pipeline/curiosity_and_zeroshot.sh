@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Two-stage proposal for a single init_state: first proposes with no prior
-# (extra=none), then proposes with extra=zeroshot_with_curiosity, each followed
-# by an attempt run. Checks that infer_tasks has been run before starting.
+# Single init_state version of curiosity_and_zeroshot_all.sh: proposes with no prior
+# (extra=none), attempts, then runs guidance and practice. The curiosity annotation is
+# checked for but is no longer used as a proposal prior — see curiosity_and_zeroshot_all.sh
+# for why that arm was dropped.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 
@@ -66,18 +67,11 @@ if [[ ! -f "$curiosity_dir/trajectory_annotation.pkl" ]]; then
     exit 1
 fi
 
-user_do_guidance="${ARGS["do_guidance_and_practice"]}"
-
-# Stage 1: zeroshot baseline — only proposal needed as prior for stage 2.
+# Zeroshot leg for this single init_state: propose (no prior), attempt, then guidance and
+# practice. The curiosity annotation checked for above is this game's curiosity vertical
+# output; it is no longer consumed as a proposal prior (see curiosity_and_zeroshot_all.sh
+# for why), so there is only one leg here.
 ARGS["extra"]="none"
-ARGS["propose_only"]="true"
-ARGS["do_guidance_and_practice"]="false"
-flags=$(args_to_flags_subset ARGS PROPOSE_AND_ATTEMPT_ARG_KEYS)
-bash scripts/pipeline/propose_and_attempt.sh $flags || exit 1
-
-# Stage 2: the meaningful output — use zeroshot_tasks_prior_zeroshot_with_curiosity_attempts/success_trajectories for guidance_and_practice.
-ARGS["extra"]="zeroshot_with_curiosity"
 ARGS["propose_only"]="false"
-ARGS["do_guidance_and_practice"]="$user_do_guidance"
 flags=$(args_to_flags_subset ARGS PROPOSE_AND_ATTEMPT_ARG_KEYS)
 bash scripts/pipeline/propose_and_attempt.sh $flags || exit 1

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Reports the task-attempt stage: the proposed -> attempted -> succeeded funnel, how much
-# of that success needed escalating hints (n_tries), success by init_state, the tasks never
-# solved in five attempts, and frame strips for successful trajectories. Writes
-# <results_dir>/debug/<game>/attempt/report.md.
+# Reports task inference: the task strings infer_tasks distilled from each curiosity group,
+# beside a frame strip of the trajectories each task was distilled from. Writes one
+# <results_dir>/debug/<game>/infer/report.md.
+#
+# Reads only the trajectory_annotation.json/.pkl that infer_tasks wrote — no emulator, no
+# GPU, no VLM. This is the curiosity vertical's *output*, distinct from the debug_curiosity
+# report which covers infer_tasks' grouped-trajectory *input*.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 
@@ -12,9 +15,9 @@ REQUIRED_ARGS=()
 populate_array DEBUG_MODEL_ESSENTIALS REQUIRED_ARGS
 populate_dict DEBUG_MODEL_DEFAULTS ARGS
 
-ARGS["extra"]="none"
-ARGS["n_frames"]=8
-ARGS["max_trajectories"]=40
+ARGS["n_frames"]=5
+ARGS["max_tasks"]=0
+ARGS["max_traj_per_task"]=3
 
 # --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -61,8 +64,8 @@ done
 
 group_flags=$(debug_group_flags ARGS)
 
-python debug.py $group_flags attempt \
+python debug.py $group_flags infer \
     --model_name "${ARGS["model_name"]}" \
-    --extra "${ARGS["extra"]}" \
     --n_frames "${ARGS["n_frames"]}" \
-    --max_trajectories "${ARGS["max_trajectories"]}" || exit 1
+    --max_tasks "${ARGS["max_tasks"]}" \
+    --max_traj_per_task "${ARGS["max_traj_per_task"]}" || exit 1

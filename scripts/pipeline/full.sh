@@ -2,7 +2,8 @@
 # End-to-end driver: runs the zeroshot-with-curiosity proposal/practice pipeline for
 # a game, then fine-tunes the VLM on the train/validation datasets it produces.
 # Assumes a VLM server is already serving --model_name (does NOT start one) — bring up
-# the server (e.g. vllm_scripts/serve_vllm_*.sh) before calling this.
+# the server (e.g. scripts/core/serve_vllm.sh, or any `vllm serve` equivalent)
+# before calling this.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 
@@ -15,6 +16,7 @@ REQUIRED_ARGS+=("run_name")
 ARGS["executor"]="history"
 ARGS["push_to_hub"]=true
 ARGS["batch_size"]=4
+ARGS["mode"]="both"
 
 # --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -58,34 +60,65 @@ for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
-# Stage 1: propose zeroshot-with-curiosity tasks and run guidance/practice/clean/
-# create_dataset for every init_state. Only the 5 shared keys are forwarded; the
-# subscript fills the rest (incl. do_guidance_and_practice=true) from its defaults.
-propose_flags=$(args_to_flags_subset ARGS PROPOSE_AND_ATTEMPT_ARG_KEYS)
-bash scripts/pipeline/propose_zeroshot_with_curiosity_all.sh $propose_flags || exit 1
-
-bash scripts/core/stop_vllm.sh # If the VLM server is still running, stop it before fine-tuning. If we error out here its fine. 
-
-# Stage 2: fine-tune on the datasets create_dataset.py wrote into the practice dir.
-# Path mirrors what guidance_and_practice derives:
-#   dirname(success_trajectories)/practice_{executor}
-# under the zeroshot_with_curiosity attempts dir (see propose_and_attempt_all.sh).
+game="${ARGS["game"]}"
+mode="${ARGS["mode"]}"
+executor="${ARGS["executor"]}"
 model_save_name="${ARGS["model_name"]##*/}"
-practice_dir="$storage_dir/proposed_tasks/${ARGS["game"]}/${model_save_name}/zeroshot/zeroshot_tasks_prior_zeroshot_with_curiosity_${ARGS["executor"]}_attempts/practice_${ARGS["executor"]}"
-train_file="$practice_dir/train_dataset.csv"
-validation_file="$practice_dir/validation_dataset.csv"
+proposed_dir="$storage_dir/proposed_tasks/${game}/${model_save_name}"
+
+# Stage 1: run the data-collection legs for this mode, and resolve dataset_dir — the
+# directory holding train_dataset.csv / validation_dataset.csv. In two modes that is a
+# practice dir; in "both" it is the merged output. Every path is re-derived here rather
+# than passed back up, matching how the rest of the pipeline works.
+case "$mode" in
+    curiosity_only)
+        curiosity_flags=$(args_to_flags_subset ARGS CURIOSITY_TASKS_ARG_KEYS)
+        bash scripts/pipeline/curiosity_all_tasks.sh $curiosity_flags --do_guidance_and_practice true || exit 1
+        dataset_dir="$proposed_dir/curiosity/${ARGS["run_name"]}/practice_${executor}"
+        ;;
+    zeroshot_only)
+        propose_flags=$(args_to_flags_subset ARGS PROPOSE_AND_ATTEMPT_ARG_KEYS)
+        bash scripts/pipeline/propose_and_attempt_all.sh $propose_flags \
+            --extra none --propose_only false --do_guidance_and_practice true || exit 1
+        dataset_dir="$proposed_dir/zeroshot/zeroshot_tasks_${executor}_attempts/practice_${executor}"
+        ;;
+    both)
+        propose_flags=$(args_to_flags_subset ARGS PROPOSE_AND_ATTEMPT_ARG_KEYS)
+        bash scripts/pipeline/curiosity_and_zeroshot_all.sh $propose_flags || exit 1
+        dataset_dir=$(merged_dataset_dir "$game" "$model_save_name" "${ARGS["run_name"]}")
+        ;;
+    *)
+        echo "Error: unknown --mode '$mode'. Choose one of: curiosity_only, zeroshot_only, both."
+        exit 1 ;;
+esac
+
+# Stage 2: fine-tune on whichever dataset this mode produced.
+train_file="$dataset_dir/train_dataset.csv"
+validation_file="$dataset_dir/validation_dataset.csv"
+
+echo "Mode '$mode' -> dataset_dir: $dataset_dir"
 
 if [[ ! -f "$train_file" ]]; then
-    echo "Error: train dataset not found at $train_file. The proposal/practice stage did not produce it."
+    echo "Error: train dataset not found at $train_file. The mode '$mode' data-collection stage did not produce it."
     exit 1
 fi
 
-bash ~/vllm_scripts/stop_vllm.sh # If the VLM server is still running, stop it before fine-tuning. If we error out here its fine.
+# If the VLM server is still running, stop it before fine-tuning so it isn't holding VRAM.
+# Failing here is fine (it just means nothing was running).
+# NOTE: stop_vllm.sh routes through ~/vllm_scripts if present, else SIGTERMs the vllm
+# process group its generic serve path recorded at launch.
+bash scripts/core/stop_vllm.sh
 
+# The mode is part of the run name, and therefore of the checkpoint dir, the hub repo, the
+# served model name and the benchmark CSV. Without it, running two modes with the same
+# --run_name silently overwrites the first one's checkpoint AND its benchmark results.
+# serve_and_benchmark.sh re-derives this same string from --game/--run_name/--mode.
+# Fine-tuning is currently echoed rather than run, so the data-collection legs can be
+# exercised end-to-end without spending a training job. Restore by dropping the echo.
 bash scripts/vlm/train_vlm.sh \
     --train_file "$train_file" \
     --validation_file "$validation_file" \
     --model_name "${ARGS["model_name"]}" \
-    --run_name "${ARGS["game"]}-${ARGS["run_name"]}" \
+    --run_name "${game}-${ARGS["run_name"]}-${mode}" \
     --push_to_hub "${ARGS["push_to_hub"]}" \
     --batch_size "${ARGS["batch_size"]}" || exit 1

@@ -82,7 +82,7 @@ def debug_zeroshot(obj, model_name, extra, controller_variant):
     """Proposed tasks per init_state, beside that state's real benchmark tasks."""
     paths = Paths(
         parameters=obj["parameters"], game=obj["game"], run_name=obj["run_name"],
-        executor=obj["executor"], model_name=model_name, output_dir=obj["output_dir"],
+        executor=obj["executor"], model_name=model_name, output_dir=obj["output_dir"], mode=obj["mode"],
     )
     overwrite = obj["overwrite"]
     report_dir = paths.debug_dir("zeroshot")
