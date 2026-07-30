@@ -73,6 +73,4 @@ sample_log_file="${ARGS["executor"]}_${model_save_name}_sample_${ARGS["random_sa
 
 #$common --random_sample ${ARGS["random_sample"]} --verbose #&> "results/benchmark/${ARGS["game"]}/${sample_log_file}"
 
-log_file=${ARGS["executor"]}_${model_save_name}.out
-
-$common --verbose &> "results/benchmark/${ARGS["game"]}/${log_file}"
+$common

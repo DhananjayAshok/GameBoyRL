@@ -13,6 +13,7 @@ REQUIRED_ARGS=()
 populate_array VLM_ESSENTIALS REQUIRED_ARGS
 REQUIRED_ARGS+=("run_name")
 populate_dict CURIOSITY_TASKS_DEFAULTS ARGS
+ARGS["overwrite_annotation"]=false
 
 # --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -92,7 +93,10 @@ python scripts/python/combine_grouped_trajectories.py \
     --z_kind global || exit 1
 
 ARGS["trajectory_path"]="$combined_dir/grouped_global_high_reward_trajectories.pkl"
+saved_overwrite="${ARGS["overwrite"]}"
+ARGS["overwrite"]="${ARGS["overwrite_annotation"]}"
 infer_flags=$(args_to_flags_subset ARGS INFER_TASKS_ARG_KEYS)
+ARGS["overwrite"]="$saved_overwrite"
 bash scripts/vlm/infer_tasks.sh $infer_flags || exit 1
 
 model_save_name="${ARGS["model_name"]##*/}"

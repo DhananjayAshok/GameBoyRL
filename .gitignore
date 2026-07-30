@@ -179,5 +179,7 @@ results/
 save_frames/
 *.out
 configs/config.env
-scripts/all_train_states.sh
+tmp*.sh
+tmp*
+scripts/core/all_train_states.sh
 vllm*.pid
