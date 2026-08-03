@@ -53,6 +53,7 @@ import click
 import pandas as pd
 from tqdm import tqdm
 
+from execution.report import ACTION_TAGS
 from utils import VLM, HuggingFaceModel, log_info, log_error, parse_key_value
 # Source of truth for which episodes/records become data — imported so the clean
 # pass selects and slices exactly what create_dataset will emit.
@@ -303,6 +304,12 @@ def _run_filter_pass(
         cutoff = _episode_cutoff(row.get("safe_success_point"), len(vlm_call_log), safety_margin)
         for call_idx, record in enumerate(vlm_call_log[:cutoff]):
             if (group_idx, attempt, call_idx) in done:
+                continue
+            # Auxiliary calls (the completion check under allow_self_termination, and any
+            # other non-action call an executor logs) are not candidate training rows, so
+            # there is nothing here to judge. Filtering them costs a VLM call each and
+            # would write accept/reject decisions create_dataset then ignores.
+            if record.tag not in ACTION_TAGS:
                 continue
             jobs.append((group_idx, attempt, call_idx, row["task_string"], record))
 

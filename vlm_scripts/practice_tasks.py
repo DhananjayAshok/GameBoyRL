@@ -74,9 +74,8 @@ from tqdm import tqdm
 from gameboy_worlds import get_environment
 from execution.registry import AVAILABLE_EXECUTORS
 from execution.report import EnvironmentStepRecord, attach_next_frames
-from execution.supervisor import SimpleCheckerSupervisor
+from execution.supervisor import SimpleCheckerSupervisor, derive_critique_hint
 from utils import log_info, log_warn, log_error, VLM, HuggingFaceModel
-from vlm_scripts.attempt_tasks import _derive_hint
 
 
 def _format_guidance(guidance_dict: dict) -> str:
@@ -182,7 +181,7 @@ def _practice_episode(
         derived_hint = ""
         if failed:
             env_steps = [s for s in result["steps"] if isinstance(s, EnvironmentStepRecord)]
-            derived_hint = _derive_hint(env_steps, task_str, game, supervisor._checker_vlm, max_new_tokens)
+            derived_hint = derive_critique_hint(env_steps, task_str, game, supervisor._checker_vlm, max_new_tokens)
             hint_str = f"{guidance_str}\nSpecific hint: {derived_hint}" if guidance_str else f"Specific hint: {derived_hint}"
             # Rebuild rather than assigning supervisor._hint: Supervisor copies hint into
             # _executor_kwargs at construction time and call_executor splats that frozen
@@ -211,7 +210,7 @@ def _practice_episode(
 
         if verbose:
             print(f"  Attempt {attempt}: {'success' if result.get('success') else 'failure'} | score={result.get('score', float('nan')):.3f}")
-            print(str(supervisor._last_report))
+            supervisor._last_report.show()
             breakpoint()
 
         row = {
@@ -308,7 +307,7 @@ def _practice_episode(
 )
 @click.option(
     "--checker_max_new_tokens",
-    default=1000,
+    default=2000,
     show_default=True,
     help="Token budget for each checker VLM call.",
 )

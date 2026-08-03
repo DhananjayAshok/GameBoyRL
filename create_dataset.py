@@ -67,6 +67,7 @@ import pandas as pd
 from PIL import Image
 from tqdm import tqdm
 
+from execution.report import ACTION_TAGS
 from utils import log_error, log_info
 
 
@@ -262,6 +263,15 @@ def create_dataset(practice_path, overwrite, safety_margin, val_frac, seed, scor
         for call_idx, record in enumerate(vlm_call_log[:cutoff]):
             if decisions.get((group_idx, attempt, call_idx)) is False:
                 n_rejected += 1
+                continue
+
+            # Not an action call at all — a completion check under allow_self_termination,
+            # or any other auxiliary call an executor logs. Skipped on the tag rather than
+            # left to fail the Action: parse below: it would be dropped either way, but as
+            # "unparseable", which is a counter that exists to detect the acting model
+            # producing malformed output and must not be inflated by calls that were never
+            # asked for an action.
+            if record.tag not in ACTION_TAGS:
                 continue
 
             # Drop calls whose response has no parseable Action: line, or names an action

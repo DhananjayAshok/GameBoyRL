@@ -20,7 +20,7 @@ import numpy as np
 from gameboy_worlds.interface import HighLevelAction
 
 from execution.executor_action import ExecutorAction
-from utils import load_parameters
+from utils import load_parameters, parse_yes_no
 
 
 @dataclass
@@ -208,18 +208,25 @@ class ExecutorReport:
     - ``"max_steps"``  — the environment-step budget was exhausted.
     - ``"terminated"`` — the environment signalled a terminal state.
     - ``"truncated"``  — the environment signalled truncation.
+    - ``"agent_done"`` — the post-step completion check said the task is finished
+      (only possible under ``allow_self_termination``).
+    - ``"max_invalid"``— too many consecutive unparseable action responses.
     - ``None``         — execution has not yet completed.
+
+    ``"agent_give_up"`` was a sixth value, produced by a ``GIVE_UP`` action token that no
+    longer exists. It is retired rather than recycled: artifacts written before that
+    removal still contain it, and nothing new should reuse the string or its outcome code
+    (``4``).
     """
 
     def __str__(self) -> str:
-        """Return the full interleaved VLM-call / step trajectory as a string and save images to disk."""
-        parameters = load_parameters()
-        task_str = re.sub(r"[^\w]", "_", self.task.lower()).strip("_")
-        img_save_path = os.path.join(parameters["results_dir"], "benchmark", self.game, self.executor_name, task_str)
-        if os.path.exists(img_save_path):
-            shutil.rmtree(img_save_path)
-        os.makedirs(img_save_path)
+        """Return the full interleaved VLM-call / step trajectory as a string.
 
+        Pure formatting with no disk side effects — safe to call anywhere a
+        report is stringified (e.g. the benchmark CSV ``report`` column). Use
+        :meth:`show` to also print the trajectory and save the per-call frames
+        to disk.
+        """
         lines: List[str] = []
 
         if not self.vlm_call_log:
@@ -242,20 +249,26 @@ class ExecutorReport:
             lines.append(_indent(entry.prompt, "  │   "))
             lines.append("  │ VLM output:")
             lines.append(_indent(entry.response, "  │   "))
-            for i, image in enumerate(entry.images):
-                img_path = os.path.join(img_save_path, f"{display_idx}_{i}.png")
-                plt.imshow(image)
-                plt.savefig(img_path)
-                plt.clf()
 
-            if entry.tag in _ACTION_TAGS:
+            if entry.tag in ACTION_TAGS:
                 n_action += 1
                 if step is None:
+                    # Every action call consumes a steps entry, so this can only be a call
+                    # that ran off the end of the list.
                     lines.append("  │ → INVALID  (end of steps)")
                 elif isinstance(step, InvalidStepRecord):
                     lines.append(f"  │ → INVALID  ({step.reason})")
                 else:
                     lines.append(f"  │ → {_step_summary(step)}")
+            elif entry.tag == DONE_CHECK_TAG:
+                # The judgement, not just the prose that produced it. A run that ended here
+                # says so on the same line, which is the only place the report shows *why*
+                # an episode with budget left stopped.
+                verdict = "yes" if says_complete(entry.response) else "no"
+                ended = (call_idx == len(self.vlm_call_log) - 1
+                         and self.termination_reason == "agent_done")
+                lines.append(f"  │ → COMPLETE: {verdict}"
+                             + ("  → SELF-TERMINATED  (agent_done)" if ended else ""))
 
             lines.append("  └" + "─" * 57)
 
@@ -266,6 +279,41 @@ class ExecutorReport:
                 lines.append(f"    [{j}] {_step_summary(step)}")
 
         return "\n".join(lines)
+
+    def _save_images(self) -> None:
+        """Write every VLM-call frame to ``results_dir/benchmark/<game>/<executor>/<task>/``.
+
+        Split out of :meth:`__str__` so that merely stringifying a report has no
+        disk side effects. The target directory is rmtree'd and recreated first,
+        so images are keyed on the executor class (not the model) and a later run
+        overwrites an earlier one — see ``debug_scripts/benchmark.py``.
+        """
+        parameters = load_parameters()
+        task_str = re.sub(r"[^\w]", "_", self.task.lower()).strip("_")
+        img_save_path = os.path.join(parameters["results_dir"], "benchmark", self.game, self.executor_name, task_str)
+        if os.path.exists(img_save_path):
+            shutil.rmtree(img_save_path)
+        os.makedirs(img_save_path)
+
+        for call_idx, entry, _step in iter_call_steps(self.vlm_call_log, self.steps):
+            display_idx = call_idx + 1
+            for i, image in enumerate(entry.images):
+                img_path = os.path.join(img_save_path, f"{display_idx}_{i}.png")
+                plt.imshow(image)
+                plt.savefig(img_path)
+                plt.clf()
+
+    def show(self) -> str:
+        """Print the full trajectory and save the per-call frames to disk.
+
+        For verbose/debug output. Use ``str(report)`` when only the rendered
+        text is needed (e.g. persisting to the CSV ``report`` column) — that
+        path writes nothing to disk.
+        """
+        text = str(self)
+        self._save_images()
+        print(text)
+        return text
 
 
 def _indent(text: str, prefix: str = "      ") -> str:
@@ -280,7 +328,49 @@ def _step_summary(step: Union[EnvironmentStepRecord, ToolCallRecord, InvalidStep
     return f"TOOL  {step.executor_action_class.__name__}({step.kwargs})  result={step.result}"
 
 
-_ACTION_TAGS = {"action", "score", "decide"}
+ACTION_TAGS = {"action", "score", "decide"}
+
+#: Tag of the post-step completion check (``Executor._check_task_complete``).
+#: Deliberately **not** in :data:`ACTION_TAGS`: the check consumes no ``steps`` entry, so
+#: the lockstep walk in :func:`iter_call_steps` must skip it exactly as it skips
+#: ``"reflection"`` and the other non-action calls. Consumers that reconstruct an action
+#: sequence from a call log (``create_dataset``, ``clean_practice``, ``debug_scripts``)
+#: should filter on this rather than on whether the response happens to parse as an action.
+DONE_CHECK_TAG = "done_check"
+
+
+def parse_completion(response: str) -> Optional[bool]:
+    """The verdict in a ``done_check`` response, or ``None`` if it had no ``Complete:`` line.
+
+    The ``Complete: <yes|no>`` format is a **cross-module contract**, not an executor
+    detail, which is why the sole parse of it lives here rather than on
+    :class:`~execution.executor.Executor`. Three subsystems read the same verdict off the
+    same call log: the executor decides whether to stop, :meth:`ExecutorReport.__str__`
+    renders it, and the plan supervisor quotes it back to the reviser. Only the first of
+    those has an executor instance, so a per-executor parse could never have been honoured
+    by the other two — the format cannot vary by subclass even in principle.
+
+    ``None`` is distinct from ``False`` on purpose: "the judge said no" and "the judge did
+    not answer" are the same decision (see :func:`says_complete`) but not the same event,
+    and only the caller that made the call is in a position to report the difference.
+
+    This function exists to name the *contract* — that ``Complete:`` is the key three
+    subsystems agree on. The *format* — what counts as yes — belongs to
+    :func:`~utils.parse_yes_no` and is shared with every other verdict in the codebase.
+    """
+    return parse_yes_no(response, "Complete")
+
+
+def says_complete(response: str) -> bool:
+    """Whether a ``done_check`` response answered yes.
+
+    **Anything that does not explicitly say yes is a no**, including an unparseable
+    response. A malformed judgement must never end a run: stopping early destroys the rest
+    of the episode, while carrying on costs at most the remaining step budget. The
+    asymmetry is hard-coded here rather than left to the prompt precisely because it is the
+    behaviour every reader must agree on.
+    """
+    return parse_completion(response) is True
 
 
 def iter_call_steps(vlm_call_log, steps):
@@ -288,7 +378,7 @@ def iter_call_steps(vlm_call_log, steps):
     entry it consumed.
 
     This is the single source of truth for the call<->step lockstep alignment.
-    Only calls whose ``tag`` is in :data:`_ACTION_TAGS` consume a ``steps`` entry
+    Only calls whose ``tag`` is in :data:`ACTION_TAGS` consume a ``steps`` entry
     (one per action call, in order); for every other call ``step`` is ``None``.
     Once ``steps`` is exhausted, action calls yield ``step=None`` too (matching
     the original ``next(steps_iter, None)`` behaviour). ``call_idx`` is the
@@ -300,7 +390,7 @@ def iter_call_steps(vlm_call_log, steps):
     """
     steps_iter = iter(steps)
     for call_idx, entry in enumerate(vlm_call_log):
-        step = next(steps_iter, None) if entry.tag in _ACTION_TAGS else None
+        step = next(steps_iter, None) if entry.tag in ACTION_TAGS else None
         yield call_idx, entry, step
 
 
@@ -312,6 +402,9 @@ def attach_next_frames(vlm_call_log, steps) -> None:
     records are left as ``None``. ``steps`` must be the FULL interleaved steps
     list (tool/env/invalid) — a pre-filtered (e.g. env-only) list would break the
     lockstep alignment. Idempotent.
+
+    :data:`DONE_CHECK_TAG` calls are among the "all other records": they consume no step,
+    so they neither receive a next-frame nor disturb the alignment of the calls around them.
     """
     for _, entry, step in iter_call_steps(vlm_call_log, steps):
         if isinstance(step, EnvironmentStepRecord):

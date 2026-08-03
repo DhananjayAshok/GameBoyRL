@@ -60,7 +60,7 @@ def run_task(row, max_resets, controller_variant, executor_class, max_tool_calls
             report_str = str(report)
             if verbose:
                 print(f"\n  Reset {n_resets} trajectory:")
-                print(report_str)
+                report.show()
 
             environment.close()
             error = False
@@ -88,6 +88,10 @@ def run_task(row, max_resets, controller_variant, executor_class, max_tool_calls
 @click.option("--max_tool_calls", default=0, type=int)
 @click.option("--override_index", default=None, type=int, required=False)
 @click.option("--random_sample", type=int, default=None)
+@click.option("--n_tasks", type=int, default=None,
+              help="Run the FIRST n tasks in benchmark order. Mirrors the same flag on "
+                   "run_benchmark_info_plan.py so the two arms can be pointed at the same "
+                   "prefix; --random_sample would draw a different subset.")
 @click.option("--verbose", is_flag=True, default=False)
 @click.option("--regenerate", is_flag=True, default=False)
 def do(
@@ -102,6 +106,7 @@ def do(
     max_tool_calls,
     override_index,
     random_sample,
+    n_tasks,
     verbose,
     regenerate,
 ):
@@ -137,10 +142,23 @@ def do(
         benchmark_tasks = benchmark_tasks.sample(
             n=random_sample, random_state=42
         ).reset_index(drop=True)
+    if n_tasks is not None:
+        if random_sample is not None:
+            raise ValueError("--random_sample and --n_tasks select the task set in "
+                             "different ways; pass one or the other.")
+        if not (1 <= n_tasks <= len(benchmark_tasks)):
+            raise ValueError(
+                f"n_tasks must be between 1 and {len(benchmark_tasks)}, got {n_tasks}"
+            )
+        benchmark_tasks = benchmark_tasks.head(n_tasks).reset_index(drop=True)
     results = project_parameters["results_dir"]
     os.makedirs(f"{results}/benchmark/{game}/", exist_ok=True)
+    # A subset run gets its own CSV, or resuming a full run from a 5-task file would treat
+    # the first 5 as done and silently skip them.
     if random_sample is not None:
         save_path = f"{results}/benchmark/{game}/{executor}_{model_save_name}_sample{random_sample}.csv"
+    elif n_tasks is not None:
+        save_path = f"{results}/benchmark/{game}/{executor}_{model_save_name}_first{n_tasks}.csv"
     else:
         save_path = f"{results}/benchmark/{game}/{executor}_{model_save_name}.csv"
     if not regenerate and os.path.exists(save_path):

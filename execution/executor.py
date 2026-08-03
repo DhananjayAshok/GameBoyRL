@@ -41,8 +41,9 @@ from gameboy_worlds.interface import Environment, HighLevelAction
 from gameboy_worlds.interface.action import LowLevelAction
 
 from execution.executor_action import ExecutorAction
-from execution.report import EnvironmentStepRecord, ExecutorReport, InvalidStepRecord, SimpleReport, ToolCallRecord, VLMCallRecord
-from utils import load_parameters, log_info, ExecutorVLM
+from execution.report import (EnvironmentStepRecord, ExecutorReport, InvalidStepRecord, SimpleReport,
+                              ToolCallRecord, VLMCallRecord, parse_completion)
+from utils import load_parameters, log_info, ExecutorVLM, parse_key_value
 
 MAX_CONSECUTIVE_INVALID = 10
 DEBUG_ON_INVALID = False
@@ -76,12 +77,26 @@ class Executor(ABC):
     :param parameters: Optional parameter overrides forwarded to
         :func:`~utils.parameter_handling.load_parameters`.
     :type parameters: Optional[dict]
-    :param allow_self_termination: When ``True``, the VLM may output
-        :attr:`DONE_TOKEN` (task complete, outcome 3) or
-        :attr:`GIVE_UP_TOKEN` (task unachievable, outcome 4) as its action to
-        end execution early.  The termination reason is recorded as
-        ``"agent_done"`` or ``"agent_give_up"`` respectively.  Defaults to
-        ``False``.
+    :param allow_self_termination: When ``True``, an extra VLM call asks whether
+        the task is now fully complete (see :meth:`_check_task_complete`).  A
+        ``yes`` ends execution with outcome 3 and ``termination_reason ==
+        "agent_done"``.  Defaults to ``False``, in which case nothing extra is
+        called and the executor plays until the environment or the step budget
+        stops it.
+
+        How often the check runs is the executor's choice, made in its
+        ``_execute`` loop: after every environment step by default, subject to
+        :data:`DONE_CHECK_EVERY_K_STEPS`, but see
+        :class:`SequencePlannerExecutor`, which checks once per committed plan.
+
+        There is deliberately **no give-up mechanism**.  The check asks one
+        question — is the task complete — and "this is hopeless" is not an
+        answer to it.  An executor that cannot make progress runs to
+        ``max_steps``.
+
+        The action prompt is **identical** either way: nothing about
+        termination is ever advertised to the acting model, so a run's prompts
+        do not depend on this flag.
     :type allow_self_termination: bool
     :param kwargs: Additional subclass-specific keyword arguments.  These are
         recorded verbatim in :attr:`report.init_kwargs` but are otherwise
@@ -100,8 +115,55 @@ class Executor(ABC):
 
     available_tools: list = []
 
-    DONE_TOKEN = "DONE"
-    GIVE_UP_TOKEN = "GIVE_UP"
+    #: Prompt for the post-step completion check (:meth:`_check_task_complete`).
+    #:
+    #: The verdict is asked for BEFORE the reasoning, which is the reverse of every other
+    #: prompt here. This one is paid per environment step, so its token budget is the
+    #: tightest in the codebase, and a model that narrates before answering (gemini writes a
+    #: ``Reasoning:`` preamble of its own before the response proper) can spend the whole
+    #: allowance without ever reaching the last line. Verdict-last means truncation costs the
+    #: answer and keeps the explanation; verdict-first means it costs the explanation and
+    #: keeps the answer. An unparsed verdict reads as "not complete", so the failure is
+    #: silent: the check simply never fires.
+    #: Two images are attached: the frame before the last action and the frame after it.
+    DONE_CHECK_PROMPT = """Task: [TASK][HINT_BLOCK]
+
+You are judging whether a task being played on a GameBoy has been FULLY completed.
+
+Image 1 is the screen BEFORE the most recent action. Image 2 is the screen AFTER it.
+
+Most recent action: [LAST_ACTION]
+[REASONING_LABEL]
+[LAST_REASONING]
+
+[HISTORY_BLOCK]Decide whether the task as stated is now COMPLETELY accomplished — not partially, not nearly, not "the next step is obvious". If any part of the task remains to be done, the answer is no. If you cannot tell from what is visible, the answer is no.
+
+Respond in exactly this format, with the verdict FIRST:
+Complete: <yes or no>
+Reasoning: <why, referring to what is visible in image 2>
+[STOP]"""
+
+    #: How the reasoning passed to the completion check is introduced. Overridden by
+    #: executors whose stored reasoning is not step-level (see
+    #: :class:`SequencePlannerExecutor`), so the prompt never misrepresents what the text is.
+    DONE_CHECK_REASONING_LABEL = "The reasoning given for that action was:"
+
+    #: Env actions shown to the completion check as history.
+    DONE_CHECK_HISTORY_K = 8
+
+    #: Run the completion check after every k-th environment step. 1 checks every step,
+    #: which is the most responsive and the most expensive — it roughly doubles the VLM
+    #: calls of a self-terminating run. Raising it to 2 or 3 halves or thirds that, at the
+    #: cost of noticing completion up to k-1 steps late. The last permitted step is always
+    #: checked whatever k is (see :meth:`_done_check_due`).
+    DONE_CHECK_EVERY_K_STEPS = 1
+
+    #: Token budget for the completion check, paid once per environment step. Not 300: a
+    #: model that narrates before answering (gemini writes its own ``Reasoning:`` preamble)
+    #: spends that entirely on prose and the reply is cut off before the verdict.
+    #: :data:`DONE_CHECK_PROMPT` asks for the verdict first so truncation costs the
+    #: explanation rather than the answer.
+    DONE_CHECK_MAX_NEW_TOKENS = 1500
 
     def __init__(
         self,
@@ -133,6 +195,10 @@ class Executor(ABC):
         self._max_new_tokens = self._parameters.get("executor_vlm_max_new_tokens", 512)
         self._last_frame_changed = True
         self._n_tool_calls = 0
+        # The reasoning the acting model gave for the action it most recently chose, kept
+        # for the completion check. Set by _pick_action; None until the first parse, and on
+        # executors whose action call produces no reasoning at all.
+        self._last_reasoning: Optional[str] = None
 
         self.report = self._make_report(task, kwargs, max_steps, max_tool_calls)
 
@@ -296,7 +362,7 @@ class Executor(ABC):
         :param tag: Short label for the call's role, e.g. ``"action"``,
             ``"reflection"``, ``"map_update"``, ``"belief_update"``,
             ``"decompose"``, ``"score"``, ``"rethink"``, ``"propose"``,
-            ``"challenge"``, ``"decide"``.
+            ``"challenge"``, ``"decide"``, ``"done_check"``.
         :type tag: str
         :param kwargs: Keyword arguments forwarded to
             :meth:`~utils.vlm.ExecutorVLM.infer`.
@@ -328,31 +394,163 @@ class Executor(ABC):
         """
         return self._env.get_action_strings(return_all=return_all)
 
-    def _check_self_termination(self, action_str: str) -> Optional[int]:
+    # ------------------------------------------------------------------
+    # Self-termination — the post-step completion check
+    # ------------------------------------------------------------------
+
+    def _parse_reasoning(self, response: str) -> Optional[str]:
+        """The ``Reasoning:`` line of an action response, or ``None``."""
+        return parse_key_value(response, "Reasoning")
+
+    def _recent_actions_block(self, k: Optional[int] = None) -> str:
         """
-        If self-termination is enabled and *action_str* is a termination token,
-        record the reason and return the outcome code; otherwise return ``None``.
+        The last *k* environment actions, oldest first, for the completion check.
 
-        Call this immediately after parsing *action_str* in ``_execute``, before
-        attempting tool or environment dispatch::
+        Derived from :attr:`report.steps` rather than from any subclass's own bookkeeping,
+        so every executor gets history here without duplicating
+        :class:`HistoryAwareExecutor`'s state. That class keeps its own list for its own
+        prompt; the two serve different callers and are deliberately not merged.
+        """
+        k = self.DONE_CHECK_HISTORY_K if k is None else k
+        env_steps = [s for s in self.report.steps if isinstance(s, EnvironmentStepRecord)]
+        if not env_steps:
+            return ""
+        lines = ["Recent actions (oldest first, the last one is the action judged above):"]
+        for step in env_steps[-k:]:
+            lines.append(f"  {step.action_class.get_action_name(**step.kwargs)}")
+        return "\n".join(lines) + "\n\n"
 
-            outcome = self._check_self_termination(action_str)
+    def _build_done_check_prompt(self, record: EnvironmentStepRecord) -> str:
+        last_action = record.action_class.get_action_name(**record.kwargs)
+        reasoning = self._last_reasoning or "(no reasoning was recorded for this action)"
+        return (
+            self.DONE_CHECK_PROMPT
+            .replace("[TASK]", self._task)
+            .replace("[HINT_BLOCK]", self._hint_block())
+            .replace("[LAST_ACTION]", last_action)
+            .replace("[REASONING_LABEL]", self.DONE_CHECK_REASONING_LABEL)
+            .replace("[LAST_REASONING]", reasoning)
+            .replace("[HISTORY_BLOCK]", self._recent_actions_block())
+        )
+
+    def _check_task_complete(self, record: EnvironmentStepRecord) -> bool:
+        """
+        Ask the VLM whether the task is now fully complete.
+
+        One call, tagged ``"done_check"``, showing the frames either side of *record* along
+        with the task, the hint, the action just taken, the reasoning that chose it and the
+        recent action history. Consumes no environment step and no tool budget.
+
+        The judge is the executor's own model — the same :attr:`_vlm`, so it follows the
+        ``vlm_model`` constructor override. Judging with a stronger model than the one
+        acting would make ``agent_done`` mean something different per run and stop
+        self-terminated episodes being comparable across the benchmark.
+
+        The response format is owned by :func:`~execution.report.parse_completion`, not by
+        this class — the report renderer and the plan supervisor read the same verdict off
+        the call log and must agree with the decision made here.
+
+        :param record: The step record just appended by :meth:`_take_action`.
+        :return: ``True`` only on an explicit ``Complete: yes``.
+        """
+        prompt = self._build_done_check_prompt(record)
+        response = self._vlm_call(
+            "done_check",
+            texts=prompt,
+            images=[record.frame_before, record.frame_after],
+            max_new_tokens=self.DONE_CHECK_MAX_NEW_TOKENS,
+        )
+        verdict = parse_completion(response)
+        if verdict is None:
+            # Logged, not recorded via _record_invalid: that list and MAX_CONSECUTIVE_INVALID
+            # are about the *acting* model's formatting, and a judge's bad formatting must
+            # not push an executor toward max_invalid. This is the only site that can tell
+            # "said no" from "did not answer" apart, so it is the only one that reports it.
+            log_info(
+                f"Completion check response had no parseable 'Complete:' line, treating as "
+                f"not complete:\n{response}",
+                parameters=self._parameters,
+            )
+        return verdict is True
+
+    def _maybe_self_terminate(self, record: EnvironmentStepRecord, n_env_steps: int) -> Optional[int]:
+        """
+        Run the completion check and end the run if it says the task is done.
+
+        Call from ``_execute`` immediately after a successful environment step, **after**
+        the environment's own ``terminated`` / ``truncated`` branches, passing the loop's
+        own budget counter::
+
+            outcome = self._maybe_self_terminate(record, n_env_steps)
             if outcome is not None:
                 return outcome
 
-        :return: ``3`` for ``DONE``, ``4`` for ``GIVE_UP``, ``None`` otherwise.
+        The ordering is not cosmetic: the environment's verdict is ground truth and the
+        agent's is an opinion, so when both fire on the same step the ground truth is what
+        gets recorded. Reversing them would quietly turn benchmark success rates into agent
+        self-assessments.
+
+        Because the check only ever runs after a step has been taken, a zero-step
+        ``agent_done`` is impossible by construction.
+
+        The check is skipped on steps that are not due one — see
+        :meth:`_done_check_due`, which implements :data:`DONE_CHECK_EVERY_K_STEPS`.
+
+        :param record: The step record just appended by :meth:`_take_action`.
+        :param n_env_steps: The calling loop's budget counter, *after* it was incremented
+            for this step. This is the quantity ``max_steps`` bounds, and it is not the
+            same as the number of environment actions taken — see :meth:`_done_check_due`.
+        :return: ``3`` when the check says the task is complete, ``None`` otherwise.
         :rtype: Optional[int]
         """
         if not self._allow_self_termination:
             return None
-        action_lower = action_str.lower()
-        if action_lower == self.DONE_TOKEN.lower():
-            self.report.termination_reason = "agent_done"
-            return 3
-        if action_lower == self.GIVE_UP_TOKEN.lower():
-            self.report.termination_reason = "agent_give_up"
-            return 4
-        return None
+        if not self._done_check_due(n_env_steps):
+            return None
+        if not self._check_task_complete(record):
+            return None
+        self.report.termination_reason = "agent_done"
+        return 3
+
+    def _done_check_due(self, n_env_steps: int) -> bool:
+        """Whether this step is one the completion check runs on.
+
+        The check is the most expensive thing in an episode: one two-image VLM call per
+        environment step, so it roughly doubles the call count of any run with
+        ``allow_self_termination`` set. :data:`DONE_CHECK_EVERY_K_STEPS` trades latency of
+        detection for that cost — at *k* the run notices it has finished up to *k-1* steps
+        late, and pays a *k*-th of the checks.
+
+        **Two different counters, deliberately.** *k* counts environment actions actually
+        dispatched (``EnvironmentStepRecord``s), because that is what the check costs money
+        against — a step the agent burned on an unparseable response produced no new frame
+        for a judge to look at. The step *budget*, though, is spent by invalid steps too:
+        every ``_execute`` loop increments its ``n_env_steps`` on a parse failure and an
+        unrecognised action as well as on a real action. So "is this the last permitted
+        step" can only be answered by the budget counter the loop itself is running on,
+        which is why it is passed in rather than recomputed here.
+
+        The final permitted step is **always** checked regardless of *k*. Without that, a
+        budget that is not a multiple of *k* would end with its last steps unexamined, and
+        an executor that finished on one of them would run out its budget and report
+        ``max_steps`` — which reads as failure. That is the one moment where a missed check
+        cannot be recovered later, so it is never the one that gets skipped. Testing that
+        against the action count instead would break the guarantee outright: after a single
+        invalid step the action count trails the budget permanently and never reaches
+        ``max_steps``, so the last step would go unchecked in exactly the runs the
+        guarantee exists for.
+
+        :param n_env_steps: The calling loop's budget counter, after it was incremented for
+            this step. Compared against ``max_steps``; never used for the *k* cadence.
+        :return: ``True`` when the check should run after the step just taken.
+        :rtype: bool
+        """
+        k = max(1, self.DONE_CHECK_EVERY_K_STEPS)
+        if k == 1:
+            return True
+        actions_taken = sum(1 for step in self.report.steps
+                            if isinstance(step, EnvironmentStepRecord))
+        return actions_taken % k == 0 or n_env_steps >= self._max_steps
 
 
 class SimpleExecutor(Executor):
@@ -378,17 +576,18 @@ class SimpleExecutor(Executor):
          environment step.
        - **Valid env action**: steps the environment, increments the env-step
          counter.
-       - **Self-termination token** (when *allow_self_termination* is enabled):
-         ``DONE`` signals task completion; ``GIVE_UP`` signals the task is
-         impossible.  Both end execution immediately.
        - **Unparseable or unrecognised**: logs to :attr:`~execution.report.SimpleReport.invalid_steps`,
          passes an error message into the next prompt, and counts as an
          environment step to prevent infinite loops.
 
+    4. When *allow_self_termination* is enabled, asks the VLM whether the task
+       is now complete (:meth:`~execution.executor.Executor._maybe_self_terminate`)
+       and stops if it says yes.  The action prompt above is unaffected by that
+       flag — the question is asked separately, after the step, never as part of
+       choosing one.
+
     Terminates early when the environment signals ``terminated`` or
-    ``truncated``, or when self-termination tokens are used (see
-    :attr:`~execution.executor.Executor.allow_self_termination` on the base class),
-    recording the reason in
+    ``truncated``, or when the completion check fires, recording the reason in
     :attr:`~execution.report.ExecutorReport.termination_reason`.
 
     .. warning:: **Subclass initialisation order**
@@ -473,6 +672,11 @@ Reasoning: <your reasoning>
 
     def _pick_action(self, vlm_output) -> Optional[str]:
         """Parse VLM output into an action string. Returns None on parse failure."""
+        # The single funnel every action response passes through, so it is where the
+        # reasoning is captured for the completion check. Kept even when the action fails
+        # to parse: a stale reasoning is more useful to the judge than none, and the next
+        # successful parse overwrites it.
+        self._last_reasoning = self._parse_reasoning(vlm_output) or self._last_reasoning
         return self._parse_action(vlm_output)
 
     def _on_env_step(self, record: EnvironmentStepRecord) -> None:
@@ -519,10 +723,6 @@ Reasoning: <your reasoning>
                     return -1
                 continue
 
-            outcome = self._check_self_termination(action_str)
-            if outcome is not None:
-                return outcome
-
             if not tool_calls_exceeded:
                 tool_result = self._try_parse_tool_call(action_str)
                 if tool_result is not None:
@@ -548,6 +748,10 @@ Reasoning: <your reasoning>
                 if self._last_truncated:
                     self.report.termination_reason = "truncated"
                     return 2
+
+                outcome = self._maybe_self_terminate(record, n_env_steps)
+                if outcome is not None:
+                    return outcome
             else:
                 error_message = (
                     f"You tried to do '{action_str}' but that is not a recognised action. DO NOT use '{action_str}' in your response. "
@@ -577,10 +781,10 @@ Reasoning: <your reasoning>
         return f"Tool result: {tool_call_message}\n\n" if tool_call_message is not None else ""
 
     def _action_list_block(self) -> str:
-        lines = [f"  {s}" for s in self._get_action_strings().values()]
-        if self._allow_self_termination:
-            lines.append(f"Available Special Actions: {self.DONE_TOKEN}  (use when the task is complete), {self.GIVE_UP_TOKEN} (use when the task is impossible or you cannot proceed)")
-        return "\n".join(lines)
+        # Only real environment actions, always. Nothing about termination is advertised
+        # here, so the prompt is identical whether or not self-termination is enabled —
+        # which is what keeps SFT rows harvested from the two configurations comparable.
+        return "\n".join(f"  {s}" for s in self._get_action_strings().values())
 
     def _tools_block(self, tool_calls_exceeded: bool) -> str:
         if tool_calls_exceeded or not self.available_tools:
@@ -709,7 +913,32 @@ class SequencePlannerExecutor(SimpleExecutor):
         Reasoning: <text>
         Action: UP, UP, RIGHT, A
         [STOP]
+
+    Under ``allow_self_termination`` the completion check runs **once per plan**, not once
+    per action as it does elsewhere — at the end of a sequence that ran to exhaustion
+    without a failed action.  A committed plan is the unit this executor reasons about, so
+    a partially-executed one is a state its planner never intended to be judged in.
+    :data:`DONE_CHECK_EVERY_K_STEPS` does not apply here; see :meth:`_done_check_due`.
     """
+
+    # This executor reasons once per *plan*, then executes several actions from it, so the
+    # reasoning the completion check is shown is the plan's rather than the step's. Say so
+    # rather than presenting it as step-level reasoning.
+    DONE_CHECK_REASONING_LABEL = "The reasoning given for the planned sequence this action came from was:"
+
+    def _done_check_due(self, n_env_steps: int) -> bool:
+        """Always due — this executor's cadence is the plan, not the step.
+
+        :data:`DONE_CHECK_EVERY_K_STEPS` exists to stop the check firing after every
+        environment step on executors that would otherwise pay for one per action.  This
+        executor already checks once per committed plan, and its ``_execute`` decides when
+        that is.  Layering *k* on top would skip the check on a plan whose last action
+        happened to land on a non-due step, and the next opportunity would not come until
+        the *end of the following plan* — an arbitrary number of steps later, gated on a
+        counter that has nothing to do with plan boundaries.  So *k* is ignored outright
+        rather than combined.
+        """
+        return True
 
     def _make_report(self, task, init_kwargs, max_steps, max_tool_calls) -> SimpleReport:
         return SimpleReport(
@@ -742,6 +971,10 @@ class SequencePlannerExecutor(SimpleExecutor):
                     texts=prompt,
                     images=[frame],
                     )
+                # Captured once per plan, and the plan gets exactly one completion check
+                # (at its end), so this is the reasoning that check sees; the
+                # DONE_CHECK_REASONING_LABEL override says so in the prompt.
+                self._last_reasoning = self._parse_reasoning(response) or self._last_reasoning
                 sequence = self._parse_sequence(response)
                 if sequence is None:
                     error_message = (
@@ -762,9 +995,6 @@ class SequencePlannerExecutor(SimpleExecutor):
 
             # Execute next action in sequence
             action_str = pending_sequence.pop(0)
-            outcome = self._check_self_termination(action_str)
-            if outcome is not None:
-                return outcome
             action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
             if action_class is None:
                 error_message = (
@@ -780,7 +1010,7 @@ class SequencePlannerExecutor(SimpleExecutor):
                     return -1
                 continue
 
-            self._take_action(action_class, **(action_kwargs or {}))
+            record = self._take_action(action_class, **(action_kwargs or {}))
             n_env_steps += 1
             consecutive_invalid = 0
 
@@ -795,15 +1025,26 @@ class SequencePlannerExecutor(SimpleExecutor):
             # LowLevelActions always return success=0 by convention (not a failure signal),
             # so skip the check for them entirely.
             last_record = self.report.steps[-1]
-            if (
+            action_failed = (
                 not issubclass(action_class, LowLevelAction)
                 and isinstance(last_record, EnvironmentStepRecord)
                 and last_record.action_success == 0
-            ):
+            )
+            if action_failed:
                 error_message = (
                     f"Action '{action_str}' failed (blocked or invalid). Re-plan."
                 )
                 pending_sequence = []
+
+            # Checked once per plan, at its end, and only when the plan actually ran:
+            # this executor commits to a sequence, so a half-executed plan is a state the
+            # planner never intended to be judged in. Both guards matter and they are not
+            # the same guard — `action_failed` also empties `pending_sequence`, so testing
+            # only for exhaustion would still fire on the aborted case.
+            if not action_failed and not pending_sequence:
+                outcome = self._maybe_self_terminate(record, n_env_steps)
+                if outcome is not None:
+                    return outcome
 
         self.report.termination_reason = "max_steps"
         return 0
@@ -1021,7 +1262,17 @@ class SelfConsistencyExecutor(SimpleExecutor):
         )
 
     def _pick_action(self, vlm_output: List[str]) -> Optional[str]:
-        return self._majority_vote(vlm_output)
+        action_str = self._majority_vote(vlm_output)
+        # k samples means k candidate reasonings. The completion check wants the one that
+        # argued for the action actually taken, not an arbitrary sample — showing a losing
+        # sample's reasoning beside the winning action would describe a step that never
+        # happened.
+        for response in vlm_output:
+            parsed = self._parse_action(response)
+            if parsed is not None and action_str is not None and parsed.lower() == action_str.lower():
+                self._last_reasoning = self._parse_reasoning(response) or self._last_reasoning
+                break
+        return action_str
 
     def _majority_vote(self, responses: List[str]) -> Optional[str]:
         """Parse each response and return the most common action string."""
@@ -1317,9 +1568,6 @@ Respond with one line per action in exactly this format:
         if not action_strings:
             return None
         action_lines = list(action_strings.values())
-        if self._allow_self_termination:
-            action_lines.append(f"{self.DONE_TOKEN}  (signal that the task is complete)")
-            action_lines.append(f"{self.GIVE_UP_TOKEN}  (signal that the task is impossible or you cannot proceed)")
         prompt = (
             self.SCORE_PROMPT
             .replace("[TASK]", self._task)
@@ -1378,13 +1626,9 @@ Respond with one line per action in exactly this format:
                     return -1
                 continue
 
-            outcome = self._check_self_termination(action_str)
-            if outcome is not None:
-                return outcome
-
             action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
             if action_class is not None:
-                self._take_action(action_class, **(action_kwargs or {}))
+                record = self._take_action(action_class, **(action_kwargs or {}))
                 error_message = None
                 n_env_steps += 1
                 consecutive_invalid = 0
@@ -1394,6 +1638,12 @@ Respond with one line per action in exactly this format:
                 if self._last_truncated:
                     self.report.termination_reason = "truncated"
                     return 2
+
+                # Scoring produces no reasoning, so _last_reasoning stays None and the
+                # check runs on the frames and the action name alone.
+                outcome = self._maybe_self_terminate(record, n_env_steps)
+                if outcome is not None:
+                    return outcome
             else:
                 error_message = (
                     f"Highest-scored action '{action_str}' is not a recognised action string. "
@@ -1574,6 +1824,11 @@ Action: <one environment action>
 
     def _pick_action(self, vlm_output: str) -> Optional[str]:
         action_str = self._parse_action(vlm_output)
+        source = vlm_output
         if action_str is None:
+            # Falling back to the proposal means the action came from there, so its
+            # reasoning is the one that explains the step.
             action_str = self._parse_action(self._last_proposal)
+            source = self._last_proposal
+        self._last_reasoning = self._parse_reasoning(source) or self._last_reasoning
         return action_str

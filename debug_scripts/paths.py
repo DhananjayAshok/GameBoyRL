@@ -27,9 +27,13 @@ PRODUCERS = {
     "clean": "scripts/vlm/clean_practice.sh",
     "dataset": "scripts/vlm/create_dataset.sh",
     "benchmark": "scripts/benchmark.sh (via scripts/pipeline/serve_and_benchmark.sh)",
+    "info": "scripts/vlm/build_info.sh",
+    "insights": "scripts/vlm/build_info.sh (stage A)",
 }
 
 GROUPED_FILENAME = "grouped_global_high_reward_trajectories.pkl"
+INFO_DOC_FILENAME = "info.md"
+INSIGHTS_FILENAME = "insights.jsonl"
 
 EXTRA_SUFFIXES = {
     "none": "",
@@ -173,6 +177,38 @@ class Paths:
         """The curiosity vertical's practice dir — dirname(trajectory_annotation)/practice_<executor>."""
         return os.path.join(os.path.dirname(self.curiosity_annotation()),
                             f"practice_{self.executor}")
+
+    # ------------------------------------------------------------------
+    # Info documents (context-engineering vertical)
+    # ------------------------------------------------------------------
+    # build_info.py writes next to its own input stem, so these two accessors just
+    # re-derive that rule per vertical — exactly like practice_dir /
+    # curiosity_practice_dir above.
+
+    def info_dir(self, extra: str = "none") -> str:
+        """The zeroshot/attempt vertical's info dir — attempts_dir/info_<model>_<executor>."""
+        return os.path.join(self.attempts_dir(extra),
+                            f"info_{self.model_save_name}_{self.executor}")
+
+    def curiosity_info_dir(self) -> str:
+        """Curiosity vertical's info dir — dirname(trajectory_annotation)/info_<model>_<executor>."""
+        return os.path.join(os.path.dirname(self.curiosity_annotation()),
+                            f"info_{self.model_save_name}_{self.executor}")
+
+    def source_info_dir(self, source: str, extra: str = "none") -> str:
+        """Info dir for a named source. ``source`` is 'attempt' or 'curiosity'."""
+        if source == "curiosity":
+            return self.curiosity_info_dir()
+        if source == "attempt":
+            return self.info_dir(extra)
+        log_error(f"Unknown --source '{source}'. Choose from ['attempt', 'curiosity'].",
+                  self.parameters)
+
+    def info_doc(self, source: str = "attempt", extra: str = "none") -> str:
+        return os.path.join(self.source_info_dir(source, extra), INFO_DOC_FILENAME)
+
+    def insights_jsonl(self, source: str = "attempt", extra: str = "none") -> str:
+        return os.path.join(self.source_info_dir(source, extra), INSIGHTS_FILENAME)
 
     def merged_dataset_dir(self) -> str:
         """Where merge_practices writes; mirrors merged_dataset_dir() in scripts/core/utils.sh."""

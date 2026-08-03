@@ -76,108 +76,13 @@ from tqdm import tqdm
 from gameboy_worlds import get_environment
 from execution.registry import AVAILABLE_EXECUTORS
 from execution.report import EnvironmentStepRecord
-from execution.supervisor import SimpleCheckerSupervisor
-from utils import log_info, log_error, VLM, parse_key_value, HuggingFaceModel
+from execution.supervisor import SimpleCheckerSupervisor, derive_critique_hint
+from utils import log_info, log_error, VLM, HuggingFaceModel
 
 
-CRITIQUE_SLICE_PROMPT = """You are analysing a segment of a failed attempt to complete a task in a game of [GAME].
-
-Task: "[TASK]"
-
-Actions taken in this segment (steps [START_IDX]-[END_IDX] of [TOTAL] total):
-[ACTION_SEQUENCE]
-
-The images show frames [START_IDX]-[END_IDX] of the trajectory, from left to right.
-
-Describe what happened in this segment: what the player did, what went wrong (if anything), and any observations relevant to why the task was not completed.
-
-Respond in exactly this format:
-Segment summary: <one or two sentences describing what happened in this segment>
-[STOP]"""
-
-CRITIQUE_CONSOLIDATE_PROMPT = """You are analysing a failed attempt to complete a task in a game of [GAME].
-
-Task: "[TASK]"
-
-Below are summaries of each segment of the failed trajectory:
-[SEGMENT_SUMMARIES]
-
-[PRIOR_HINT_BLOCK]Based on the full trajectory above, provide a concise hint for how to better approach the task on the next attempt.
-
-Respond in exactly this format:
-Critique: <what went wrong overall>
-Hint: <one or two sentence hint for a better approach>
-[STOP]"""
-
-
-def _derive_hint(
-    env_steps: list,
-    task: str,
-    game: str,
-    vlm: VLM,
-    max_new_tokens: int,
-    previous_hint: str = "",
-    max_frames_per_slice: int = 8,
-) -> str:
-    """Slice the failed trajectory into fixed-size windows, critique each with images,
-    then consolidate into a single hint with a text-only call."""
-    frames = [s.frame_after for s in env_steps]
-    if not frames:
-        return previous_hint
-
-    total = len(env_steps)
-    action_lines_all = [
-        f"  {i + 1}. {step.action_class.get_action_name(**step.kwargs)}"
-        for i, step in enumerate(env_steps)
-    ]
-
-    segment_ranges = []
-    segment_prompts = []
-    segment_images = []
-    for start in range(0, total, max_frames_per_slice):
-        end = min(start + max_frames_per_slice, total)
-        slice_actions = "\n".join(action_lines_all[start:end]) or "  (no actions taken)"
-        prompt = (
-            CRITIQUE_SLICE_PROMPT
-            .replace("[GAME]", game)
-            .replace("[TASK]", task)
-            .replace("[START_IDX]", str(start + 1))
-            .replace("[END_IDX]", str(end))
-            .replace("[TOTAL]", str(total))
-            .replace("[ACTION_SEQUENCE]", slice_actions)
-        )
-        segment_ranges.append((start, end))
-        segment_prompts.append(prompt)
-        segment_images.append(frames[start:end])
-
-    outputs = vlm.infer(texts=segment_prompts, images=segment_images, max_new_tokens=max_new_tokens)
-
-    segment_summaries = []
-    for (start, end), output in zip(segment_ranges, outputs):
-        stop_idx = output.lower().find("[stop]")
-        if stop_idx != -1:
-            output = output[:stop_idx]
-        for line in output.splitlines():
-            if line.strip().lower().startswith("segment summary:"):
-                summary = line.strip()[len("segment summary:"):].strip()
-                segment_summaries.append(f"Steps {start + 1}-{end}: {summary}")
-                break
-        else:
-            segment_summaries.append(f"Steps {start + 1}-{end}: {output.strip()}")
-
-    prior_block = (
-        f'Previous hint (refine or build on this):\n"{previous_hint}"\n\n'
-        if previous_hint else ""
-    )
-    consolidate_prompt = (
-        CRITIQUE_CONSOLIDATE_PROMPT
-        .replace("[GAME]", game)
-        .replace("[TASK]", task)
-        .replace("[SEGMENT_SUMMARIES]", "\n".join(segment_summaries))
-        .replace("[PRIOR_HINT_BLOCK]", prior_block)
-    )
-    output = vlm.infer(texts=consolidate_prompt, max_new_tokens=max_new_tokens)
-    return parse_key_value(output, "hint") or output.strip()
+# The critique prompts and the slice-then-consolidate implementation live in
+# execution/supervisor.py, shared with vlm_scripts/practice_tasks.py so both derive hints
+# from identical prompts.
 
 
 def _reconstruct_trajectory(env_steps: list, init_state: str) -> tuple:
@@ -269,7 +174,7 @@ def _attempt_task(
                 break
 
             if attempt < max_attempts - 1:
-                hint = _derive_hint(
+                hint = derive_critique_hint(
                     env_steps, task_str, game, critique_vlm, max_new_tokens, hint
                 )
                 if verbose:
@@ -288,6 +193,15 @@ def _attempt_task(
         # not what it said, and this is the information the retained trajectory was actually
         # produced under.
         "final_hint": hint,
+        # How the final attempt's executor stopped, and how much budget it left. With
+        # allow_self_termination on, "agent_done" is the executor's own claim to have
+        # finished; `success` above is the checker judging the same trajectory
+        # independently. Keeping both is what lets `debug.py attempt` report how often the
+        # completion check is wrong — the failure that silently truncates a trajectory and
+        # then ships it forward as a success.
+        "termination_reason": result.get("termination_reason"),
+        "n_env_steps": result.get("n_env_steps"),
+        "max_steps": result.get("max_steps"),
     }
     return result_record, trajectory
 
@@ -338,7 +252,7 @@ def _attempt_task(
 )
 @click.option(
     "--checker_max_new_tokens",
-    default=1000,
+    default=2000,
     show_default=True,
     help="Token budget for each checker VLM call.",
 )
@@ -471,6 +385,11 @@ def attempt_tasks_cmd(
             "final_hint": res.get("final_hint", ""),
             "judge_description": res.get("description", ""),
             "judge_reasoning": res.get("reasoning", ""),
+            # .get for the same legacy-checkpoint reason as final_hint above: a resumed run
+            # can hold records written before these keys existed.
+            "termination_reason": res.get("termination_reason"),
+            "n_env_steps": res.get("n_env_steps"),
+            "max_steps": res.get("max_steps"),
         }
         for group_idx, res in results.items()
     ]).to_csv(csv_path, index=False)

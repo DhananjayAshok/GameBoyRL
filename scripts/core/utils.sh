@@ -275,6 +275,190 @@ PRACTICE_TASKS_DEFAULTS["max_concurrency"]=16
 
 PRACTICE_TASKS_ARG_KEYS=("${PRACTICE_TASKS_ESSENTIALS[@]}" "${!PRACTICE_TASKS_DEFAULTS[@]}")
 
+# build_info: distils (task, trajectory) pairs into an info document, beside its own input
+# stem (like practice_tasks/infer_guidance). --stage a is enough for benchmark_info --mode
+# init_state; the full run also builds the merge tree.
+BUILD_INFO_ESSENTIALS=("trajectory_path")
+populate_array VLM_ESSENTIALS BUILD_INFO_ESSENTIALS
+declare -A BUILD_INFO_DEFAULTS
+populate_dict VLM_DEFAULTS BUILD_INFO_DEFAULTS
+BUILD_INFO_DEFAULTS["n_frames"]=8
+BUILD_INFO_DEFAULTS["max_concurrency"]=16
+BUILD_INFO_DEFAULTS["stage"]="all"
+# Names the output dir (info_<model>_<executor>), so documents distilled from one executor's
+# trajectories never overwrite another's. The curiosity stem carries no executor of its own,
+# so without this the two verticals would collide on the same path.
+BUILD_INFO_DEFAULTS["executor"]="history"
+BUILD_INFO_DEFAULTS["overwrite_from_round"]=none
+# Override the shared VLM default of 1000: stage A emits six labelled fields plus a bullet
+# list of insights, and the stage-B combine emits a merged list that grows with the entry.
+# Truncation here does not fail loudly — it silently drops the trailing insights.
+BUILD_INFO_DEFAULTS["max_new_tokens"]=3000
+
+BUILD_INFO_ARG_KEYS=("${BUILD_INFO_ESSENTIALS[@]}" "${!BUILD_INFO_DEFAULTS[@]}")
+
+# info_mode_sources <mode>
+#
+# The source verticals a --mode selects. Shares its vocabulary with full.sh's --mode so the
+# context-engineering arm and the fine-tuning arm mean the same thing by the same word.
+# Order matters: zeroshot first, because it is the verified-solution source and reads first
+# in a comma-joined --insights_paths / --info_docs list.
+function info_mode_sources() {
+    case "$1" in
+        curiosity_only) echo "curiosity" ;;
+        zeroshot_only)  echo "zeroshot" ;;
+        both)           echo "zeroshot curiosity" ;;
+        *)              echo "" ;;
+    esac
+}
+
+# info_source_stem <game> <model_save_name> <run_name> <executor> <source>
+#
+# The trajectory stem build_info.py consumes for one source: <stem>.json + <stem>.pkl.
+# build_info writes its output beside this stem, so this function also fixes where the
+# info dir lands (see info_dir_for_stem).
+#
+# Defined here for the same reason as merged_dataset_dir: build_info_all.sh writes these
+# directories and benchmark_info_all.sh reads them, and the two must not drift — neither
+# passes the path to the other, both derive it from this function. debug_scripts/paths.py
+# re-derives the identical rule on the python side (info_dir / curiosity_info_dir).
+#
+# model_save_name is in the path because a document is built from one model's own output;
+# two models sharing a game must not share an info dir.
+#
+# The zeroshot branch probes the --extra proposal variants in a fixed order and returns the
+# first that exists, because different games were proposed under different variants and the
+# arm should use whatever attempts a game actually has. The order is deterministic so build
+# and benchmark always resolve to the same stem; when nothing exists it falls back to the
+# plain variant so error messages name a sensible path.
+INFO_EXTRA_SUFFIXES=("" "_prior_zeroshot_with_curiosity" "_prior_curiosity" "_prior_zeroshot")
+
+function info_source_stem() {
+    local base
+    case "$5" in
+        zeroshot)
+            base="$storage_dir/proposed_tasks/$1/$2/zeroshot"
+            for sfx in "${INFO_EXTRA_SUFFIXES[@]}"; do
+                local stem="$base/zeroshot_tasks${sfx}_$4_attempts/success_trajectories"
+                if [[ -f "$stem.json" && -f "$stem.pkl" ]]; then echo "$stem"; return; fi
+            done
+            echo "$base/zeroshot_tasks_$4_attempts/success_trajectories" ;;
+        curiosity)
+            echo "$storage_dir/proposed_tasks/$1/$2/curiosity/$3/trajectory_annotation" ;;
+        *)
+            echo "" ;;
+    esac
+}
+
+# info_extra_from_stem <stem>
+#
+# The --extra name debug_scripts/paths.py knows this stem by. The bash side probes the
+# attempts dirs by literal suffix, but paths.py addresses the same dirs through the named
+# EXTRA_SUFFIXES vocabulary, so anything handing a stem to a python entry point has to
+# translate. Keep this table in step with EXTRA_SUFFIXES in debug_scripts/paths.py.
+function info_extra_from_stem() {
+    case "$(dirname "$1")" in
+        *_prior_zeroshot_with_curiosity_*) echo "zeroshot_with_curiosity" ;;
+        *_prior_curiosity_*)               echo "curiosity" ;;
+        *_prior_zeroshot_*)                echo "zeroshot" ;;
+        *)                                 echo "none" ;;
+    esac
+}
+
+# info_available_sources <game> <model_save_name> <run_name> <executor>
+#
+# Which of {zeroshot, curiosity} actually have inputs on disk for this game. The all-games
+# sweep uses this to pick each game's --mode rather than assuming both exist: most games
+# have only one vertical, and demanding both would skip them entirely.
+function info_available_sources() {
+    local found=""
+    for source in zeroshot curiosity; do
+        local stem
+        stem=$(info_source_stem "$1" "$2" "$3" "$4" "$source")
+        if [[ -f "$stem.json" && -f "$stem.pkl" ]]; then found+="${found:+ }$source"; fi
+    done
+    echo "$found"
+}
+
+# info_sources_to_mode <sources>
+#
+# Inverse of info_mode_sources: the --mode that selects exactly this set.
+function info_sources_to_mode() {
+    case "$1" in
+        "zeroshot curiosity"|"curiosity zeroshot") echo "both" ;;
+        "zeroshot")                                echo "zeroshot_only" ;;
+        "curiosity")                               echo "curiosity_only" ;;
+        *)                                         echo "" ;;
+    esac
+}
+
+# info_dir_for_stem <stem> <model_save_name> <executor>
+#
+# Where build_info.py puts everything for that stem. Mirrors the one line in build_info.py
+# that decides it:
+#   os.path.join(os.path.dirname(trajectory_path), f"info_{model_save_name}_{executor}").
+#
+# The executor is in the name because it is the identity of the trajectories the document was
+# distilled from. The zeroshot stem already encodes it (zeroshot_tasks_<executor>_attempts),
+# but the curiosity stem does not — so before this, a curiosity document built from one
+# executor's annotations silently overwrote another's.
+function info_dir_for_stem() {
+    echo "$(dirname "$1")/info_$2_$3"
+}
+
+# build_info_all: stage A/B for every source a --mode selects, plus the debug report.
+BUILD_INFO_ALL_ESSENTIALS=()
+populate_array VLM_ESSENTIALS BUILD_INFO_ALL_ESSENTIALS
+BUILD_INFO_ALL_ESSENTIALS+=("run_name")
+declare -A BUILD_INFO_ALL_DEFAULTS
+populate_dict VLM_DEFAULTS BUILD_INFO_ALL_DEFAULTS
+BUILD_INFO_ALL_DEFAULTS["max_new_tokens"]=3000
+BUILD_INFO_ALL_DEFAULTS["executor"]="history"
+BUILD_INFO_ALL_DEFAULTS["mode"]="both"
+BUILD_INFO_ALL_DEFAULTS["stage"]="all"
+BUILD_INFO_ALL_DEFAULTS["n_frames"]=8
+BUILD_INFO_ALL_DEFAULTS["max_concurrency"]=16
+BUILD_INFO_ALL_DEFAULTS["do_debug"]=true
+
+BUILD_INFO_ALL_ARG_KEYS=("${BUILD_INFO_ALL_ESSENTIALS[@]}" "${!BUILD_INFO_ALL_DEFAULTS[@]}")
+
+# benchmark_info_all: hinted benchmarks over the documents build_info_all produced, plus the
+# no-hint baseline the results are only interpretable against.
+BENCHMARK_INFO_ALL_ESSENTIALS=()
+populate_array VLM_ESSENTIALS BENCHMARK_INFO_ALL_ESSENTIALS
+BENCHMARK_INFO_ALL_ESSENTIALS+=("run_name")
+declare -A BENCHMARK_INFO_ALL_DEFAULTS=(
+    # One knob for both halves: which attempts/curiosity dirs the documents were built from,
+    # AND the executor run at test time. These were separate (build=history, bench=simple)
+    # and must not be — the no-hint baseline has to be the same executor as the hinted run,
+    # or the delta mixes the hint effect with a scaffold change.
+    ["executor"]="history"
+    ["mode"]="both"
+    ["hint_mode"]="both"
+    ["baseline"]=true
+    ["max_steps"]=50
+    ["max_resets"]=1
+    ["max_concurrency"]=8
+    ["hint_vlm_model"]=none
+    ["hint_vlm_kind"]=none
+    ["regenerate"]=false
+)
+
+BENCHMARK_INFO_ALL_ARG_KEYS=("${BENCHMARK_INFO_ALL_ESSENTIALS[@]}" "${!BENCHMARK_INFO_ALL_DEFAULTS[@]}")
+
+# info_full: the top-level driver. Its key set is the union of the two stages it calls, so
+# the all-games sweep can forward one dict down without knowing the split.
+INFO_FULL_ESSENTIALS=()
+populate_array VLM_ESSENTIALS INFO_FULL_ESSENTIALS
+INFO_FULL_ESSENTIALS+=("run_name")
+declare -A INFO_FULL_DEFAULTS
+populate_dict BUILD_INFO_ALL_DEFAULTS INFO_FULL_DEFAULTS
+populate_dict BENCHMARK_INFO_ALL_DEFAULTS INFO_FULL_DEFAULTS
+INFO_FULL_DEFAULTS["do_build"]=true
+INFO_FULL_DEFAULTS["do_benchmark"]=true
+
+INFO_FULL_ARG_KEYS=("${INFO_FULL_ESSENTIALS[@]}" "${!INFO_FULL_DEFAULTS[@]}")
+
 CLEAN_PRACTICE_ESSENTIALS=("practice_path")
 populate_array VLM_ESSENTIALS CLEAN_PRACTICE_ESSENTIALS
 declare -A CLEAN_PRACTICE_DEFAULTS

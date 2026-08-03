@@ -2,7 +2,7 @@
 Called by scripts/vlm/{attempt_tasks,infer_guidance,infer_tasks,practice_tasks,propose_zeroshot,propose_all_zeroshot}.sh.
 Use --help for CLI options.
 """
-from vlm_scripts import infer_tasks, propose_tasks_zeroshot, infer_guidance, attempt_tasks, practice_tasks, clean_practice
+from vlm_scripts import infer_tasks, propose_tasks_zeroshot, infer_guidance, attempt_tasks, practice_tasks, clean_practice, build_info
 import numpy as np
 import click
 from utils import load_parameters
@@ -30,7 +30,7 @@ from utils import load_parameters
 )
 @click.option(
     "--max_new_tokens",
-    default=1000,
+    default=2000,
     show_default=True,
     help="Max tokens for each VLM call",
 )
@@ -55,6 +55,7 @@ main.add_command(infer_guidance, name="infer_guidance")
 main.add_command(attempt_tasks, name="attempt_tasks")
 main.add_command(practice_tasks, name="practice_tasks")
 main.add_command(clean_practice, name="clean_practice")
+main.add_command(build_info, name="build_info")
 
 if __name__ == "__main__":
     main()

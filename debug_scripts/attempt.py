@@ -94,6 +94,77 @@ def _figure_by_init_state(frame: pd.DataFrame, out_path: str):
     plt.close(fig)
 
 
+def _completion_check_blocks(frame: pd.DataFrame) -> list:
+    """How the self-termination completion check behaved, and whether it was right.
+
+    ``attempt_tasks`` runs with ``allow_self_termination=True``, so after every action the
+    executor is asked whether the task is finished and a ``yes`` ends the episode
+    (``termination_reason == "agent_done"``). Nothing can assert on that judgement, so the
+    only way to know it is working is to read three things together:
+
+    * **the breakdown** — a check that fires on everything is over-eager, one that never
+      fires is dead weight paying a VLM call per step;
+    * **agreement with the checker** — ``success`` is :class:`SimpleCheckerSupervisor`
+      judging the same trajectory from the frames and its own description, independently of
+      the executor. ``agent_done`` with ``success == False`` is the failure that matters: a
+      trajectory truncated before the task was done, then shipped forward as evidence;
+    * **steps saved** — the benefit the per-step cost buys.
+
+    Returns ``[]`` on a CSV written before these columns existed, rather than failing:
+    older attempt dirs are still worth reporting on for everything else.
+    """
+    if "termination_reason" not in frame.columns:
+        return []
+    known = frame[frame["termination_reason"].notna()]
+    if known.empty:
+        return []
+
+    breakdown = (
+        known.groupby("termination_reason")
+        .agg(episodes=("success", "count"), judged_successful=("success", "sum"))
+        .reset_index()
+        .sort_values("episodes", ascending=False)
+    )
+    breakdown["judged_successful_%"] = (
+        breakdown["judged_successful"] / breakdown["episodes"] * 100
+    )
+
+    done = known[known["termination_reason"] == "agent_done"]
+    n_done = len(done)
+    false_done = int((~done["success"]).sum())
+    missed = known[(known["termination_reason"] != "agent_done") & (known["success"])]
+
+    lines = [
+        f"episodes ending `agent_done` (the check fired): **{n_done}** of {len(known)} "
+        f"({n_done / len(known) * 100:.1f}%)",
+        f"of those, the checker disagreed (`success == False`): **{false_done}** "
+        f"({false_done / max(n_done, 1) * 100:.1f}%) — these are trajectories cut short",
+        f"episodes the checker called successful where the check never fired: "
+        f"**{len(missed)}** — the task was done and the executor kept playing",
+    ]
+    if n_done and {"n_env_steps", "max_steps"} <= set(frame.columns):
+        saved = (done["max_steps"] - done["n_env_steps"]).dropna()
+        if len(saved):
+            lines.append(
+                f"steps saved when it fired: **{saved.mean():.1f}** on average "
+                f"(median {saved.median():.0f}) of a {done['max_steps'].max():.0f}-step budget"
+            )
+
+    return [
+        md.h2("Completion check (self-termination)"),
+        md.bullets(lines),
+        md.para(
+            "The check is one VLM call per environment step, so it roughly doubles this "
+            "stage's call count. A **high false-`agent_done` rate is the failure to act on** "
+            "— it truncates a trajectory before the task is done and then feeds it forward "
+            "as a success. Note the two verdicts are not independent evidence of the same "
+            "quality: the checker sees the whole trajectory described, the check sees two "
+            "frames, so where they disagree the checker is usually the one to believe."
+        ),
+        md.table(breakdown.reset_index(drop=True)),
+    ]
+
+
 @click.command(name="attempt")
 @click.option("--model_name", required=True, help="Full VLM name (e.g. google/gemma-4-31b-it)")
 @click.option("--extra", default="none", show_default=True,
@@ -218,6 +289,7 @@ def debug_attempt(obj, model_name, extra, n_frames, max_trajectories):
             "rather than information it worked out. The trajectories that feed guidance and "
             "practice do not distinguish the two."
         ),
+        *_completion_check_blocks(frame),
         md.h2("Attempts used"),
         md.img("n_tries breakdown", tries_fig, report_dir),
         md.h2("By init_state"),

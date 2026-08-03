@@ -63,6 +63,43 @@ def parse_key_value(text: str, key: str) -> Optional[str]:
 
     return None
 
+
+def parse_yes_no(text: str, key: str) -> Optional[bool]:
+    """
+    Return the yes/no verdict on the ``"Key:"`` line of ``text``.
+
+    The single parser for every yes/no answer a model gives us. Built on
+    :func:`parse_key_value`, so it inherits the ``[STOP]`` stripping, the
+    ``response:`` disambiguation and the bare-key fallback.
+
+    **Only an explicit "yes" is yes.** ``y``, ``yep`` and ``true`` are *not*
+    accepted: a model answering those did not follow the format it was given, and
+    quietly rewarding near-misses is what lets prompt drift go unnoticed. Every
+    prompt in this codebase asks for ``<yes or no>``.
+
+    **Three-valued on purpose.** ``None`` means the model did not answer at all —
+    the key was missing, or present with an empty value. That is a different event
+    from an answer of "no", and callers treat it differently: some log it, some
+    warn loudly (a truncated reply that loses its verdict is a common and
+    confusing failure), and some ignore it. Collapsing it to ``False`` here would
+    force every caller to re-derive it, which is precisely how six near-identical
+    copies of this logic came to exist. Callers that only want the boolean should
+    say ``parse_yes_no(...) is True``.
+
+    :param text: The model response to search.
+    :type text: str
+    :param key: The verdict key, e.g. ``"Complete"``, ``"Relevant"``, ``"Flawed"``.
+    :type key: str
+    :return: ``True`` on an explicit yes, ``False`` on any other answer, ``None``
+        when no answer was given.
+    :rtype: Optional[bool]
+    """
+    raw = parse_key_value(text, key)
+    if raw is None:
+        return None
+    return raw.strip().lower().startswith("yes")
+
+
 MIN_QUERIES_PER_MINUTE = 1
 
 # Placeholder per-model rate limits (queries per minute). All currently set to
