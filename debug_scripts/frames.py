@@ -13,6 +13,8 @@ import os
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from utils import parse_action_line
+
 
 try:
     _FONT = ImageFont.load_default(size=14)
@@ -140,16 +142,9 @@ def call_log_strip(vlm_call_log, out_path: str, n: int = 5, overwrite: bool = Fa
         if not images:
             continue
         frames.append(images[0])
-        labels.append(parse_action(getattr(record, "response", "")))
+        # Truncated to fit the frame label; the width is a rendering concern, so it lives
+        # here rather than in the parser.
+        labels.append((parse_action_line(getattr(record, "response", "")) or "")[:16])
     return strip(frames, out_path, labels=labels, n=n, overwrite=overwrite)
 
 
-def parse_action(response: str) -> str:
-    """Extract the ``Action:`` value from a VLM response, mirroring Executor._parse_action."""
-    if not response:
-        return ""
-    for line in str(response).splitlines():
-        stripped = line.strip()
-        if stripped.lower().startswith("action:"):
-            return stripped[len("action:"):].replace("[STOP]", "").strip()[:16]
-    return ""

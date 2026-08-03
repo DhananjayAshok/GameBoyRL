@@ -42,7 +42,8 @@ from execution.info_doc import (
     parse_document,
     render_document,
 )
-from utils import HuggingFaceModel, VLM, log_error, log_info, log_warn, parse_key_value
+from utils import (HuggingFaceModel, VLM, log_error, log_info, log_warn, parse_key_value,
+                   parse_list, strip_stop)
 
 INSIGHTS_FILENAME = "insights.jsonl"
 INFO_DOC_FILENAME = "info.md"
@@ -133,42 +134,14 @@ Insights:
 # ---------------------------------------------------------------------------
 
 
-def _truncate(text: str) -> str:
-    """Cut a model response at [STOP], the house end-of-response marker."""
-    idx = text.lower().find("[stop]")
-    return text[:idx] if idx != -1 else text
-
-
-def _parse_bullets(text: str, header: str) -> list[str]:
-    """Bullets under a ``Header:`` line, stopping at the next non-bullet line."""
-    out = []
-    in_block = False
-    for line in _truncate(text).splitlines():
-        stripped = line.strip()
-        if stripped.lower().startswith(header.lower() + ":"):
-            in_block = True
-            remainder = stripped[len(header) + 1:].strip()
-            if remainder and remainder.upper() != "NONE":
-                out.append(remainder)
-            continue
-        if in_block:
-            if stripped.startswith("- "):
-                item = stripped[2:].strip()
-                if item and item.upper() != "NONE":
-                    out.append(item)
-            elif stripped:
-                break
-    return out
-
-
 def _is_none(value: str | None) -> bool:
     return value is None or not value.strip() or value.strip().upper().startswith("NONE")
 
 
 def _parse_extraction(text: str) -> dict | None:
     """Parse EXTRACT_INSIGHTS_PROMPT output into task/image entry fields."""
-    body = _truncate(text)
-    insights = _parse_bullets(body, "Insights")
+    body = strip_stop(text)
+    insights = parse_list(body, "Insights")
     if not insights:
         return None
 
@@ -193,7 +166,7 @@ def _parse_extraction(text: str) -> dict | None:
 
 def _parse_match(text: str, n_existing: int) -> tuple[int | None, str]:
     """Parse MATCH_PROMPT output to a 0-based index into the existing entries, or None."""
-    body = _truncate(text)
+    body = strip_stop(text)
     reason = (parse_key_value(body, "Reasoning") or "").strip()
     raw = parse_key_value(body, "Match")
     if _is_none(raw):
@@ -434,7 +407,7 @@ def fold_section(doc1: InfoDocument, doc2: InfoDocument, section: str, root: str
         if verbose:
             print(f"COMBINE output:\n{combined_out}\n---")
 
-        combined = _parse_bullets(combined_out, "Insights")
+        combined = parse_list(combined_out, "Insights")
         if not combined:
             # A failed combine must not silently delete knowledge: keep both lists.
             log_warn(f"combine returned nothing for '{target.category}'; keeping both lists.")

@@ -26,7 +26,7 @@ import shutil
 import click
 import pandas as pd
 
-from utils import log_info, log_warn, log_error
+from utils import log_info, log_warn, log_error, parse_action_line
 from debug_scripts import markdown as md
 from debug_scripts.paths import Paths
 from debug_scripts.stats import gini
@@ -44,23 +44,11 @@ PROMPT_BLOCKS = {
 }
 
 
-def _parsed_action(output: str):
-    """The `Action:` value from a training target, or None when there is no parseable line."""
-    if not isinstance(output, str):
-        return None
-    for line in output.splitlines():
-        stripped = line.strip()
-        if stripped.lower().startswith("action:"):
-            value = stripped[len("action:"):].replace("[STOP]", "").strip()
-            return value if value else None
-    return None
-
-
 def _action_counts(frame: pd.DataFrame) -> pd.Series:
     """Distribution of parsed `Action:` values across training targets. create_dataset
     guarantees every row has a valid, parseable action, so this is a coverage view, not a
     validity check."""
-    return frame["output"].map(_parsed_action).dropna().str.strip().str.upper().value_counts()
+    return frame["output"].map(parse_action_line).dropna().str.strip().str.upper().value_counts()
 
 
 @click.command(name="dataset")

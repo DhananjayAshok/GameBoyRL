@@ -12,7 +12,8 @@ from gameboy_worlds.interface import Environment
 from execution.executor import Executor
 from execution.report import (DONE_CHECK_TAG, EnvironmentStepRecord, ExecutorReport,
                               iter_call_steps, parse_completion, says_complete)
-from utils import load_parameters, log_warn, VLM, parse_key_value, parse_yes_no
+from utils import (load_parameters, log_warn, VLM, parse_key_value, parse_yes_no,
+                   PLAN_SEPARATOR, parse_int, parse_list, parse_steps)
 
 
 class Supervisor(ABC):
@@ -89,19 +90,6 @@ class Supervisor(ABC):
 
 
 
-def _parse_optional_int(text: str, key: str) -> Optional[int]:
-    """Extract a non-negative integer from 'Key: value'. Returns None if absent,
-    'N/A', or otherwise unparseable (e.g. the task was never completed)."""
-    raw = (parse_key_value(text, key) or "").strip()
-    if not raw or raw.lower().startswith(("n/a", "na", "none", "unknown")):
-        return None
-    for token in raw.replace(",", " ").split():
-        if token.isdigit():
-            return int(token)
-    digits = "".join(ch for ch in raw if ch.isdigit())
-    return int(digits) if digits else None
-
-
 def _frame_to_call_cutoff(
     vlm_call_log: list,
     steps: list,
@@ -135,24 +123,6 @@ def _frame_to_call_cutoff(
             if env_frames >= safe_frame:
                 return call_idx + 1  # keep through the call that produced this frame
     return len(vlm_call_log)
-
-
-def _parse_checker_int(text: str, key: str, lo: int, hi: int) -> int:
-    """Extract an integer in [lo, hi] from 'Key: value'. Falls back to lo on parse failure."""
-    raw = parse_key_value(text, key) or ""
-    for token in raw.split():
-        try:
-            v = int(token)
-            if lo <= v <= hi:
-                return v
-        except ValueError:
-            continue
-    for ch in raw:
-        if ch.isdigit():
-            v = int(ch)
-            if lo <= v <= hi:
-                return v
-    return lo
 
 
 # ---------------------------------------------------------------------------
@@ -402,12 +372,20 @@ Safe success point: <frame number, or N/A if never completed or unknown>
         # create_dataset.py) receive a call-log index, not a frame number. This
         # overloading is deliberate: it lets create_dataset slice the saved
         # vlm_call_log directly without also needing the (unsaved) steps list.
-        safe_frame = _parse_optional_int(judge_output, "Safe success point")
+        safe_frame = parse_int(judge_output, "Safe success point")
         safe_success_point = _frame_to_call_cutoff(report.vlm_call_log, report.steps, safe_frame)
         executor_meta = {"vlm_call_log": report.vlm_call_log, "steps": report.steps, **run_meta}
 
         if self._score_mode:
-            score = _parse_checker_int(judge_output, "Score", lo=1, hi=10)
+            score = parse_int(judge_output, "Score", lo=1, hi=10)
+            if score is None:
+                # Scored 1 either way, but the event is now visible. A judgement whose
+                # Score line was truncated away is otherwise indistinguishable from a
+                # genuine 1, and downstream (practice_tasks retry, create_dataset) treats
+                # it as a real failed attempt.
+                log_warn("[checker] no parseable Score in judgement (truncated?); "
+                         "scoring 1", self._parameters)
+                score = 1
             return {"score": score, "safe_success_point": safe_success_point, "description": description, "reasoning": reasoning, **executor_meta}
         else:
             success = parse_yes_no(judge_output, "Success") is True
@@ -417,38 +395,6 @@ Safe success point: <frame number, or N/A if never completed or unknown>
 # ---------------------------------------------------------------------------
 # Parse helpers for ExplorationSupervisor
 # ---------------------------------------------------------------------------
-
-
-def _parse_numbered_list(text: str, marker: str) -> List[str]:
-    """Extract a numbered list that follows a line starting with *marker*.
-
-    Looks for lines of the form ``1. ...``, ``2. ...`` etc. that appear after
-    the marker line (or anywhere in *text* if the marker is not found).
-    """
-    lines = text.splitlines()
-    start = 0
-    for i, line in enumerate(lines):
-        if marker.lower() in line.lower():
-            start = i + 1
-            break
-    items: List[str] = []
-    for line in lines[start:]:
-        stripped = line.strip()
-        # Accept "1. foo", "1) foo", "- foo"
-        for sep in (". ", ") ", " "):
-            if stripped and stripped[0].isdigit():
-                idx = stripped.find(sep)
-                if idx != -1:
-                    items.append(stripped[idx + len(sep):].strip())
-                    break
-            elif stripped.startswith("- "):
-                items.append(stripped[2:].strip())
-                break
-        else:
-            # If we've started collecting and hit a blank line, stop
-            if items and stripped == "":
-                break
-    return [item for item in items if item]
 
 
 # ---------------------------------------------------------------------------
@@ -665,7 +611,10 @@ Distilled:
                 images=lookback_frames,
                 max_new_tokens=self._max_new_tokens,
             )
-            self._all_raw_insights.extend(_parse_numbered_list(insights_output, "Insights:"))
+            # `or parse_list(...)`: the predecessor scanned the whole reply when the
+            # heading was missing, and models routinely list insights without one.
+            self._all_raw_insights.extend(
+                parse_list(insights_output, "Insights") or parse_list(insights_output))
 
         return {"reached": reached}
 
@@ -681,7 +630,9 @@ Distilled:
             context_block = ""
         prompt = self.PROPOSE_PROMPT.replace("[GAME]", self._game).replace("[CONTEXT_BLOCK]", context_block)
         output = self._vlm.infer(texts=prompt, images=[frame], max_new_tokens=self._max_new_tokens)
-        targets = _parse_numbered_list(output, "Targets:")
+        # Unscoped fallback matters most here: an empty list means this node proposes
+        # nothing and the exploration tree stops expanding at it.
+        targets = parse_list(output, "Targets") or parse_list(output)
         if not targets:
             targets = [l.strip() for l in output.splitlines() if l.strip() and not l.strip().lower().startswith("targets")]
         return targets
@@ -695,7 +646,7 @@ Distilled:
             images=None,
             max_new_tokens=self._max_new_tokens,
         )
-        return _parse_numbered_list(output, "Distilled:") or raw_insights
+        return parse_list(output, "Distilled") or parse_list(output) or raw_insights
 
 
 # ---------------------------------------------------------------------------
@@ -736,7 +687,10 @@ Hint: <one or two sentence hint for a better approach>
 # Module level because two parties share it: the planner prompt tells the model to emit it,
 # and InfoPlanSupervisor splits on it — so the token the model is asked for and the token
 # the code looks for cannot drift apart.
-PLAN_SEPARATOR = "[STEP]"
+#
+# It now lives in utils.parsing alongside parse_steps, the only code that splits on it, and
+# is re-exported here so `from execution.supervisor import PLAN_SEPARATOR` — which
+# run_benchmark_info_plan.py does — keeps working.
 
 
 # The planner writes for an executor that will be handed each step in isolation, with no
@@ -1536,7 +1490,7 @@ class InfoPlanSupervisor(InfoHintSupervisor):
         output = self._plan_vlm.infer(texts=prompt, images=[screen],
                                       max_new_tokens=self._plan_max_new_tokens)
         raw = (parse_key_value(output, "Plan") or "").strip()
-        self.plan = self.parse_steps(raw)
+        self.plan = parse_steps(raw)
         return self.plan
 
     def filter_insights(self, selected, screen) -> str:
@@ -1648,7 +1602,7 @@ class InfoPlanSupervisor(InfoHintSupervisor):
         output = self._plan_vlm.infer(texts=prompt, images=[screen],
                                       max_new_tokens=self._plan_max_new_tokens)
 
-        lines = self.parse_bulleted_answer(output, "Insights")
+        lines = parse_list(output, "Insights")
 
         if not lines:
             log_warn(f"[plan] insight distillation produced nothing from {len(kept)} "
@@ -1658,62 +1612,9 @@ class InfoPlanSupervisor(InfoHintSupervisor):
 
         self.n_insights_distilled = len(lines)
         self._say(f"  insight distillation: {len(kept)} -> {len(lines)} statements")
-        return "\n".join(lines)
-
-    @staticmethod
-    def parse_bulleted_answer(text: str, key: str) -> List[str]:
-        """Bullets following a ``Key:`` marker, the way :func:`parse_key_value` finds values.
-
-        ``parse_key_value`` returns one line, so a list answer needs its own reader — but it
-        must match the marker the same way, or the two disagree about what counts as an
-        answer. Two rules are borrowed from it, and both were learned the hard way:
-
-        - When the reply contains exactly one ``Response:``, only the text after it is
-          searched. Models that narrate before answering repeat the key inside the narration.
-        - The marker is matched **anywhere in a line**, not at its start. A reply whose
-          answer begins ``Response:  Insights:`` has the marker mid-line, and a start-anchored
-          match silently discards every bullet under it — which reads as a model that
-          returned nothing rather than a parser that could not find it.
-
-        :return: One ``"- statement"`` per bullet, or ``[]`` if the marker is absent.
-        """
-        body = text or ""
-        lowered = body.lower()
-        if lowered.count("response:") == 1:
-            body = body[lowered.index("response:") + len("response:"):]
-
-        marker = f"{key.lower()}:"
-        source = body.splitlines()
-        start = None
-        for i, line in enumerate(source):
-            if marker in line.lower():
-                start = i
-                break
-        if start is None:
-            return []
-
-        bullets = []
-        # Anything on the marker line after the marker itself counts as the first item.
-        head = source[start][source[start].lower().index(marker) + len(marker):].strip()
-        if head.startswith(("-", "*", "•")):
-            bullets.append("- " + head.lstrip("-*• ").strip())
-
-        for line in source[start + 1:]:
-            stripped = line.strip()
-            if stripped.lower().startswith("[stop]"):
-                break
-            if stripped.startswith(("-", "*", "•")):
-                bullets.append("- " + stripped.lstrip("-*• ").strip())
-            elif re.match(r"^\d+[.)]\s", stripped):
-                bullets.append("- " + re.sub(r"^\d+[.)]\s*", "", stripped))
-        return [b for b in bullets if b.strip("- ")]
-
-    @staticmethod
-    def parse_steps(text: str) -> List[str]:
-        """Split a ``[STEP]``-separated string into steps, dropping empties."""
-        if not text:
-            return []
-        return [part.strip() for part in text.split(PLAN_SEPARATOR) if part.strip()]
+        # parse_list returns bare items; the bullet is re-added here because this block goes
+        # straight into a prompt and the "- " is part of how that prompt reads.
+        return "\n".join(f"- {line}" for line in lines)
 
     # -- Judging and repair ----------------------------------------------------
 
@@ -2004,7 +1905,7 @@ class InfoPlanSupervisor(InfoHintSupervisor):
             return None
 
         raw = (parse_key_value(output, "Plan") or "").strip()
-        replacement = self.parse_steps(raw)
+        replacement = parse_steps(raw)
         if not replacement or raw.upper().startswith("NONE"):
             # Said flawed and produced nothing to replace it with. Hinting the existing step
             # is a worse plan than no plan, but it is a plan.

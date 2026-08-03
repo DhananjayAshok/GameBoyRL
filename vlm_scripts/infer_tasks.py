@@ -149,18 +149,6 @@ Task: <single distilled imperative task string>
 
 
 
-def _parse_bullet_list(text: str) -> list[str]:
-    """Return all '- ...' bullet lines before [stop]. Case-insensitive."""
-    results = []
-    for line in text.lower().splitlines():
-        if "[stop]" in line:
-            break
-        stripped = line.strip()
-        if stripped.startswith("- "):
-            results.append(stripped[2:].strip())
-    return results
-
-
 def _parse_infer_block(
     text: str, window_offset: int = 0, n_obs: int = None
 ) -> dict | None:

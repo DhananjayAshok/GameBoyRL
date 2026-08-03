@@ -28,7 +28,8 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from utils import load_parameters, log_info, log_warn, log_error, VLM, HuggingFaceModel
+from utils import (load_parameters, log_info, log_warn, log_error, VLM, HuggingFaceModel,
+                   parse_list)
 from gameboy_worlds import get_environment
 
 PROPOSE_PROMPT = """You are observing the initial frame of a game of [GAME].
@@ -123,20 +124,6 @@ def get_extra_context(
     return tasks
 
 
-def _parse_task_list(text: str) -> list[str]:
-    tasks = []
-    in_tasks = False
-    for line in text.lower().splitlines():
-        if "[stop]" in line:
-            break
-        if line.strip().startswith("tasks:"):
-            in_tasks = True
-            continue
-        if in_tasks and line.strip().startswith("- "):
-            tasks.append(line.strip()[2:].strip())
-    return tasks
-
-
 def _propose_for_init_state(
     init_state: str,
     game: str,
@@ -176,7 +163,11 @@ def _propose_for_init_state(
     if verbose:
         print(f"PROPOSE output for '{init_state}':\n{output}\n---")
 
-    tasks = _parse_task_list(output)
+    # Lowercased here, not in the parser: these strings go on to name directories on disk
+    # (proposed_tasks/<game>/.../<task>_attempts), and every artifact already written was
+    # keyed on the lowercase form. The old _parse_task_list lowercased internally; dropping
+    # that without restoring it here would orphan the existing corpus.
+    tasks = [task.lower() for task in parse_list(output, "Tasks")]
     if not tasks:
         log_warn(
             f"no tasks parsed from VLM output for init_state '{init_state}'."

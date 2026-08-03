@@ -40,13 +40,12 @@ import pandas as pd
 
 from debug_scripts.benchmark import parse_report
 from debug_scripts.frames import to_pil
-from utils import load_parameters, log_info, log_warn
+from utils import load_parameters, log_info, log_warn, parse_action_line
 
 # Written by run_benchmark_info_plan._join_leg_reports.
 LEG_HEADER = re.compile(
     r"^===== STEP (\d+) ATTEMPT (\d+) \[([^\]]*)\] (.*?) =====$", re.MULTILINE
 )
-ACTION_LINE = re.compile(r"^\s*Action:\s*(.+?)\s*$", re.MULTILINE)
 
 
 def split_legs(report_cell: str) -> list[dict]:
@@ -121,12 +120,6 @@ def render_call(call, index: int, max_prompt_chars: int) -> list[str]:
     ]
 
 
-def action_from_output(output: str):
-    """The action string the executor parsed out of this call, or None."""
-    found = ACTION_LINE.findall(output or "")
-    return found[-1].strip() if found else None
-
-
 def replay_episode(row, bench_row, images_dir: str, controller_variant: str = "low_level"):
     """Re-run the recorded actions, capturing the frame each call was looking at.
 
@@ -160,7 +153,7 @@ def replay_episode(row, bench_row, images_dir: str, controller_variant: str = "l
                 to_pil(frame).save(path, "JPEG", quality=88)
                 call["frame_path"] = path
 
-                action = action_from_output(call["output"])
+                action = parse_action_line(call["output"])
                 call["replay_action"] = action
                 if action and call["tag"] in ("action", "score", "decide"):
                     observation, *_ = environment.step_str(action)

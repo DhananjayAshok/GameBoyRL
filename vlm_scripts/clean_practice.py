@@ -54,7 +54,8 @@ import pandas as pd
 from tqdm import tqdm
 
 from execution.report import ACTION_TAGS
-from utils import VLM, HuggingFaceModel, log_info, log_error, parse_key_value
+from utils import (VLM, HuggingFaceModel, log_info, log_error, parse_key_value,
+                   parse_list)
 # Source of truth for which episodes/records become data — imported so the clean
 # pass selects and slices exactly what create_dataset will emit.
 from create_dataset import select_successful, _episode_cutoff
@@ -138,18 +139,6 @@ def _strip_blocks(text: str) -> str:
     return STEP_INFO_RE.sub('', HINT_RE.sub('', text))
 
 
-def _parse_bullet_list(text: str) -> list[str]:
-    """Return all '- ...' bullet lines before [STOP]. Preserves original casing."""
-    results = []
-    for line in text.splitlines():
-        if "[stop]" in line.lower():
-            break
-        stripped = line.strip()
-        if stripped.startswith("- "):
-            results.append(stripped[2:].strip())
-    return results
-
-
 def _paraphrase_task(task: str, vlm: VLM, max_new_tokens: int, k: int) -> list[str]:
     """Ask the VLM for paraphrases of a single task string. Returns up to k of them."""
     prompt = (
@@ -158,7 +147,7 @@ def _paraphrase_task(task: str, vlm: VLM, max_new_tokens: int, k: int) -> list[s
         .replace("[N]", str(k))
     )
     output = vlm.infer(texts=prompt, max_new_tokens=max_new_tokens)
-    paraphrases = [p for p in _parse_bullet_list(output) if p and p != task]
+    paraphrases = [p for p in parse_list(output) if p and p != task]
     return paraphrases[:k]
 
 

@@ -43,7 +43,8 @@ from gameboy_worlds.interface.action import LowLevelAction
 from execution.executor_action import ExecutorAction
 from execution.report import (EnvironmentStepRecord, ExecutorReport, InvalidStepRecord, SimpleReport,
                               ToolCallRecord, VLMCallRecord, parse_completion)
-from utils import load_parameters, log_info, ExecutorVLM, parse_key_value
+from utils import (load_parameters, log_info, ExecutorVLM, parse_key_value,
+                   parse_action_line, parse_int)
 
 MAX_CONSECUTIVE_INVALID = 10
 DEBUG_ON_INVALID = False
@@ -819,14 +820,15 @@ Reasoning: <your reasoning>
         )
 
     def _parse_action(self, response: str) -> Optional[str]:
-        """Extract the action string from a structured VLM response."""
-        for line in response.splitlines():
-            stripped = line.strip()
-            if stripped.lower().startswith("action:"):
-                action_str = stripped[len("action:"):].strip()
-                action_str = action_str.replace("[STOP]", "").strip()
-                return action_str if action_str else None
-        return None
+        """Extract the action string from a structured VLM response.
+
+        Kept as a method, delegating to :func:`utils.parsing.parse_action_line`, because it
+        is part of the extension surface the executor variants are built on — a subclass
+        reading actions out of a different format overrides this. The format itself is a
+        cross-module contract shared with create_dataset and the frame tooling, so it is
+        defined once in utils.parsing rather than here.
+        """
+        return parse_action_line(response)
 
     def _try_parse_tool_call(
         self, action_str: str
@@ -1478,14 +1480,13 @@ class ConfidenceGatedExecutor(SimpleExecutor):
         super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
 
     def _parse_confidence(self, response: str) -> Optional[int]:
-        for line in response.splitlines():
-            stripped = line.strip()
-            if stripped.lower().startswith("confidence:"):
-                val = stripped[len("confidence:"):].strip()
-                for ch in val:
-                    if ch.isdigit() and 1 <= int(ch) <= 5:
-                        return int(ch)
-        return None
+        """The 1-5 self-reported confidence, or None if the model did not give one.
+
+        A method for the same reason as :meth:`_parse_action` — it is a subclass hook. The
+        range is the one this executor's prompt asks for, so it is passed rather than baked
+        into the parser.
+        """
+        return parse_int(response, "Confidence", 1, 5)
 
     STEP_PROMPT = """Task: [TASK][HINT_BLOCK]
 

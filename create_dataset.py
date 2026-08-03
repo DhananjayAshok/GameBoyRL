@@ -68,7 +68,7 @@ from PIL import Image
 from tqdm import tqdm
 
 from execution.report import ACTION_TAGS
-from utils import log_error, log_info
+from utils import log_error, log_info, parse_action_line
 
 
 HINT_RE = re.compile(r'\n?\[HINT_START\].*?\[HINT_END\]', re.DOTALL)
@@ -84,18 +84,6 @@ def _strip_blocks(text: str) -> str:
 # are dropped when building rows. This is the source of truth: the debug dataset report no
 # longer audits action validity because create_dataset now guarantees it.
 VALID_ACTIONS = {"A", "B", "UP", "DOWN", "LEFT", "RIGHT", "START", "SELECT"}
-
-
-def _parsed_action(response):
-    """The `Action:` value from a VLM response, or None when there is no parseable line."""
-    if not isinstance(response, str):
-        return None
-    for line in response.splitlines():
-        stripped = line.strip()
-        if stripped.lower().startswith("action:"):
-            value = stripped[len("action:"):].replace("[STOP]", "").strip()
-            return value if value else None
-    return None
 
 
 def _episode_cutoff(safe_success_point, n_calls: int, safety_margin: int) -> int:
@@ -277,7 +265,7 @@ def create_dataset(practice_path, overwrite, safety_margin, val_frac, seed, scor
             # Drop calls whose response has no parseable Action: line, or names an action
             # the environment cannot execute. Checked before saving images so dropped rows
             # leave no orphan files behind.
-            action = _parsed_action(record.response)
+            action = parse_action_line(record.response)
             if action is None:
                 n_unparseable += 1
                 continue

@@ -33,9 +33,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from utils import log_info, log_warn
+from utils import log_info, log_warn, parse_action_line
 from debug_scripts import markdown as md
-from debug_scripts.frames import call_log_strip, parse_action
+from debug_scripts.frames import call_log_strip
 from debug_scripts.paths import Paths
 from debug_scripts.stats import wilson_str
 
@@ -196,7 +196,7 @@ def _practice_report(paths, obj, leg, extra, n_audit, n_frames, seed):
         out = os.path.join(images_dir, "audit", f"{row['group_idx']}_{int(row['attempt'])}.png")
         if not call_log_strip(call_log, out, n=n_frames, overwrite=overwrite):
             continue
-        actions = [parse_action(getattr(r, "response", "")) for r in call_log]
+        actions = [parse_action_line(getattr(r, "response", "")) for r in call_log]
         actions = [a for a in actions if a]
         audit_entries.append({
             "episode": f"{row['group_idx']}_{int(row['attempt'])}",
