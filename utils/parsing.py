@@ -27,7 +27,7 @@ every strictness in the old set was a silent data-loss path, where a model answe
 
 Two behaviours from the old set were dropped on purpose and must be supplied by callers:
 lowercasing (``vlm_scripts/propose_tasks_zeroshot.py``) and ``"- "`` re-prefixing for
-markdown output (``execution/supervisor.py``). Both are caller concerns — one names
+markdown output (``execution/supervisors/``). Both are caller concerns — one names
 directories on disk, the other formats a prompt — and neither belongs in a parser.
 """
 
@@ -234,7 +234,7 @@ def parse_action_line(text) -> Optional[str]:
 
 # Separator InfoPlanSupervisor joins plan steps with, and the `hint` CSV column stores the
 # whole plan under. It lives here with parse_steps, the only code that splits on it;
-# execution/supervisor.py re-exports the name so `from execution.supervisor import
+# execution/supervisors/ re-exports the name so `from execution.supervisors import
 # PLAN_SEPARATOR` keeps working.
 PLAN_SEPARATOR = "[STEP]"
 

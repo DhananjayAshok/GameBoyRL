@@ -2,7 +2,7 @@
 The info document: a game's distilled knowledge as plain markdown.
 
 The document is the shared artifact of the context-engineering vertical. It is written by
-vlm_scripts/build_info.py, read by execution.supervisor.InfoHintSupervisor at test time, and
+vlm_scripts/build_info.py, read by execution.supervisors.InfoHintSupervisor at test time, and
 rendered by debug_scripts/info.py. This module owns its *shape* so those three never disagree
 about it.
 

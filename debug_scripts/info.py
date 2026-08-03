@@ -381,7 +381,7 @@ def debug_info_hint(obj, model_name, source, extra, hint_mode, hint_vlm_model, h
     from debug_scripts.frames import to_pil
     from execution.info_doc import load_document, source_label
     from execution.registry import AVAILABLE_EXECUTORS
-    from execution.supervisor import InfoHintSupervisor
+    from execution.supervisors import InfoHintSupervisor
 
     paths = Paths(
         parameters=obj["parameters"], game=obj["game"], run_name=obj["run_name"],

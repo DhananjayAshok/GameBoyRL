@@ -3,7 +3,7 @@ Data structures for recording a complete executor run.
 
 :class:`ToolCallRecord` captures a single passive tool call (no emulator step).
 :class:`EnvironmentStepRecord` captures a single high-level environment step.
-:class:`ExecutorReport` aggregates the full run history produced by one :class:`~execution.executor.Executor` invocation.
+:class:`ExecutorReport` aggregates the full run history produced by one :class:`~execution.executors.Executor` invocation.
 """
 
 from __future__ import annotations
@@ -147,7 +147,7 @@ class ExecutorReport:
     """
     Complete record of a single executor run.
 
-    Produced and sealed entirely by :class:`~execution.executor.Executor.__init__`.
+    Produced and sealed entirely by :class:`~execution.executors.Executor.__init__`.
     Subclasses never build or overwrite this object.
 
     :param task: Natural-language task description given to the executor.
@@ -163,18 +163,18 @@ class ExecutorReport:
         permitted to make.
     :type max_tool_calls: int
     :param initial_state: State snapshot taken immediately before
-        :meth:`~execution.executor.Executor._execute` is called.
+        :meth:`~execution.executors.Executor._execute` is called.
     :type initial_state: dict
     :param steps: Interleaved, time-ordered list of
         :class:`ToolCallRecord` and :class:`EnvironmentStepRecord` objects
         produced during the run.
     :type steps: List[Union[ToolCallRecord, EnvironmentStepRecord]]
     :param final_state: State snapshot taken immediately after
-        :meth:`~execution.executor.Executor._execute` returns.
+        :meth:`~execution.executors.Executor._execute` returns.
         Set to ``None`` until execution completes.
     :type final_state: Optional[dict]
     :param outcome: Executor-defined integer outcome code.
-        ``None`` until :meth:`~execution.executor.Executor._execute` returns.
+        ``None`` until :meth:`~execution.executors.Executor._execute` returns.
     :type outcome: Optional[int]
     :param notes: Optional freeform commentary written by the executor.
     :type notes: Optional[str]
@@ -344,7 +344,7 @@ def parse_completion(response: str) -> Optional[bool]:
 
     The ``Complete: <yes|no>`` format is a **cross-module contract**, not an executor
     detail, which is why the sole parse of it lives here rather than on
-    :class:`~execution.executor.Executor`. Three subsystems read the same verdict off the
+    :class:`~execution.executors.Executor`. Three subsystems read the same verdict off the
     same call log: the executor decides whether to stop, :meth:`ExecutorReport.__str__`
     renders it, and the plan supervisor quotes it back to the reviser. Only the first of
     those has an executor instance, so a per-executor parse could never have been honoured
@@ -414,7 +414,7 @@ def attach_next_frames(vlm_call_log, steps) -> None:
 @dataclass
 class SimpleReport(ExecutorReport):
     """
-    Report produced by :class:`~execution.executor.SimpleExecutor`.
+    Report produced by :class:`~execution.executors.SimpleExecutor`.
 
     Extends :class:`ExecutorReport` with a log of invalid VLM outputs and
     convenience read-only accessors.

@@ -34,7 +34,7 @@ from tqdm import tqdm
 from gameboy_worlds import AVAILABLE_GAMES, get_benchmark_tasks, get_test_environment
 
 from execution.registry import AVAILABLE_EXECUTORS
-from execution.supervisor import PLAN_SEPARATOR, InfoPlanSupervisor
+from execution.supervisors import PLAN_SEPARATOR, InfoPlanSupervisor
 from run_benchmark_info import _load_documents, _load_insight_rows
 from utils import load_parameters, log_error, log_info
 

@@ -1,4 +1,4 @@
-from execution.executor import (
+from execution.executors import (
     Executor,
     SimpleExecutor,
     HistoryAwareExecutor,

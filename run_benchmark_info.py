@@ -23,7 +23,7 @@ from gameboy_worlds import AVAILABLE_GAMES, get_benchmark_tasks, get_test_enviro
 
 from execution.info_doc import load_document, source_label
 from execution.registry import AVAILABLE_EXECUTORS
-from execution.supervisor import InfoHintSupervisor
+from execution.supervisors import InfoHintSupervisor
 from utils import load_parameters, log_error, log_info
 
 

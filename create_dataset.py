@@ -90,7 +90,7 @@ def _episode_cutoff(safe_success_point, n_calls: int, safety_margin: int) -> int
     """Return the number of leading VLM calls to keep for an episode.
 
     ``safe_success_point`` is already a vlm_call_log slice index (see
-    execution/supervisor.py), not a frame number, so we slice directly.
+    execution/supervisors/), not a frame number, so we slice directly.
     ``safety_margin`` keeps a few extra calls as insurance. Returns ``n_calls``
     (keep everything) when safe_success_point is N/A.
     """

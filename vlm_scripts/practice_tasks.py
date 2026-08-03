@@ -74,7 +74,7 @@ from tqdm import tqdm
 from gameboy_worlds import get_environment
 from execution.registry import AVAILABLE_EXECUTORS
 from execution.report import EnvironmentStepRecord, attach_next_frames
-from execution.supervisor import SimpleCheckerSupervisor, derive_critique_hint
+from execution.supervisors import SimpleCheckerSupervisor, derive_critique_hint
 from utils import log_info, log_warn, log_error, VLM, HuggingFaceModel
 
 

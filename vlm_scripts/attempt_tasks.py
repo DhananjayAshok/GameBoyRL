@@ -76,12 +76,12 @@ from tqdm import tqdm
 from gameboy_worlds import get_environment
 from execution.registry import AVAILABLE_EXECUTORS
 from execution.report import EnvironmentStepRecord
-from execution.supervisor import SimpleCheckerSupervisor, derive_critique_hint
+from execution.supervisors import SimpleCheckerSupervisor, derive_critique_hint
 from utils import log_info, log_error, VLM, HuggingFaceModel
 
 
 # The critique prompts and the slice-then-consolidate implementation live in
-# execution/supervisor.py, shared with vlm_scripts/practice_tasks.py so both derive hints
+# execution/supervisors/checker.py, shared with vlm_scripts/practice_tasks.py so both derive hints
 # from identical prompts.
 
 

@@ -1,0 +1,360 @@
+"""
+Turning past attempts into a hint for the next one.
+
+:class:`InfoHintSupervisor` judges whether retrieved knowledge is relevant to the
+task at hand and writes a hint from what survives.  :class:`InfoPlanSupervisor`
+subclasses it, so anything added here is inherited by the plan arm.
+
+:class:`_RecordingVLM` is a thin wrapper that captures every call made through it so
+the calls can be attributed to the supervisor rather than the executor.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, List, Optional, Type
+
+from gameboy_worlds.interface import Environment
+
+from execution.executors import Executor
+from execution.report import ExecutorReport
+from execution.supervisors.base import Supervisor
+from execution.supervisors.checker import summarise_trajectory_segments
+from utils import log_warn, parse_key_value, parse_yes_no, VLM
+
+
+class InfoHintSupervisor(Supervisor):
+    """
+    Reads a prebuilt info document, writes one hint for the task at hand, then runs the
+    executor with it.
+
+    This is the test-time half of the context-engineering vertical. Two modes decide *which*
+    knowledge reaches the hint writer; the synthesis call is identical in both, so any
+    difference in results is attributable purely to selection:
+
+    ``retrieval``
+        Iterate over every entry of every loaded document and ask, one call each, whether it
+        fits this task and this screen. Entries are judged on ``Description`` + ``Examples`` +
+        their representative frame — never on their ``Insights``, so relevance is decided on
+        whether the context fits rather than on whether the advice sounds appealing.
+
+    ``init_state``
+        Skip the document entirely and read the stage-A ``insights.jsonl``, keeping rows whose
+        ``init_state`` matches the episode's. The init state is *given* by the benchmark row
+        rather than inferred, which makes this the retrieval-free upper bound. Rows are still
+        task-filtered by the same relevance call — one init state can carry many unrelated
+        tasks, so the init state narrows the candidate pool and the task filter picks from it.
+
+    No executor is modified or subclassed: the hint travels through ``Executor.__init__``'s
+    existing ``hint`` argument, which ``Supervisor.call_executor`` already forwards. The
+    executor's hint block presents a hint as reliable, so calibration lives in the hint text —
+    :attr:`WRITE_HINT_PROMPT` requires hints to be conditional and self-limiting, and to emit
+    ``NO HINT`` rather than guess.
+
+    :param task: The benchmark task string.
+    :param executor_class: :class:`~execution.executors.Executor` subclass to run.
+    :param env: The game environment.
+    :param game: Game name string.
+    :param max_steps: Env-step budget forwarded to the executor.
+    :param max_tool_calls: Tool-call budget forwarded to the executor.
+    :param documents: Parsed :class:`~execution.info_doc.InfoDocument` objects (retrieval mode).
+    :param insight_rows: Stage-A rows from ``insights.jsonl`` (init_state mode).
+    :param mode: ``"retrieval"`` or ``"init_state"``.
+    :param init_state: The episode's init state; required for ``init_state`` mode.
+    :param hint_vlm_model: Model name for the relevance and hint-writing calls.
+    :param hint_vlm_kind: VLM kind for those calls.
+    :param hint_max_new_tokens: Token budget per hint-pipeline VLM call.
+    :param max_concurrency: Parallel relevance calls (they are independent).
+    :param parameters: Optional parameter overrides.
+    :param executor_kwargs: Extra keyword arguments forwarded to the executor constructor.
+    """
+
+    RELEVANCE_PROMPT = """You are deciding whether a piece of recorded knowledge about [GAME] is relevant to the situation a player is in right now.
+
+The player's current task is: "[TASK]"
+
+Here is the recorded entry:
+[ENTRY]
+
+The images are: first the CURRENT screen the player is looking at, then the representative frame recorded with this entry.
+
+Could this entry's knowledge be relevant to the player's current task on this current screen? Answer yes only if the entry genuinely fits the situation — the same or a very similar [KIND]. The frames are your primary evidence: compare what is actually visible in them.
+
+Answering yes to something that does not fit produces a misleading hint, which is worse than no hint at all. Answering no to something that does fit wastes knowledge that was already paid for. Judge honestly in both directions.
+
+Respond in exactly this format:
+Reasoning: <one or two sentences, referring to the frames>
+Relevant: <yes or no>
+[STOP]"""
+
+    WRITE_HINT_PROMPT = """You are advising a player of [GAME] who is about to attempt this task:
+
+Task: "[TASK]"
+
+The image is the screen they are looking at right now.
+
+Here is what has been learned from past playthroughs of this game that may be relevant:
+[INSIGHTS]
+
+Write ONE short hint telling the player what to do from THIS screen. Requirements:
+
+- Be concrete and actionable: name the actual button, the actual direction, the actual object.
+- Ground it in what is ACTUALLY VISIBLE on the current screen. Do not describe things that are not there.
+- Make it SELF-LIMITING ON SOMETHING VISIBLE. Every condition must be a fact the player can check on the screen and find FALSE — a visible object, icon, cursor position, menu state or character position. Write "if a hand icon is visible in the toolbar, press LEFT or RIGHT to highlight it" rather than "press LEFT or RIGHT to highlight the hand icon".
+- NEVER condition on intent, desire, or the task itself. "If you intend to take the gun", "if you want to open the door", "if you wish to examine the coat" are FORBIDDEN. The player always intends to do the task, so such a condition is always true, the advice can never be declined, and a wrong hint is then followed until the step limit. Ask yourself: is there a screen on which this condition would be FALSE? If not, the condition is worthless — rewrite it or reply NO HINT.
+- Do not prescribe a fixed opening sequence of button presses. The player may already be past that point, or on a different screen than the one your evidence came from. Anchor the advice to what is on screen NOW, not to a plan begun from some earlier state.
+- Never assert something the evidence above does not support. Scope every claim to what was actually observed.
+- Prefer two sentences at most.
+
+If none of the knowledge above genuinely applies to this screen and this task, reply with exactly NO HINT. A missing hint costs nothing; a confident wrong hint actively misleads the player.
+
+Respond in exactly this format:
+Hint: <the hint, or NO HINT>
+[STOP]"""
+
+    def __init__(
+        self,
+        task: str,
+        executor_class: Type[Executor],
+        env: Environment,
+        game: str,
+        max_steps: int,
+        max_tool_calls: int,
+        documents: Optional[List[Any]] = None,
+        insight_rows: Optional[List[dict]] = None,
+        mode: str = "retrieval",
+        init_state: Optional[str] = None,
+        hint_vlm_model: str = None,
+        hint_vlm_kind: str = None,
+        hint_max_new_tokens: int = 1000,
+        max_concurrency: int = 8,
+        parameters: Optional[dict] = None,
+        **executor_kwargs: Any,
+    ) -> None:
+        self._task = task
+        self._documents = documents or []
+        self._insight_rows = insight_rows or []
+        self._mode = mode
+        self._init_state = init_state
+        self._max_concurrency = max_concurrency
+        self._hint_max_new_tokens = hint_max_new_tokens
+        super().__init__(executor_class, env, game, max_steps, max_tool_calls, parameters,
+                         **executor_kwargs)
+        self._hint_vlm = VLM(hint_vlm_model, hint_vlm_kind)
+        # Populated by write_hint() so the caller (and debug.py info_hint) can inspect why a
+        # hint came out the way it did without re-running the pipeline. ``selected_ids`` is
+        # the durable part: the benchmark CSV stores it per episode, so a hint can be traced
+        # back to the exact entries it was synthesised from long after the run.
+        self.selection_log: List[dict] = []
+        self.selected_ids: List[str] = []
+        self.hint: Optional[str] = None
+
+    @staticmethod
+    def entry_id(entry) -> str:
+        """
+        Stable identifier for one selected entry, for the benchmark CSV and debug reports.
+
+        ``source`` is the provenance label the loader attached: the document's vertical in
+        retrieval mode (``zeroshot``), or vertical/group_idx in init_state mode
+        (``zeroshot/12_0``) — which pins the exact stage-A row in insights.jsonl. The
+        category disambiguates entries within a source.
+        """
+        return f"{entry.source}#{entry.category}" if entry.source else entry.category
+
+    # -- Hint pipeline ---------------------------------------------------------
+
+    def _current_frame(self):
+        return self._env.get_info()["core"]["current_frame"]
+
+    @staticmethod
+    def _entry_frame(entry):
+        from PIL import Image
+
+        if not entry.frame or not os.path.exists(entry.frame):
+            return None
+        return Image.open(entry.frame).convert("RGB")
+
+    def _judge_relevance(self, entry, kind: str, screen) -> tuple:
+        """One yes/no call for a single entry. Returns (is_relevant, reason)."""
+        prompt = (
+            self.RELEVANCE_PROMPT
+            .replace("[GAME]", self._game)
+            .replace("[TASK]", self._task)
+            .replace("[KIND]", kind)
+            .replace("[ENTRY]", entry.evidence_block())
+        )
+        images = [screen]
+        entry_frame = self._entry_frame(entry)
+        if entry_frame is not None:
+            images.append(entry_frame)
+
+        output = self._hint_vlm.infer(texts=prompt, images=images,
+                                      max_new_tokens=self._hint_max_new_tokens)
+        verdict = parse_yes_no(output, "Relevant")
+        reason = (parse_key_value(output, "Reasoning") or "").strip()
+        return verdict is True, reason
+
+    def _select_entries(self, candidates, screen) -> List[Any]:
+        """Run the relevance pass over (entry, kind) candidates, in parallel."""
+        if not candidates:
+            return []
+
+        selected = []
+        with ThreadPoolExecutor(max_workers=self._max_concurrency) as pool:
+            futures = {
+                pool.submit(self._judge_relevance, entry, kind, screen): (entry, kind)
+                for entry, kind in candidates
+            }
+            for future in as_completed(futures):
+                entry, kind = futures[future]
+                try:
+                    relevant, reason = future.result()
+                except Exception as error:      # a failed judgement must not sink the episode
+                    log_warn(f"relevance call failed for '{entry.category}': {error}")
+                    continue
+                self.selection_log.append({
+                    "category": entry.category,
+                    "kind": kind,
+                    "source": entry.source,
+                    "relevant": relevant,
+                    "reason": reason,
+                })
+                if relevant:
+                    selected.append(entry)
+        return selected
+
+    def _retrieval_candidates(self):
+        from execution.info_doc import IMAGE_SECTION, TASK_SECTION
+
+        candidates = []
+        for document in self._documents:
+            candidates += [(e, "task") for e in document.entries(TASK_SECTION)]
+            candidates += [(e, "kind of screen") for e in document.entries(IMAGE_SECTION)]
+        return candidates
+
+    def _init_state_candidates(self):
+        """Stage-A rows for this episode's init state, as entries for the same relevance pass."""
+        from execution.info_doc import TASK_SECTION, parse_document
+
+        available = sorted({row.get("init_state") for row in self._insight_rows
+                            if row.get("init_state")})
+        matching = [row for row in self._insight_rows
+                    if row.get("init_state") == self._init_state]
+
+        if not matching:
+            log_warn(
+                f"init_state '{self._init_state}' has no records in the loaded insights — "
+                f"running with no hint. Available init_states: {available}",
+                self._parameters,
+            )
+            return []
+
+        candidates = []
+        for row in matching:
+            document = parse_document(row["document"])
+            for entry in document.entries(TASK_SECTION):
+                # Prefer the provenance label the loader attached; group_idx is only a
+                # fallback, and is not comparable across verticals (each numbers its groups
+                # independently, so the same key means different things in each).
+                label = row.get("source")
+                entry.source = f"{label}/{row.get('group_idx')}" if label else row.get("group_idx")
+                candidates.append((entry, "task"))
+        return candidates
+
+    def write_hint(self) -> Optional[str]:
+        """Select relevant knowledge for the current screen and synthesise one hint."""
+        self.selection_log = []
+        self.selected_ids = []
+        screen = self._current_frame()
+
+        candidates = (self._init_state_candidates() if self._mode == "init_state"
+                      else self._retrieval_candidates())
+        selected = self._select_entries(candidates, screen)
+        self.selected_ids = [self.entry_id(entry) for entry in selected]
+
+        if not selected:
+            self.hint = None
+            return None
+
+        blocks = []
+        for entry in selected:
+            label = f" (source: {entry.source})" if entry.source else ""
+            blocks.append(f"From '{entry.category}'{label}:\n{entry.insights_block()}")
+
+        prompt = (
+            self.WRITE_HINT_PROMPT
+            .replace("[GAME]", self._game)
+            .replace("[TASK]", self._task)
+            .replace("[INSIGHTS]", "\n\n".join(blocks))
+        )
+        output = self._hint_vlm.infer(texts=prompt, images=[screen],
+                                      max_new_tokens=self._hint_max_new_tokens)
+        hint = (parse_key_value(output, "Hint") or "").strip()
+
+        if not hint or hint.upper().startswith("NO HINT"):
+            self.hint = None
+            return None
+        self.hint = hint
+        return hint
+
+    # -- Supervisor API --------------------------------------------------------
+
+    def evaluate(self) -> Any:
+        """Write a hint from the current screen, then run the executor with it."""
+        hint = self.write_hint()
+        if hint is not None:
+            self._executor_kwargs["hint"] = hint
+        else:
+            self._executor_kwargs.pop("hint", None)
+        return self.call_executor(self._task)
+
+    def process_executor_return(self, report: ExecutorReport) -> Any:
+        """Hand the report back unchanged — the benchmark runner reads it directly."""
+        return report
+
+
+class _RecordingVLM:
+    """Wraps a VLM so every call the supervisor makes is kept, tagged with its stage.
+
+    The supervisor's own calls — filter, distil, plan, judge, hint, revise — go straight to
+    a VLM and never touch an :class:`~execution.report.ExecutorReport`, so unlike the
+    executor's calls nothing records them and a run leaves no trace of *why* the supervisor
+    did what it did. Wrapping rather than logging at each call site also catches the batched
+    ones inside :func:`summarise_trajectory_segments`, which is shared with the critique
+    pipeline and should not grow a supervisor-specific parameter.
+
+    :param vlm: The real VLM to delegate to.
+    :param sink: List the records are appended to; owned by the supervisor.
+    """
+
+    def __init__(self, vlm, sink: List[dict]) -> None:
+        self._vlm = vlm
+        self._sink = sink
+        self.stage = "unknown"
+        # Which leg the supervisor is currently working on, carried into every record so a
+        # reader can put these calls back in place between the executor's legs. Without it
+        # the log is a flat list and the order has to be guessed from the stage names,
+        # which breaks on any attempt that skips a stage.
+        self.context: dict = {"phase": "planning"}
+
+    def infer(self, **kwargs: Any):
+        result = self._vlm.infer(**kwargs)
+        texts = kwargs.get("texts")
+        # A batched call passes a list of prompts and gets a list back; record them paired
+        # so one windowed judgement does not collapse into a single unreadable entry.
+        if isinstance(texts, list):
+            responses = result if isinstance(result, list) else [result] * len(texts)
+            for prompt, response in zip(texts, responses):
+                self._sink.append({"stage": self.stage, "prompt": prompt,
+                                   "response": response, **self.context})
+        else:
+            self._sink.append({"stage": self.stage, "prompt": texts, "response": result,
+                               **self.context})
+        return result
+
+    def __getattr__(self, name):
+        return getattr(self._vlm, name)
+
+
