@@ -15,7 +15,7 @@ from gameboy_worlds.interface import HighLevelAction
 from gameboy_worlds.interface.action import LowLevelAction
 
 from execution.executors.base import Executor, MAX_CONSECUTIVE_INVALID
-from execution.report import EnvironmentStepRecord, ExecutorReport, SimpleReport
+from execution.report import EnvironmentStepRecord, SimpleReport
 from utils import parse_action_line
 
 
@@ -61,6 +61,10 @@ class SimpleExecutor(Executor):
         Per :class:`Executor` contract, call ``super().__init__()`` **last**.
     """
 
+    #: ``[CONTEXT_SECTION]`` is where a variant splices whatever state it carries between
+    #: steps — a spatial map, a belief state, a plan, an action history. It renders empty
+    #: unless :meth:`_context_section` is overridden, so a variant that wants one adds three
+    #: lines rather than copying this whole template to insert a placeholder.
     STEP_PROMPT = """Task: [TASK][HINT_BLOCK]
 
 You are playing a GameBoy game. The current screen is shown in the image.
@@ -68,7 +72,7 @@ You are playing a GameBoy game. The current screen is shown in the image.
 [ERROR_BLOCK][TOOL_RESULT_BLOCK]Available environment actions:
 [ACTION_LIST]
 
-[TOOLS_BLOCK]Reason about the best next action, then respond in exactly this format:
+[TOOLS_BLOCK][CONTEXT_SECTION]Reason about the best next action, then respond in exactly this format:
 Reasoning: <your reasoning>
 [ACTION_FORMAT]
 [STOP]"""
@@ -149,6 +153,54 @@ Reasoning: <your reasoning>
         """Called after a successful env step, with the resulting record."""
         pass
 
+    def _context_section(self) -> str:
+        """State carried between steps, spliced into ``[CONTEXT_SECTION]``.
+
+        Empty here, so the reference executor's prompt is unchanged. A variant that
+        maintains something across steps overrides this instead of restating the whole
+        step prompt to add a placeholder — which is how four variants came to hold
+        near-identical copies of a template that then had to be edited in five places.
+
+        Return a block ending in a blank line if non-empty; it sits directly before the
+        "Reason about the best next action" line.
+        """
+        return ""
+
+    def _on_parse_failure(self, vlm_output) -> str:
+        """Record an unparseable response and return the error to put in the next prompt.
+
+        A hook because the wording has to match what the variant actually asked for: an
+        executor whose prompt requests a score table must not be told it should have ended
+        with ``Action:``. Recording and messaging are one method because the two must stay
+        in step — every invalid step produces exactly one record and one message.
+        """
+        self._record_invalid(str(vlm_output))
+        return (
+            "Your previous response could not be parsed. "
+            "You must end your response with:\n"
+            "  Action: <action>\n"
+            "  [STOP]"
+        )
+
+    def _on_unrecognised_action(self, action_str: str) -> str:
+        """Record a well-formed but unknown action and return the error for the next prompt."""
+        self._record_invalid(f"Unrecognised action string: {action_str!r}",
+                             reason="unrecognised action")
+        return (
+            f"You tried to do '{action_str}' but that is not a recognised action. DO NOT use '{action_str}' in your response. "
+            "Choose exactly one from the listed actions."
+        )
+
+    def _step_template(self) -> str:
+        """The prompt template :meth:`_build_prompt` fills.
+
+        A hook rather than a direct ``self.STEP_PROMPT`` read so a variant can choose
+        between templates per step — :class:`~execution.executors.stateful.ScreenDiffExecutor`
+        picks a one-image or two-image wording depending on whether it has a previous
+        frame — without reimplementing the substitution chain.
+        """
+        return self.STEP_PROMPT
+
     # ------------------------------------------------------------------
     # Unified execution loop
     # ------------------------------------------------------------------
@@ -174,16 +226,10 @@ Reasoning: <your reasoning>
             action_str = self._pick_action(vlm_output)
 
             if action_str is None:
-                error_message = (
-                    "Your previous response could not be parsed. "
-                    "You must end your response with:\n"
-                    "  Action: <action>\n"
-                    "  [STOP]"
-                )
+                error_message = self._on_parse_failure(vlm_output)
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self._record_invalid(str(vlm_output))
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -219,14 +265,10 @@ Reasoning: <your reasoning>
                 if outcome is not None:
                     return outcome
             else:
-                error_message = (
-                    f"You tried to do '{action_str}' but that is not a recognised action. DO NOT use '{action_str}' in your response. "
-                    "Choose exactly one from the listed actions."
-                )
+                error_message = self._on_unrecognised_action(action_str)
                 tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
-                self._record_invalid(f"Unrecognised action string: {action_str!r}", reason="unrecognised action")
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
                     self.report.termination_reason = "max_invalid"
                     return -1
@@ -274,13 +316,14 @@ Reasoning: <your reasoning>
         tool_calls_exceeded: bool,
     ) -> str:
         return (
-            self.STEP_PROMPT
+            self._step_template()
             .replace("[TASK]", self._task)
             .replace("[HINT_BLOCK]", self._hint_block())
             .replace("[ERROR_BLOCK]", self._error_block(error_message))
             .replace("[TOOL_RESULT_BLOCK]", self._tool_result_block(tool_call_message))
             .replace("[ACTION_LIST]", self._action_list_block())
             .replace("[TOOLS_BLOCK]", self._tools_block(tool_calls_exceeded))
+            .replace("[CONTEXT_SECTION]", self._context_section())
             .replace("[ACTION_FORMAT]", self._action_format(tool_calls_exceeded))
         )
 
@@ -340,32 +383,27 @@ You are playing a GameBoy game. The current screen is shown in the image.
 [ERROR_BLOCK][TOOL_RESULT_BLOCK]Available environment actions:
 [ACTION_LIST]
 
-[TOOLS_BLOCK][HISTORY_SECTION]Reason about the best next action, then respond in exactly this format:
+[TOOLS_BLOCK][CONTEXT_SECTION]Reason about the best next action, then respond in exactly this format:
 Reasoning: <your reasoning, specifically reason over your history as well. If you see the [no change] message on the action that you are trying, then you almost certainly have slightly misperceived the screen position of the player relative to the objects. In that case, reason about what else you can try instead of just repeating the same action.>
 [ACTION_FORMAT]
 [STOP]"""
 
-    def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
-        if self._action_history:
-            recent = self._action_history[-self._history_k:]
-            history_lines = ["Recent actions (oldest first):"]
-            frame_change_hint = ""
-            for action_cls, action_str, success, frame_changed in recent:
-                if issubclass(action_cls, LowLevelAction):
-                    tags = "" if frame_changed else " [no change]"
-                    if not frame_changed:
-                        frame_change_hint = "\nIf you have been trying to execute the same action repeatedly (specifically A or B) and especially if you get the [no change] message on your recent actions, consider that you may be stuck in a loop, and should try something else. Look at the screen deeply and use the visual cues to guide your decision making. If you are trying to interact with something, you likely have the incorrect orientation and need to slightly adjust your positioning"
-                    history_lines.append(f"  {action_str}{tags}")
-                else:
-                    status = "ok" if success == 1 else ("failed" if success == 0 else "unknown")
-                    tags = "" if frame_changed else ", no change"
-                    history_lines.append(f"  {action_str}  [{status}{tags}]")
-            history_section = "\n".join(history_lines) + frame_change_hint + "\n\n"
-        else:
-            history_section = ""
-        return (
-            super()._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-            .replace("[HISTORY_SECTION]", history_section)
-        )
+    def _context_section(self) -> str:
+        if not self._action_history:
+            return ""
+        recent = self._action_history[-self._history_k:]
+        history_lines = ["Recent actions (oldest first):"]
+        frame_change_hint = ""
+        for action_cls, action_str, success, frame_changed in recent:
+            if issubclass(action_cls, LowLevelAction):
+                tags = "" if frame_changed else " [no change]"
+                if not frame_changed:
+                    frame_change_hint = "\nIf you have been trying to execute the same action repeatedly (specifically A or B) and especially if you get the [no change] message on your recent actions, consider that you may be stuck in a loop, and should try something else. Look at the screen deeply and use the visual cues to guide your decision making. If you are trying to interact with something, you likely have the incorrect orientation and need to slightly adjust your positioning"
+                history_lines.append(f"  {action_str}{tags}")
+            else:
+                status = "ok" if success == 1 else ("failed" if success == 0 else "unknown")
+                tags = "" if frame_changed else ", no change"
+                history_lines.append(f"  {action_str}  [{status}{tags}]")
+        return "\n".join(history_lines) + frame_change_hint + "\n\n"
 
 

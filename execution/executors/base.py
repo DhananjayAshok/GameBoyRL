@@ -44,16 +44,14 @@ triggered a second time — the executor is sealed after construction.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, Optional, Type
 
 from gameboy_worlds.interface import Environment, HighLevelAction
-from gameboy_worlds.interface.action import LowLevelAction
 
 from execution.executor_action import ExecutorAction
-from execution.report import (EnvironmentStepRecord, ExecutorReport, InvalidStepRecord, SimpleReport,
+from execution.report import (EnvironmentStepRecord, ExecutorReport, InvalidStepRecord,
                               ToolCallRecord, VLMCallRecord, parse_completion)
-from utils import (load_parameters, log_info, ExecutorVLM, parse_key_value,
-                   parse_action_line, parse_int)
+from utils import load_parameters, log_info, ExecutorVLM, parse_key_value
 
 MAX_CONSECUTIVE_INVALID = 10
 DEBUG_ON_INVALID = False

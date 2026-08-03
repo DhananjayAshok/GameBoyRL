@@ -18,8 +18,8 @@ from __future__ import annotations
 import re
 from typing import Any, List, Optional
 
-from execution.report import (DONE_CHECK_TAG, EnvironmentStepRecord, ExecutorReport,
-                              iter_call_steps, parse_completion, says_complete)
+from execution.report import EnvironmentStepRecord, ExecutorReport, parse_completion
+from execution.supervisors._format import action_trace, attempt_history_line
 from execution.supervisors.checker import summarise_trajectory_segments
 from execution.supervisors.info_hint import InfoHintSupervisor, _RecordingVLM
 from execution.supervisors.prompts import (
@@ -163,6 +163,19 @@ class InfoPlanSupervisor(InfoHintSupervisor):
         if self.verbose:
             print(message)
 
+    def _call(self, stage: str, **kwargs):
+        """Tag the recorded call with *stage*, then make it.
+
+        ``_RecordingVLM`` labels whatever it is asked to infer with whatever ``stage`` was
+        last assigned, so setting the stage and calling were two separate statements at
+        every one of these sites — and a site that forgot to set it would be logged under
+        the *previous* stage, silently. ``supervisor_calls`` is the only record of this
+        arm's reasoning, so a mislabelled call is a quietly corrupted artifact rather than
+        a cosmetic problem. Binding the two together makes the mistake unavailable.
+        """
+        self._plan_vlm.stage = stage
+        return self._plan_vlm.infer(**kwargs)
+
     # -- Planning --------------------------------------------------------------
 
     def write_plan(self) -> List[str]:
@@ -192,8 +205,7 @@ class InfoPlanSupervisor(InfoHintSupervisor):
             .replace("[TASK]", self._task)
             .replace("[INSIGHTS]", self.insights_block)
         )
-        self._plan_vlm.stage = "plan"
-        output = self._plan_vlm.infer(texts=prompt, images=[screen],
+        output = self._call("plan", texts=prompt, images=[screen],
                                       max_new_tokens=self._plan_max_new_tokens)
         raw = (parse_key_value(output, "Plan") or "").strip()
         self.plan = parse_steps(raw)
@@ -239,8 +251,7 @@ class InfoPlanSupervisor(InfoHintSupervisor):
             .replace("[TASK]", self._task)
             .replace("[CANDIDATES]", numbered)
         )
-        self._plan_vlm.stage = "filter_insights"
-        output = self._plan_vlm.infer(texts=prompt, images=[screen],
+        output = self._call("filter_insights", texts=prompt, images=[screen],
                                       max_new_tokens=self._hint_max_new_tokens)
         answer = (parse_key_value(output, "Keep") or "").strip()
 
@@ -304,8 +315,7 @@ class InfoPlanSupervisor(InfoHintSupervisor):
             .replace("[TASK]", self._task)
             .replace("[CANDIDATES]", grouped_block)
         )
-        self._plan_vlm.stage = "distil_insights"
-        output = self._plan_vlm.infer(texts=prompt, images=[screen],
+        output = self._call("distil_insights", texts=prompt, images=[screen],
                                       max_new_tokens=self._plan_max_new_tokens)
 
         lines = parse_list(output, "Insights")
@@ -324,97 +334,10 @@ class InfoPlanSupervisor(InfoHintSupervisor):
 
     # -- Judging and repair ----------------------------------------------------
 
-    @staticmethod
-    def action_names(env_steps: list) -> str:
-        """The buttons this attempt actually pressed, in order."""
-        names = []
-        for step in env_steps:
-            try:
-                names.append(step.action_class.get_action_name(**step.kwargs))
-            except Exception:      # an action whose name needs kwargs it did not record
-                names.append(step.action_class.__name__)
-        return ", ".join(names) if names else "(no actions taken)"
-
-    @staticmethod
-    def action_trace(report, max_chars: int = 0) -> str:
-        """Each action the executor took, beside the reasoning it gave for taking it.
-
-        Already on the report — ``vlm_call_log`` holds every response verbatim and
-        ``iter_call_steps`` pairs each with the step it produced — so this costs nothing
-        and has simply never been read.
-
-        Pairing the two is what makes a failure diagnosable. The button alone shows a run
-        of identical presses; the reasoning beside it shows *why*, and the usual answer is
-        that the executor believes something about the screen that is not true ("the cursor
-        is now over the hand icon" while it is not). That is a perception failure, and no
-        rewording of the step will fix it — which is precisely the judgement the reviser is
-        being asked to make.
-
-        *max_chars* is 0 (uncapped) by default. The belief that matters usually arrives
-        mid-sentence — "the cursor is now over the hand icon, so pressing A selects it" —
-        so a cap tends to remove exactly the clause the reader needs while leaving the part
-        that says nothing. Longer prompts are the cheaper problem.
-
-        Completion checks are shown too, indented under the action they judged. A check
-        answering "no" three times in a row, with its reasoning, is a different failure from
-        an executor that thinks it has already finished, and the reviser can only tell them
-        apart if it sees both. They are not numbered — only actions are — so the numbering
-        still counts steps taken.
-        """
-        def compress(text: str) -> str:
-            text = " ".join((text or "").strip().split())
-            if max_chars and len(text) > max_chars:
-                text = text[:max_chars].rstrip() + "…"
-            return text
-
-        lines, n_actions = [], 0
-        for _, entry, step in iter_call_steps(report.vlm_call_log, report.steps):
-            if entry.tag == DONE_CHECK_TAG:
-                verdict = "yes" if says_complete(entry.response) else "no"
-                reason = compress(parse_key_value(entry.response, "Reasoning"))
-                lines.append(f"            ↳ finished? {verdict}"
-                             + (f" — {reason}" if reason else ""))
-                continue
-            if entry.tag not in ("action", "score", "decide"):
-                continue
-            if isinstance(step, EnvironmentStepRecord):
-                try:
-                    name = step.action_class.get_action_name(**step.kwargs)
-                except Exception:
-                    name = step.action_class.__name__
-            elif step is None:
-                name = "(no action)"
-            else:
-                name = "INVALID"
-            n_actions += 1
-            reason = compress(parse_key_value(entry.response, "Reasoning"))
-            lines.append(f"         {n_actions}. {name} — {reason or '(no reasoning given)'}")
-        return "\n".join(lines) if lines else "         (no actions taken)"
-
-    def attempt_history_line(self, report, env_steps: list, summaries: List[str],
-                             hint: Optional[str], verdict: str,
-                             regression: Optional[str] = None) -> str:
-        """One attempt, described richly enough for :meth:`revise_step` to diagnose it.
-
-        The summaries are already paid for — :meth:`judge_step` builds them from the frames
-        and they were previously used once and dropped — and the button list costs nothing
-        at all. Together they are what separates the two failures that a bare termination
-        reason cannot: a step that is badly worded, and a step that is fine but that the
-        executor cannot act on. The second looks like a run of identical buttons with
-        nothing changing on screen, which is invisible unless the buttons are shown.
-        """
-        return (
-            f"{report.termination_reason} after {len(env_steps)} step(s)\n"
-            f"       hint given: {hint or '(none — the step text was the only instruction)'}\n"
-            f"       what the player pressed, and why they said they pressed it:\n"
-            f"{self.action_trace(report)}\n"
-            f"       what visibly happened: "
-            f"{' '.join(summaries) if summaries else '(nothing summarised)'}\n"
-            + (f"       REGRESSION: {regression}\n" if regression else "")
-            + f"       verdict: {verdict}"
-        )
-
     def _segment_summaries(self, env_steps: list, step: str) -> List[str]:
+        # The one site that cannot use _call: the infer happens inside
+        # summarise_trajectory_segments, which is handed the recording VLM and calls it
+        # itself, so the stage has to be set on the object beforehand.
         self._plan_vlm.stage = "judge_slice"
         return summarise_trajectory_segments(
             env_steps, JUDGE_SLICE_PROMPT, self._game, step, self._plan_vlm,
@@ -445,8 +368,7 @@ class InfoPlanSupervisor(InfoHintSupervisor):
             .replace("[SEGMENT_SUMMARIES]", "\n".join(summaries))
             .replace("[STOP_REASON]", stop_reason or "unknown")
         )
-        self._plan_vlm.stage = "judge"
-        output = self._plan_vlm.infer(texts=prompt, images=[self._current_frame()],
+        output = self._call("judge", texts=prompt, images=[self._current_frame()],
                                       max_new_tokens=self._judge_max_new_tokens)
         verdict = parse_completion(output)
         reasoning = (parse_key_value(output, "Reasoning") or "").strip()
@@ -496,8 +418,7 @@ class InfoPlanSupervisor(InfoHintSupervisor):
             .replace("[EARLIER_STEPS_BLOCK]", earlier_block)
             .replace("[SEGMENT_SUMMARIES]", "\n".join(summaries) or "  (no actions taken)")
         )
-        self._plan_vlm.stage = "regression_check"
-        output = self._plan_vlm.infer(
+        output = self._call("regression_check", 
             texts=prompt, images=[last["frame"], self._current_frame()],
             max_new_tokens=self._hint_max_new_tokens,
         )
@@ -527,7 +448,7 @@ class InfoPlanSupervisor(InfoHintSupervisor):
         prior_block = (f'Previous hint, which did not work (do not simply repeat it):\n'
                        f'"{previous_hint}"\n\n' if previous_hint else "")
         trace_block = (f"\n\nWhat they pressed, and the reason they gave for each:\n"
-                       f"{self.action_trace(report)}" if report is not None else "")
+                       f"{action_trace(report)}" if report is not None else "")
         prompt = (
             RESUME_HINT_PROMPT
             .replace("[GAME]", self._game)
@@ -542,8 +463,7 @@ class InfoPlanSupervisor(InfoHintSupervisor):
             .replace("[INSIGHTS]", self.insights_block or "(nothing recorded)")
             .replace("[PRIOR_HINT_BLOCK]", prior_block)
         )
-        self._plan_vlm.stage = "hint"
-        output = self._plan_vlm.infer(texts=prompt, images=[self._current_frame()],
+        output = self._call("hint", texts=prompt, images=[self._current_frame()],
                                       max_new_tokens=self._hint_max_new_tokens)
         # The diagnosis is not passed to the executor — it is the hint writer's working, and
         # the executor gets instructions, not analysis. It is kept for the debug panel,
@@ -604,8 +524,7 @@ class InfoPlanSupervisor(InfoHintSupervisor):
             .replace("[REGRESSION_LINE]", f"\n{regression}\n" if regression else "")
             .replace("[INSIGHTS]", self.insights_block or "(nothing recorded)")
         )
-        self._plan_vlm.stage = "plan_flaw"
-        output = self._plan_vlm.infer(texts=prompt, images=[self._current_frame()],
+        output = self._call("plan_flaw", texts=prompt, images=[self._current_frame()],
                                       max_new_tokens=self._plan_max_new_tokens)
         if parse_yes_no(output, "Flawed") is not True:
             return None
@@ -749,7 +668,7 @@ class InfoPlanSupervisor(InfoHintSupervisor):
                     if regression:
                         attempt["regression"] = regression
                     verdict = "the environment did not signal the task complete"
-                    history.append(self.attempt_history_line(
+                    history.append(attempt_history_line(
                         report, env_steps, summaries, leg_hint, verdict, regression))
 
                     # The final step is replanned like any other. This is where a plan that
@@ -797,7 +716,7 @@ class InfoPlanSupervisor(InfoHintSupervisor):
                 if regression:
                     attempt["regression"] = regression
 
-                history.append(self.attempt_history_line(
+                history.append(attempt_history_line(
                     report, env_steps, summaries, leg_hint,
                     f"judged incomplete — {reasoning}", regression))
 

@@ -104,6 +104,10 @@ class SimpleCheckerSupervisor(Supervisor):
         total = len(all_frames)
         slice_size = self._DESCRIBE_SLICE_SIZE
 
+        # One call rather than two when the whole trajectory fits in a single window:
+        # there is nothing to consolidate, and the description is already the answer.
+        # Kept here rather than pushed into window_trajectory because skipping the
+        # consolidate step is this caller's judgement, not a property of the windowing.
         if total <= slice_size:
             output = self._checker_vlm.infer(
                 texts=DESCRIBE_SLICE_PROMPT
@@ -116,30 +120,13 @@ class SimpleCheckerSupervisor(Supervisor):
             )
             return parse_key_value(output, "Description") or output.strip()
 
-        segment_ranges = []
-        segment_prompts = []
-        segment_images = []
-        for start in range(0, total, slice_size):
-            end = min(start + slice_size, total)
-            prompt = (
-                DESCRIBE_SLICE_PROMPT
-                .replace("[GAME]", self._game)
-                .replace("[START_IDX]", str(start + 1))
-                .replace("[END_IDX]", str(end))
-                .replace("[TOTAL]", str(total))
-            )
-            segment_ranges.append((start, end))
-            segment_prompts.append(prompt)
-            segment_images.append(all_frames[start:end])
-
-        outputs = self._checker_vlm.infer(
-            texts=segment_prompts,
-            images=segment_images,
-            max_new_tokens=self._checker_max_new_tokens,
+        windows = window_trajectory(
+            env_steps, DESCRIBE_SLICE_PROMPT, game=self._game, vlm=self._checker_vlm,
+            max_new_tokens=self._checker_max_new_tokens, slice_size=slice_size,
         )
 
         segment_descriptions = []
-        for (start, end), output in zip(segment_ranges, outputs):
+        for (start, end), output in windows:
             desc = parse_key_value(output, "Description") or output.strip()
             segment_descriptions.append(f"Frames {start + 1}-{end}: {desc}")
 
@@ -245,44 +232,53 @@ class SimpleCheckerSupervisor(Supervisor):
 # ---------------------------------------------------------------------------
 
 
-def summarise_trajectory_segments(
+def window_trajectory(
     env_steps: list,
     slice_prompt: str,
+    *,
     game: str,
-    task: str,
     vlm: VLM,
     max_new_tokens: int,
-    max_frames_per_slice: int = 8,
-) -> List[str]:
-    """Window a trajectory and summarise each window in one image call per window.
+    task: str = "",
+    slice_size: int = 8,
+) -> List[tuple]:
+    """Cut a trajectory into fixed-size windows and describe each in one image call.
 
-    The windowing half of the critique pipeline, factored out so anything that needs to
-    read a trajectory with images — :func:`derive_critique_hint`, the plan arm's
-    step-completion judgement — slices it identically. A judge that saw the frames in
-    different groupings from the critic would not be comparing like with like.
+    The windowing every reader of a long trajectory shares — the critique hint, the plan
+    arm's step judgement, and the checker's trajectory description. Factored out so all
+    three slice identically: a judge that saw the frames in different groupings from the
+    critic would not be comparing like with like, and that is easy to break by accident
+    when the loop is written out three times.
 
     *slice_prompt* is filled with ``[GAME]``, ``[TASK]``, ``[START_IDX]``, ``[END_IDX]``,
-    ``[TOTAL]`` and ``[ACTION_SEQUENCE]``, and is expected to answer on a
-    ``Segment summary:`` line; anything else is taken verbatim.
+    ``[TOTAL]`` and ``[ACTION_SEQUENCE]``. Placeholders the template does not contain are
+    simply not substituted, so a prompt that wants no action list just omits the slot —
+    and the action names are only resolved when it asks for them, since deriving them can
+    raise for an action whose name needs kwargs it did not record.
 
-    :return: One ``"Steps a-b: ..."`` string per window, in order. Empty when there are no
-        steps to summarise.
+    Parsing is deliberately **not** done here. The three callers read their replies with
+    different keys and different fallbacks, and unifying that would change what each of
+    them extracts; only the windowing is shared.
+
+    :return: ``[((start, end), raw_output), ...]``, one per window, in order. Empty when
+        there are no steps.
     """
     frames = [s.frame_after for s in env_steps]
     if not frames:
         return []
 
     total = len(env_steps)
+    wants_actions = "[ACTION_SEQUENCE]" in slice_prompt
     action_lines_all = [
         f"  {i + 1}. {step.action_class.get_action_name(**step.kwargs)}"
         for i, step in enumerate(env_steps)
-    ]
+    ] if wants_actions else []
 
     segment_ranges = []
     segment_prompts = []
     segment_images = []
-    for start in range(0, total, max_frames_per_slice):
-        end = min(start + max_frames_per_slice, total)
+    for start in range(0, total, slice_size):
+        end = min(start + slice_size, total)
         slice_actions = "\n".join(action_lines_all[start:end]) or "  (no actions taken)"
         prompt = (
             slice_prompt
@@ -297,10 +293,35 @@ def summarise_trajectory_segments(
         segment_prompts.append(prompt)
         segment_images.append(frames[start:end])
 
-    outputs = vlm.infer(texts=segment_prompts, images=segment_images, max_new_tokens=max_new_tokens)
+    outputs = vlm.infer(texts=segment_prompts, images=segment_images,
+                        max_new_tokens=max_new_tokens)
+    return list(zip(segment_ranges, outputs))
+
+
+def summarise_trajectory_segments(
+    env_steps: list,
+    slice_prompt: str,
+    game: str,
+    task: str,
+    vlm: VLM,
+    max_new_tokens: int,
+    max_frames_per_slice: int = 8,
+) -> List[str]:
+    """Window a trajectory and summarise each window in one image call per window.
+
+    :func:`window_trajectory` plus this pipeline's own reading of the replies: the answer
+    is expected on a ``Segment summary:`` line, and anything else is taken verbatim.
+
+    :return: One ``"Steps a-b: ..."`` string per window, in order. Empty when there are no
+        steps to summarise.
+    """
+    windows = window_trajectory(
+        env_steps, slice_prompt, game=game, task=task, vlm=vlm,
+        max_new_tokens=max_new_tokens, slice_size=max_frames_per_slice,
+    )
 
     segment_summaries = []
-    for (start, end), output in zip(segment_ranges, outputs):
+    for (start, end), output in windows:
         stop_idx = output.lower().find("[stop]")
         if stop_idx != -1:
             output = output[:stop_idx]

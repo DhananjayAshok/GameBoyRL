@@ -16,7 +16,6 @@ from typing import Dict, List, Optional
 
 from gameboy_worlds.interface.action import LowLevelAction
 
-from execution.executors.base import MAX_CONSECUTIVE_INVALID
 from execution.executors.simple import SimpleExecutor
 from execution.report import EnvironmentStepRecord
 from utils import parse_int
@@ -123,18 +122,6 @@ The current game screen is shown in the image.
 Briefly critique whether the recent actions made progress toward the task. Then state a concise plan for the next few steps (1-2 sentences). End your response with [STOP].
 [STOP]"""
 
-    STEP_PROMPT = """Task: [TASK][HINT_BLOCK]
-
-You are playing a GameBoy game. The current screen is shown in the image.
-
-[ERROR_BLOCK][TOOL_RESULT_BLOCK]Available environment actions:
-[ACTION_LIST]
-
-[TOOLS_BLOCK][PLAN_SECTION]Reason about the best next action, then respond in exactly this format:
-Reasoning: <your reasoning>
-[ACTION_FORMAT]
-[STOP]"""
-
     def _reflect(self, frame) -> None:
         history_str = ", ".join(self._reflection_action_log) if self._reflection_action_log else "none"
         self._reflection_action_log = []
@@ -154,12 +141,8 @@ Reasoning: <your reasoning>
         if self._steps_since_reflection >= self._reflection_interval:
             self._reflect(frame)
 
-    def _build_prompt(self, tool_call_message, error_message, tool_calls_exceeded) -> str:
-        plan_section = f"Current plan: {self._plan_summary}\n\n" if self._plan_summary else ""
-        return (
-            super()._build_prompt(tool_call_message, error_message, tool_calls_exceeded)
-            .replace("[PLAN_SECTION]", plan_section)
-        )
+    def _context_section(self) -> str:
+        return f"Current plan: {self._plan_summary}\n\n" if self._plan_summary else ""
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +188,7 @@ You are playing a GameBoy game. The current screen is shown in the image.
 [ERROR_BLOCK][TOOL_RESULT_BLOCK]Available environment actions:
 [ACTION_LIST]
 
-[TOOLS_BLOCK]Reason about the best next action, then respond in exactly this format:
+[TOOLS_BLOCK][CONTEXT_SECTION]Reason about the best next action, then respond in exactly this format:
 Reasoning: <your reasoning>
 Confidence: <1-5 how confident you are this is the right action>
 [ACTION_FORMAT]
@@ -259,7 +242,11 @@ class ActionValueEstimatorExecutor(SimpleExecutor):
         [STOP]
     """
 
-    SCORE_PROMPT = """Task: [TASK][HINT_BLOCK]
+    #: Replaces the inherited step prompt outright — this executor never asks for an
+    #: action, only for scores. The unused ``[TOOL_RESULT_BLOCK]`` / ``[TOOLS_BLOCK]`` /
+    #: ``[CONTEXT_SECTION]`` / ``[ACTION_FORMAT]`` slots are simply absent, and the base
+    #: substitution chain leaves them alone.
+    STEP_PROMPT = """Task: [TASK][HINT_BLOCK]
 
 [ERROR_BLOCK]You are playing a GameBoy game. The current screen is shown in the image.
 
@@ -273,25 +260,18 @@ Respond with one line per action in exactly this format:
 ...
 [STOP]"""
 
-    def _score_actions(self, frame, error_message: Optional[str]) -> Optional[str]:
-        """Ask VLM to score each available action. Returns best action string or None."""
-        action_strings = self._get_action_strings()
-        if not action_strings:
-            return None
-        action_lines = list(action_strings.values())
-        prompt = (
-            self.SCORE_PROMPT
-            .replace("[TASK]", self._task)
-            .replace("[HINT_BLOCK]", self._hint_block())
-            .replace("[ERROR_BLOCK]", self._error_block(error_message))
-            .replace("[ACTION_LIST]", "\n".join(f"  {s}" for s in action_lines))
-        )
-        response = self._vlm_call("score", texts=prompt, images=[frame], max_new_tokens=300)
+    def _query_vlm(self, prompt: str, frame) -> str:
+        return self._vlm_call("score", texts=prompt, images=[frame], max_new_tokens=300)
 
-        # Parse scores
+    def _pick_action(self, vlm_output: str) -> Optional[str]:
+        """The highest-scored action, or None if no line parsed.
+
+        Deliberately does not set ``_last_reasoning``: scoring produces no reasoning, so
+        the completion check runs on the frames and the action name alone.
+        """
         best_score = -1
         best_action_str = None
-        for line in response.splitlines():
+        for line in vlm_output.splitlines():
             stripped = line.strip()
             if ":" not in stripped:
                 continue
@@ -310,65 +290,19 @@ Respond with one line per action in exactly this format:
             if score > best_score:
                 best_score = score
                 best_action_str = action_part
-
         return best_action_str
 
-    def _execute(self) -> int:
-        self._last_terminated = False
-        self._last_truncated = False
+    def _on_parse_failure(self, vlm_output) -> str:
+        self._record_invalid("Failed to parse action scores")
+        return "Could not determine a valid action from scoring. Try again."
 
-        error_message: Optional[str] = None
-        n_env_steps: int = 0
-        consecutive_invalid: int = 0
-
-        while n_env_steps < self._max_steps:
-            state = self._get_state()
-            frame = state["core"]["current_frame"]
-
-            action_str = self._score_actions(frame, error_message)
-
-            if action_str is None:
-                error_message = "Could not determine a valid action from scoring. Try again."
-                n_env_steps += 1
-                consecutive_invalid += 1
-                self._record_invalid("Failed to parse action scores")
-                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
-                    self.report.termination_reason = "max_invalid"
-                    return -1
-                continue
-
-            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
-            if action_class is not None:
-                record = self._take_action(action_class, **(action_kwargs or {}))
-                error_message = None
-                n_env_steps += 1
-                consecutive_invalid = 0
-                if self._last_terminated:
-                    self.report.termination_reason = "terminated"
-                    return 1
-                if self._last_truncated:
-                    self.report.termination_reason = "truncated"
-                    return 2
-
-                # Scoring produces no reasoning, so _last_reasoning stays None and the
-                # check runs on the frames and the action name alone.
-                outcome = self._maybe_self_terminate(record, n_env_steps)
-                if outcome is not None:
-                    return outcome
-            else:
-                error_message = (
-                    f"Highest-scored action '{action_str}' is not a recognised action string. "
-                    "Re-score using exact action strings from the list."
-                )
-                n_env_steps += 1
-                consecutive_invalid += 1
-                self._record_invalid(f"Unrecognised scored action: {action_str!r}", reason="unrecognised action")
-                if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
-                    self.report.termination_reason = "max_invalid"
-                    return -1
-
-        self.report.termination_reason = "max_steps"
-        return 0
+    def _on_unrecognised_action(self, action_str: str) -> str:
+        self._record_invalid(f"Unrecognised scored action: {action_str!r}",
+                             reason="unrecognised action")
+        return (
+            f"Highest-scored action '{action_str}' is not a recognised action string. "
+            "Re-score using exact action strings from the list."
+        )
 
 
 class AdversarialSamplingExecutor(SimpleExecutor):
