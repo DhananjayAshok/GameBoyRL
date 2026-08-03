@@ -22,6 +22,7 @@ from execution.executors import Executor
 from execution.report import ExecutorReport
 from execution.supervisors.base import Supervisor
 from execution.supervisors.checker import summarise_trajectory_segments
+from execution.supervisors.prompts import RELEVANCE_PROMPT, WRITE_HINT_PROMPT
 from utils import log_warn, parse_key_value, parse_yes_no, VLM
 
 
@@ -70,49 +71,6 @@ class InfoHintSupervisor(Supervisor):
     :param parameters: Optional parameter overrides.
     :param executor_kwargs: Extra keyword arguments forwarded to the executor constructor.
     """
-
-    RELEVANCE_PROMPT = """You are deciding whether a piece of recorded knowledge about [GAME] is relevant to the situation a player is in right now.
-
-The player's current task is: "[TASK]"
-
-Here is the recorded entry:
-[ENTRY]
-
-The images are: first the CURRENT screen the player is looking at, then the representative frame recorded with this entry.
-
-Could this entry's knowledge be relevant to the player's current task on this current screen? Answer yes only if the entry genuinely fits the situation — the same or a very similar [KIND]. The frames are your primary evidence: compare what is actually visible in them.
-
-Answering yes to something that does not fit produces a misleading hint, which is worse than no hint at all. Answering no to something that does fit wastes knowledge that was already paid for. Judge honestly in both directions.
-
-Respond in exactly this format:
-Reasoning: <one or two sentences, referring to the frames>
-Relevant: <yes or no>
-[STOP]"""
-
-    WRITE_HINT_PROMPT = """You are advising a player of [GAME] who is about to attempt this task:
-
-Task: "[TASK]"
-
-The image is the screen they are looking at right now.
-
-Here is what has been learned from past playthroughs of this game that may be relevant:
-[INSIGHTS]
-
-Write ONE short hint telling the player what to do from THIS screen. Requirements:
-
-- Be concrete and actionable: name the actual button, the actual direction, the actual object.
-- Ground it in what is ACTUALLY VISIBLE on the current screen. Do not describe things that are not there.
-- Make it SELF-LIMITING ON SOMETHING VISIBLE. Every condition must be a fact the player can check on the screen and find FALSE — a visible object, icon, cursor position, menu state or character position. Write "if a hand icon is visible in the toolbar, press LEFT or RIGHT to highlight it" rather than "press LEFT or RIGHT to highlight the hand icon".
-- NEVER condition on intent, desire, or the task itself. "If you intend to take the gun", "if you want to open the door", "if you wish to examine the coat" are FORBIDDEN. The player always intends to do the task, so such a condition is always true, the advice can never be declined, and a wrong hint is then followed until the step limit. Ask yourself: is there a screen on which this condition would be FALSE? If not, the condition is worthless — rewrite it or reply NO HINT.
-- Do not prescribe a fixed opening sequence of button presses. The player may already be past that point, or on a different screen than the one your evidence came from. Anchor the advice to what is on screen NOW, not to a plan begun from some earlier state.
-- Never assert something the evidence above does not support. Scope every claim to what was actually observed.
-- Prefer two sentences at most.
-
-If none of the knowledge above genuinely applies to this screen and this task, reply with exactly NO HINT. A missing hint costs nothing; a confident wrong hint actively misleads the player.
-
-Respond in exactly this format:
-Hint: <the hint, or NO HINT>
-[STOP]"""
 
     def __init__(
         self,
@@ -179,7 +137,7 @@ Hint: <the hint, or NO HINT>
     def _judge_relevance(self, entry, kind: str, screen) -> tuple:
         """One yes/no call for a single entry. Returns (is_relevant, reason)."""
         prompt = (
-            self.RELEVANCE_PROMPT
+            RELEVANCE_PROMPT
             .replace("[GAME]", self._game)
             .replace("[TASK]", self._task)
             .replace("[KIND]", kind)
@@ -284,7 +242,7 @@ Hint: <the hint, or NO HINT>
             blocks.append(f"From '{entry.category}'{label}:\n{entry.insights_block()}")
 
         prompt = (
-            self.WRITE_HINT_PROMPT
+            WRITE_HINT_PROMPT
             .replace("[GAME]", self._game)
             .replace("[TASK]", self._task)
             .replace("[INSIGHTS]", "\n\n".join(blocks))

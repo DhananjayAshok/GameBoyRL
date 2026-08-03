@@ -244,3 +244,189 @@ Flawed: <yes or no>
 Plan: <the replacement steps separated by [STEP], or NONE if not flawed>
 [STOP]"""
 
+
+
+# --- Checker arm (SimpleCheckerSupervisor) ---------------------------------------------
+
+DESCRIBE_SLICE_PROMPT = """You are watching frames [START_IDX]-[END_IDX] of [TOTAL] total frames from a game of [GAME].
+
+Describe what the player does and what changes visually in this segment. Focus on actions taken and their outcomes. Do not assume any particular goal.
+
+Respond in exactly this format:
+Description: <concise description of the player's actions and visual changes in this segment>
+[STOP]"""
+
+DESCRIBE_CONSOLIDATE_PROMPT = """You are consolidating segment descriptions from a game of [GAME] into a single complete trajectory description.
+
+Segment descriptions (in chronological order), each labelled with the frame range it covers:
+[SEGMENT_DESCRIPTIONS]
+
+Produce a single coherent description of the full trajectory from start to finish. Explicitly reference the frame ranges (e.g. "frames 1-10", "frames 11-20") as you describe what happens, so the reader can tell which part of the trajectory each event belongs to. Keep these frame-range references in the same form they appear in the segment labels above.
+
+Respond in exactly this format:
+Description: <complete description of the full trajectory, with frame ranges referenced inline>
+[STOP]"""
+
+JUDGE_BINARY_PROMPT = """Task: "[TASK]"
+[GOAL_CONDITION_BLOCK][GUIDANCE_BLOCK]
+A player attempted to complete this task. Here is a description of what happened across the FULL trajectory:
+"[DESCRIPTION]"
+
+The images show only the FINAL frames of the trajectory. Task completion may have occurred earlier and may not be visible in these images.
+
+Did the player successfully complete the task at any point during the trajectory? Use the description as your primary evidence — if it mentions something that closely matches task completion, count it as success even if it is not visible in the final frames shown.
+
+The goal condition is a strict guide, and only if the player has basically achieved the task with only minor, trivial differences from the goal condition should you consider it a success.
+
+The description references frame ranges (e.g. "frames 11-20"). Using these, identify the safe success point: the single frame number by which the task has SURELY been achieved. Pick the earliest frame you are confident the task is already complete. If the task was never completed, or you cannot tell from the description, respond with N/A.
+
+Respond in exactly this format:
+Reasoning: <your reasoning, referencing the description and any visual evidence>
+Success: <yes or no>
+Safe success point: <frame number, or N/A if never completed or unknown>
+[STOP]"""
+
+JUDGE_SCORE_PROMPT = """Task: "[TASK]"
+[GOAL_CONDITION_BLOCK][GUIDANCE_BLOCK]
+A player attempted to complete this task. Here is a description of what happened across the FULL trajectory:
+"[DESCRIPTION]"
+
+The images show only the FINAL frames of the trajectory. Task completion may have occurred earlier and may not be visible in these images.
+
+Score how well the player progressed toward or completed this task at any point during the trajectory. Use the description as your primary evidence — if it mentions something that closely matches task completion, score it highly even if not visible in the final frames.
+
+Do not be overly strict in your judgement: the goal condition is a rough guide, not a strict requirement. Partial progress deserves a fair score and you are allowed to give a perfect score if the player has basically achieved the task with only minor, trivial differences.
+1 = no progress at all, 10 = task perfectly completed.
+
+The description may reference frame ranges (e.g. "frames 11-20"). Using these, identify the safe success point: the single frame number by which the task has SURELY been achieved. Err on the side of caution and pick a later frame if you are unsure. If the task was never completed, or you cannot tell from the description, respond with N/A.
+
+Respond in exactly this format:
+Reasoning: <your reasoning, referencing the description and any visual evidence>
+Score: <integer from 1 to 10>
+Safe success point: <frame number, or N/A if never completed or unknown>
+[STOP]"""
+
+
+# --- Exploration arm (ExplorationSupervisor) ------------------------------------------
+
+PROPOSE_PROMPT = """You are looking at the current screen of a [GAME] game.
+[CONTEXT_BLOCK]
+Your job is to identify every nearby area, object, or goal visible on this screen that would be worth exploring. Focus on things that:
+- Are visible or reachable from the current position (local neighbourhood only — no distant or unseen parts of the world).
+- Could expose unique game mechanics, items, NPCs, or points of interest.
+
+List every specific exploration target you can identify. Be concrete and actionable (e.g. "walk to the chest in the top-right corner", "talk to the NPC near the exit door", "enter the cave opening on the left").
+
+Respond in exactly this format:
+Targets:
+1. <target>
+2. <target>
+...
+[STOP]"""
+
+PROPOSE_CONTEXT_BLOCK = """You arrived at this screen by completing the task: "[PARENT_TASK]"
+Do not suggest revisiting any step, path, or area that was part of arriving here. Only propose new targets that are distinct from that journey.
+"""
+
+DESCRIBE_TRAJECTORY_PROMPT = """You are reviewing a sequence of screenshots from a game of [GAME].
+
+A player attempted the following task: "[TASK]"
+
+Describe the trajectory in detail. For each major action, mention what the player did and what changed on screen as a result. Be specific about visual changes (new locations, items picked up, NPCs encountered, etc.).
+
+Respond in exactly this format:
+Description: <detailed trajectory description referencing actions and their visual consequences>
+[STOP]"""
+
+JUDGE_REACHED_PROMPT = """You are reviewing a sequence of screenshots from a game of [GAME].
+
+Task attempted: "[TASK]"
+Trajectory description: "[DESCRIPTION]"
+
+The images show the final frames of the run. Did the player successfully reach or complete the target area/goal described in the task?
+
+Respond in exactly this format:
+Reasoning: <your reasoning referencing specific visual evidence>
+Reached: <yes or no>
+[STOP]"""
+
+INSIGHTS_PROMPT = """You are analysing a gameplay trajectory from [GAME].
+
+Task attempted: "[TASK]"
+Trajectory description: "[DESCRIPTION]"
+Goal reached: [REACHED]
+
+The images show key frames from the run. Extract every insight that can be learned from this trajectory. Include:
+- Game mechanics observed (movement rules, interaction triggers, combat rules, etc.)
+- Location-specific details (what is at this area, what NPCs/items are present, layout)
+- Possible tasks that could be executed in the game based on what was seen
+
+Label location-specific insights with [LOCATION] at the start of the line.
+
+Respond in exactly this format:
+Insights:
+1. <insight>
+2. <insight>
+...
+[STOP]"""
+
+DISTILL_PROMPT = """You are consolidating game knowledge about [GAME].
+
+Here are insights collected from multiple exploration trajectories:
+
+[INSIGHTS]
+
+Distil these into a single unified list. Remove duplicates, merge overlapping observations, and keep only the most informative and distinct facts.
+
+Respond in exactly this format:
+Distilled:
+1. <insight>
+2. <insight>
+...
+[STOP]"""
+
+
+# --- Hint arm (InfoHintSupervisor, inherited by InfoPlanSupervisor) -------------------
+
+RELEVANCE_PROMPT = """You are deciding whether a piece of recorded knowledge about [GAME] is relevant to the situation a player is in right now.
+
+The player's current task is: "[TASK]"
+
+Here is the recorded entry:
+[ENTRY]
+
+The images are: first the CURRENT screen the player is looking at, then the representative frame recorded with this entry.
+
+Could this entry's knowledge be relevant to the player's current task on this current screen? Answer yes only if the entry genuinely fits the situation — the same or a very similar [KIND]. The frames are your primary evidence: compare what is actually visible in them.
+
+Answering yes to something that does not fit produces a misleading hint, which is worse than no hint at all. Answering no to something that does fit wastes knowledge that was already paid for. Judge honestly in both directions.
+
+Respond in exactly this format:
+Reasoning: <one or two sentences, referring to the frames>
+Relevant: <yes or no>
+[STOP]"""
+
+WRITE_HINT_PROMPT = """You are advising a player of [GAME] who is about to attempt this task:
+
+Task: "[TASK]"
+
+The image is the screen they are looking at right now.
+
+Here is what has been learned from past playthroughs of this game that may be relevant:
+[INSIGHTS]
+
+Write ONE short hint telling the player what to do from THIS screen. Requirements:
+
+- Be concrete and actionable: name the actual button, the actual direction, the actual object.
+- Ground it in what is ACTUALLY VISIBLE on the current screen. Do not describe things that are not there.
+- Make it SELF-LIMITING ON SOMETHING VISIBLE. Every condition must be a fact the player can check on the screen and find FALSE — a visible object, icon, cursor position, menu state or character position. Write "if a hand icon is visible in the toolbar, press LEFT or RIGHT to highlight it" rather than "press LEFT or RIGHT to highlight the hand icon".
+- NEVER condition on intent, desire, or the task itself. "If you intend to take the gun", "if you want to open the door", "if you wish to examine the coat" are FORBIDDEN. The player always intends to do the task, so such a condition is always true, the advice can never be declined, and a wrong hint is then followed until the step limit. Ask yourself: is there a screen on which this condition would be FALSE? If not, the condition is worthless — rewrite it or reply NO HINT.
+- Do not prescribe a fixed opening sequence of button presses. The player may already be past that point, or on a different screen than the one your evidence came from. Anchor the advice to what is on screen NOW, not to a plan begun from some earlier state.
+- Never assert something the evidence above does not support. Scope every claim to what was actually observed.
+- Prefer two sentences at most.
+
+If none of the knowledge above genuinely applies to this screen and this task, reply with exactly NO HINT. A missing hint costs nothing; a confident wrong hint actively misleads the player.
+
+Respond in exactly this format:
+Hint: <the hint, or NO HINT>
+[STOP]"""
