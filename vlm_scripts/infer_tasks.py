@@ -12,7 +12,8 @@ Input: grouped_high_reward_trajectories.pkl
             - rewards: list[float] of length (num_frames - 1)
 
 Output: trajectory_annotation.json  +  trajectory_annotation.pkl
-    Path: parameters["storage_dir"]/proposed_tasks/$game/$model_name/curiosity/$run_name/
+    Path: Paths.curiosity_annotation() and its .pkl sibling. The directory scheme lives in
+    :mod:`utils.paths`, so this module names the accessor rather than the layout.
     trajectory_annotation.json — dict[int, str]
         - keys are group indices
         - values are distilled imperative task strings (e.g. "Walk into the building")
@@ -23,8 +24,8 @@ Output: trajectory_annotation.json  +  trajectory_annotation.pkl
 
     With --dedup_tasks (default on), groups that distill to the SAME task string
     are merged into a single group_idx before saving (their trajectory lists are
-    concatenated), so downstream practice doesn't run redundant copies of the
-    same task. This is exact-match on a normalized form only — paraphrases are
+    concatenated), so downstream consumers don't process the same task twice.
+    This is exact-match on a normalized form only — paraphrases are
     not merged. See _dedup_task_groups.
 """
 
@@ -35,9 +36,9 @@ from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 import numpy as np
 import click
-from PIL import Image
 
-from utils import load_parameters, log_info, log_warn, log_error, VLM, parse_key_value, HuggingFaceModel
+from utils import log_info, log_warn, log_error, VLM, parse_key_value, HuggingFaceModel
+from utils.paths import Paths
 from show_trajectories import plot_transitions
 
 SAVE_FRAMES_DIR = "save_frames"
@@ -396,9 +397,9 @@ def _dedup_task_groups(trajectory_output: dict, trajectory_data_output: dict):
 
     Curiosity groups are clustered by final-frame similarity, so several
     independent groups can distill to an identical task (e.g. three separate
-    'enter the pokemon center' groups). Downstream (infer_guidance → practice)
-    treats every group_idx as a distinct task to practice, so identical task
-    strings cause redundant practice runs. We collapse groups sharing a canonical
+    'enter the pokemon center' groups). Downstream (build_info) treats every
+    group_idx as a distinct task, so identical task strings cause redundant
+    VLM calls. We collapse groups sharing a canonical
     task string into the first group_idx that produced it, concatenating their
     trajectories so no example data is lost. Detection is exact-match on the
     canonical form only — paraphrases (different wording, same meaning) are NOT
@@ -513,14 +514,13 @@ def infer_task_cmd(
     parameters = obj["parameters"]
     model_name = obj["model_name"]
     vlm = VLM(model_name, vlm_kind)
-    model_save_name = model_name.split("/")[-1]
-
-    out_dir = (
-        parameters["storage_dir"]
-        + f"/proposed_tasks/{game}/{model_save_name}/curiosity/{run_name}/"
-    )
+    # The directory layout lives in utils.paths, not here — this script used to spell it
+    # out and every reader re-derived the same string independently.
+    paths = Paths(parameters=parameters, game=game, model_name=model_name,
+                  run_name=run_name)
+    traj_path = paths.curiosity_annotation()
+    out_dir = os.path.dirname(traj_path)
     os.makedirs(out_dir, exist_ok=True)
-    traj_path = os.path.join(out_dir, f"trajectory_annotation.json")
     checkpoint_path = traj_path.replace(".json", "_checkpoint.json")
 
     if os.path.exists(traj_path) and not obj["overwrite"]:
@@ -539,6 +539,28 @@ def infer_task_cmd(
         if os.path.exists(pkl_checkpoint_path):
             with open(pkl_checkpoint_path, "rb") as f:
                 trajectory_data_output = pickle.load(f)
+        # A group is "done" only when BOTH its annotation and its trajectories are on
+        # disk. The two checkpoints are separate non-atomic writes (json first), so a run
+        # killed between them — or one resuming with the pkl absent entirely — comes back
+        # with annotations whose trajectories never landed. The skip check below keys off
+        # `trajectory_output` alone, so without this those groups are skipped, the pool
+        # does no work, and the final pkl is written short (empty, in the absent-pkl case)
+        # while the json looks complete. Nothing downstream catches it: the emptiness
+        # guard below checks only `trajectory_output`, and _dedup_task_groups tolerates the
+        # gap via .get(gid, []). Dropping the unpaired annotations makes the pair the unit
+        # of truth.
+        unpaired = [
+            group_idx for group_idx in trajectory_output
+            if group_idx not in trajectory_data_output
+        ]
+        for group_idx in unpaired:
+            del trajectory_output[group_idx]
+        if unpaired:
+            log_warn(
+                f"checkpoint mismatch: {len(unpaired)} group(s) had a saved annotation but "
+                f"no saved trajectories ({unpaired[:5]}{' ...' if len(unpaired) > 5 else ''}) "
+                "— rerunning them."
+            )
         log_info(
             f"Resuming infer from checkpoint — {len(trajectory_output)} groups already done."
         )
@@ -616,15 +638,14 @@ def infer_task_cmd(
         log_info(f"Dedup: {before} groups → {len(trajectory_output)} unique tasks.")
 
     # Fail here rather than let an empty annotation propagate. Everything downstream
-    # (infer_guidance -> practice_tasks -> create_dataset) keys off this file, and an empty
-    # one surfaces four stages later as an opaque pandas EmptyDataError on a 0-byte
-    # results.csv. Checked BEFORE writing: traj_path existing is this command's
+    # (build_info) keys off this file, and an empty one yields an empty info document with
+    # no error. Checked BEFORE writing: traj_path existing is this command's
     # skip-if-exists marker, so writing an empty one would make every later run skip it.
     # The checkpoint is left in place so a rerun resumes instead of re-annotating.
     if not trajectory_output:
         log_error(
             f"infer_tasks produced 0 task annotations from {trajectory_path}. "
-            "Nothing was written, so downstream guidance/practice cannot run. "
+            "Nothing was written, so downstream build_info cannot run. "
             "Check that the grouped trajectory file actually contains trajectories "
             "(a 'manifest' pkl holds paths, not frames) and that the VLM returned parseable "
             "output.",

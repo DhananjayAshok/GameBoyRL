@@ -8,7 +8,6 @@ Input (all produced by scripts/vlm/attempt_tasks.sh)
     group_idx, init_state, task_string, success, n_tries
 <attempts_dir>/success_trajectories.json   {group_idx: task_string}
 <attempts_dir>/success_trajectories.pkl    {group_idx: 5-tuple trajectory}
-<attempts_dir>/success_trajectories_guidance.json   (optional; from infer_guidance.sh)
 
 ``n_tries`` is the key column. attempt_tasks retries a failed task up to --max_attempts
 (default 5), deriving a fresh hint from the failed trajectory between attempts, so
@@ -34,7 +33,7 @@ import pandas as pd
 from utils import log_info, log_warn
 from debug_scripts import markdown as md
 from debug_scripts.frames import trajectory_strip
-from debug_scripts.paths import Paths
+from utils.paths import Paths
 from debug_scripts.stats import wilson_str
 
 
@@ -167,13 +166,11 @@ def _completion_check_blocks(frame: pd.DataFrame) -> list:
 
 @click.command(name="attempt")
 @click.option("--model_name", required=True, help="Full VLM name (e.g. google/gemma-4-31b-it)")
-@click.option("--extra", default="none", show_default=True,
-              help="Which proposal variant's attempts to report.")
 @click.option("--n_frames", default=8, show_default=True, help="Frames per trajectory strip.")
 @click.option("--max_trajectories", default=40, show_default=True,
               help="Cap on rendered success-trajectory strips (0 = no cap).")
 @click.pass_obj
-def debug_attempt(obj, model_name, extra, n_frames, max_trajectories):
+def debug_attempt(obj, model_name, n_frames, max_trajectories):
     """Attempt funnel, hint-escalation analysis, and successful-trajectory strips."""
     paths = Paths(
         parameters=obj["parameters"], game=obj["game"], run_name=obj["run_name"],
@@ -183,7 +180,7 @@ def debug_attempt(obj, model_name, extra, n_frames, max_trajectories):
     report_dir = paths.debug_dir("attempt")
     images_dir = paths.debug_dir("attempt", "images")
 
-    csv_path = paths.require(paths.all_trajectories_csv(extra), "attempts")
+    csv_path = paths.require(paths.all_trajectories_csv(), "attempts")
     frame = pd.read_csv(csv_path)
     frame["success"] = frame["success"].astype(bool)
     log_info(f"[attempt] {len(frame)} attempted tasks from {csv_path}")
@@ -195,7 +192,7 @@ def debug_attempt(obj, model_name, extra, n_frames, max_trajectories):
     hinted = n_success - unaided
 
     # How many tasks were proposed in the first place — the top of this funnel.
-    tasks_path = paths.tasks_file(extra)
+    tasks_path = paths.tasks_file()
     n_proposed = 0
     if os.path.exists(tasks_path):
         proposals = pd.read_json(tasks_path, lines=True)
@@ -218,33 +215,28 @@ def debug_attempt(obj, model_name, extra, n_frames, max_trajectories):
 
     never = frame[~frame["success"]][["init_state", "task_string", "n_tries"]]
 
-    # Cross-check the two success artifacts against each other and against guidance.
-    success_json = paths.success_trajectories_json(extra)
-    guidance_json = paths.guidance_json(extra)
+    # Cross-check the success artifacts against each other.
+    success_json = paths.success_trajectories_json()
     consistency = []
-    success_keys, guidance_keys = set(), set()
+    success_keys = set()
     if os.path.exists(success_json):
         with open(success_json) as handle:
             success_keys = set(json.load(handle))
-    if os.path.exists(guidance_json):
-        with open(guidance_json) as handle:
-            guidance_keys = set(json.load(handle))
     csv_success_keys = set(solved["group_idx"].astype(str))
     consistency.append(f"`all_trajectories.csv` successes: **{len(csv_success_keys)}**")
     consistency.append(f"`success_trajectories.json` entries: **{len(success_keys)}**")
-    consistency.append(f"`success_trajectories_guidance.json` entries: **{len(guidance_keys)}**")
-    only_guidance = sorted(guidance_keys - success_keys)
-    only_success = sorted(success_keys - guidance_keys)
-    if only_guidance:
-        consistency.append(f"in guidance but not in successes (**{len(only_guidance)}**): "
-                           f"`{', '.join(only_guidance[:20])}`")
-    if only_success:
-        consistency.append(f"in successes but not in guidance (**{len(only_success)}**): "
-                           f"`{', '.join(only_success[:20])}`")
+    only_csv = sorted(csv_success_keys - success_keys)
+    only_json = sorted(success_keys - csv_success_keys)
+    if only_csv:
+        consistency.append(f"in the CSV but not in successes (**{len(only_csv)}**): "
+                           f"`{', '.join(only_csv[:20])}`")
+    if only_json:
+        consistency.append(f"in successes but not in the CSV (**{len(only_json)}**): "
+                           f"`{', '.join(only_json[:20])}`")
 
     # Frame strips for successful trajectories.
     strips = []
-    pkl_path = paths.success_trajectories_pkl(extra)
+    pkl_path = paths.success_trajectories_pkl()
     if os.path.exists(pkl_path):
         with open(pkl_path, "rb") as handle:
             trajectories = pickle.load(handle)
@@ -270,8 +262,8 @@ def debug_attempt(obj, model_name, extra, n_frames, max_trajectories):
         strip_blocks.append(md.img(str(group_idx), out, report_dir))
 
     blocks = [
-        md.h1(f"Task attempts — {paths.game} / {paths.model_save_name} / extra={extra}"),
-        md.para(f"Source: `{paths.attempts_dir(extra)}`"),
+        md.h1(f"Task attempts — {paths.game} / {paths.model_save_name}"),
+        md.para(f"Source: `{paths.attempts_dir()}`"),
         md.h2("Funnel"),
         md.bullets([
             f"tasks proposed: **{n_proposed}**" if n_proposed else "tasks proposed: _(jsonl absent)_",
@@ -286,8 +278,8 @@ def debug_attempt(obj, model_name, extra, n_frames, max_trajectories):
         md.para(
             "`attempt_tasks.py` derives a fresh hint from the failed trajectory between attempts, "
             "so every success with `n_tries > 1` was carried by information the agent was given "
-            "rather than information it worked out. The trajectories that feed guidance and "
-            "practice do not distinguish the two."
+            "rather than information it worked out. The saved success trajectories "
+            "do not distinguish the two."
         ),
         *_completion_check_blocks(frame),
         md.h2("Attempts used"),

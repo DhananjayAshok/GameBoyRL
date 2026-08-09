@@ -85,7 +85,7 @@ SUMMARY_COLUMNS = [
 
 @click.command(name="plan")
 @click.option("--info_docs", default=None, type=str,
-              help="Comma-separated info.md path(s). Required for --mode retrieval.")
+              help="Comma-separated info.json path(s). Required for --mode retrieval.")
 @click.option("--insights_paths", default=None, type=str,
               help="Comma-separated insights.jsonl path(s). Required for --mode init_state.")
 @click.option("--mode", default="retrieval", type=click.Choice(["retrieval", "init_state"]),

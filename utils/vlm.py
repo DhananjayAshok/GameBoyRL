@@ -1,5 +1,5 @@
 from utils.parameter_handling import load_parameters
-from utils.log_handling import log_warn, log_error, log_info
+from utils.log_handling import log_warn, log_error
 from typing import List, Union
 import numpy as np
 from abc import ABC
@@ -9,6 +9,7 @@ from utils.lm_inference import (
     OpenRouterModel,
     AnthropicModel,
     vLLMModel,
+    parse_yes_no,
 )
 from utils.huggingface_inference import HuggingFaceModel
 
@@ -272,21 +273,24 @@ def object_detection(
     """
     Performs object detection on the given images with the given texts.
 
+    The verdict is read with :func:`parse_yes_no`, so a caller-supplied
+    ``text_prompt`` must ask for the house ``Answer: <yes or no>`` format. An
+    unparseable reply is warned about and counted as *not detected*.
+
     :param images: List of images that may contain the object described in texts
     :type images: List[np.ndarray]
-    :param text_prompt: A prompt with the textual description of the object to detect, and that requests a Yes/No answer.
+    :param text_prompt: A prompt with the textual description of the object to detect, and that requests an ``Answer: <yes or no>`` line.
     :type text_prompt: str
     :return: List of booleans indicating whether the object was detected in each image.
     :rtype: List[bool]
     """
     if text_prompt is None:
-        text_prompt = f"""You are playing a gameboy game and are given a screen capture of the game. 
+        text_prompt = f"""You are playing a gameboy game and are given a screen capture of the game.
         Your job is to locate the target that best fits the description `{description}`
 
-        Do you see the target described? Answer with a single sentence and then [YES] or [NO]
-        [STOP]
-        Output:
-        """
+        Do you see the target described? Answer in the following format:
+        Explanation: <a single sentence describing what you see>
+        Answer: <yes or no>[STOP]"""
     if model is None:
         model = ObjectDetectionVLM(parameters=parameters)
     outputs = model.infer(
@@ -296,10 +300,14 @@ def object_detection(
     )
     founds = []
     for i, output in enumerate(outputs):
-        if "yes" in output.lower():
-            founds.append(True)
-        else:
-            founds.append(False)
+        verdict = parse_yes_no(output, "Answer")
+        if verdict is None:
+            log_warn(
+                f"Object detection for {description!r} gave no parseable Answer line; "
+                f"treating as not detected. Raw output: {output!r}",
+                parameters,
+            )
+        founds.append(verdict is True)
     return founds
 
 
@@ -313,11 +321,16 @@ def identify_matches(
 ) -> List[bool]:
     """
     Identifies which screens match the given reference image based on the description.
+
+    The verdict is read with :func:`parse_yes_no`, so a caller-supplied
+    ``text_prompt`` must ask for the house ``Answer: <yes or no>`` format. An
+    unparseable reply is warned about and counted as *no match*.
+
     Args:
         description: A textual description of the target object.
         screens: A list of screen images in numpy array format (H x W x C).
         reference: A PIL Image of the reference object.
-        text_prompt: Optional prompt to guide the VLM that requests a yes/ no answer.
+        text_prompt: Optional prompt to guide the VLM that requests an `Answer: <yes or no>` line.
         model: Optional VLM instance to use for inference. If None, uses the object detection VLM.
 
     Returns:
@@ -335,8 +348,12 @@ def identify_matches(
     outputs = model.infer(texts=texts, images=images, max_new_tokens=120)
     results = []
     for output in outputs:
-        if "yes" in output.lower():
-            results.append(True)
-        else:
-            results.append(False)
+        verdict = parse_yes_no(output, "Answer")
+        if verdict is None:
+            log_warn(
+                f"Match identification for {description!r} gave no parseable Answer line; "
+                f"treating as no match. Raw output: {output!r}",
+                parameters,
+            )
+        results.append(verdict is True)
     return results

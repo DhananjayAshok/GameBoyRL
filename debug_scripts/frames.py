@@ -1,5 +1,5 @@
 """
-Frame-strip rendering shared by the curiosity / attempt / practice reports.
+Frame-strip rendering shared by the curiosity / attempt reports.
 
 A "strip" is N frames sampled evenly from a trajectory, concatenated left-to-right with
 a separator line between panels, each labelled with its index (top-left) and, when
@@ -12,9 +12,6 @@ import os
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-
-from utils import parse_action_line
-
 
 try:
     _FONT = ImageFont.load_default(size=14)
@@ -127,24 +124,5 @@ def trajectory_strip(trajectory, out_path: str, n: int = 5, overwrite: bool = Fa
     if high_level_actions is not None:
         labels = [action_label(a) for a in high_level_actions]
     return strip(observations, out_path, labels=labels, n=n, overwrite=overwrite)
-
-
-def call_log_strip(vlm_call_log, out_path: str, n: int = 5, overwrite: bool = False) -> str | None:
-    """
-    Strip for one practice episode's ``List[VLMCallRecord]``.
-
-    Uses the first image of each action-tagged call, labelled with the parsed action from
-    that call's response, so the strip reads as "what it saw -> what it chose".
-    """
-    frames, labels = [], []
-    for record in vlm_call_log:
-        images = getattr(record, "images", None)
-        if not images:
-            continue
-        frames.append(images[0])
-        # Truncated to fit the frame label; the width is a rendering concern, so it lives
-        # here rather than in the parser.
-        labels.append((parse_action_line(getattr(record, "response", "")) or "")[:16])
-    return strip(frames, out_path, labels=labels, n=n, overwrite=overwrite)
 
 

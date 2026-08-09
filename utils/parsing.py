@@ -17,7 +17,7 @@ throughout: :func:`~utils.lm_inference.parse_key_value` and
 :func:`~utils.lm_inference.parse_yes_no`.
 
 These four replace twelve near-duplicates that had accumulated across ``execution/``,
-``vlm_scripts/``, ``debug_scripts/`` and ``create_dataset.py`` — five list readers, three
+``vlm_scripts/`` and ``debug_scripts/`` — five list readers, three
 integer readers and four action readers, each written for one prompt and none aware of the
 others. The differences between them were accidental rather than intentional, so the
 unified versions take the most permissive rule on every axis. That direction is deliberate:
@@ -40,9 +40,10 @@ from utils.lm_inference import parse_key_value
 
 
 # A list item: "- foo", "* foo", "• foo", "1. foo", "1) foo", "1 foo".
-# The bare "<digits> foo" form is accepted because ExplorationSupervisor's prompts elicit
-# it; it is safe here only because scanning stops at the first non-item line, so a prose
-# line that happens to open with a number cannot pull in the paragraph after it.
+# The bare "<digits> foo" form — a number with no punctuation after it — is accepted
+# because models routinely drop the punctuation when asked for a numbered list. It is
+# safe here only because scanning stops at the first non-item line, so a prose line that
+# happens to open with a number cannot pull in the paragraph after it.
 _ITEM_RE = re.compile(r"^(?:[-*•]|\d+[.)]?)\s+(.*)$")
 
 # The house "no answer" tokens. Matched exactly, not by prefix, so a real answer opening
@@ -174,15 +175,15 @@ def parse_int(text: str, key: str, lo: Optional[int] = None,
 
     **Always three-valued.** ``None`` means "the model did not answer", which is a
     different event from any number it could have given, and callers that want a default
-    say so at the call site (``parse_int(...) or 1``). The predecessor used by the score
-    judge returned its lower bound on a parse failure, which made a truncated judgement
-    indistinguishable from a genuine lowest score — the kind of thing that is invisible
-    until someone asks why so many episodes scored 1.
+    say so at the call site (``parse_int(...) or 1``). An earlier bounded reader returned
+    its lower bound on a parse failure, which made a truncated reply indistinguishable
+    from a genuine lowest value — the kind of thing that is invisible until someone asks
+    why so many episodes came out at the floor.
 
     Digits are looked for in three passes, most trustworthy first: a whole token, then —
     only when unbounded — every digit in the value concatenated, then any single in-range
-    digit. The last pass is what rescues ``Score: 11`` from a 1-10 prompt as ``1``; it is
-    lossy, but it is what the callers have always done.
+    digit. The last pass is what rescues an out-of-range ``11`` from a 1-10 scale as
+    ``1``; it is lossy, but it is what the callers have always done.
     """
     raw = (parse_key_value(text, key) or "").strip()
     if not raw or raw.lower().startswith(("n/a", "na", "none", "unknown")):
@@ -209,9 +210,8 @@ def parse_action_line(text) -> Optional[str]:
     """The action on the first ``Action:`` line, or ``None`` if there is no usable one.
 
     The single reader of the ``Action:`` format, which is a cross-module contract: the
-    executor chooses an action by it at run time, ``create_dataset`` filters training rows
-    on it, the frame tooling labels screenshots with it, and ``plan_replay`` reconstructs
-    an episode from it.
+    executor chooses an action by it at run time, the frame tooling labels screenshots
+    with it, and ``plan_replay`` reconstructs an episode from it.
 
     **The first match wins**, matching the executor — the code whose reading actually
     determined what happened. ``plan_replay`` previously took the *last* match, so on a

@@ -1,9 +1,29 @@
-from gameboy_worlds.execution.executor_action import ExecutorAction, LocateAction
+"""
+Pokemon-specific executor actions.
+
+.. warning:: **This module is not usable as written.** It imports cleanly, but nothing
+    in it can actually run. Four separate blockers, each marked with a ``TODO`` at the
+    site below:
+
+    1. Neither class implements ``verbalize`` or ``string_to_kwargs``, both
+       ``@abstractmethod`` on :class:`~execution.executor_action.ExecutorAction`, so
+       neither can be instantiated. (:class:`~execution.executor_action.LocateAction`
+       has the same gap, so ``PokemonLocateAction`` inherits it as well as adding its own.)
+    2. ``self._state_tracker`` is read but is defined by no class in the hierarchy.
+    3. ``self._emulator`` is read but is likewise never defined.
+    4. ``ExecutorVLM.infer(...)`` is called on the class rather than an instance.
+
+    Nothing imports this module. Fix all four before wiring it up, or delete it.
+"""
+
+from execution.executor_action import ExecutorAction, LocateAction
 from gameboy_worlds.emulation.pokemon import AgentState
-from gameboy_worlds.execution.vlm import ExecutorVLM
+from utils import ExecutorVLM
 
 
 class PokemonLocateAction(LocateAction):
+    # TODO: cannot be instantiated — `verbalize` and `string_to_kwargs` are abstract on
+    # ExecutorAction and are implemented by neither LocateAction nor this class.
     pre_described_options = {
         "item": "a pixelated, greyscale Poke Ball sprite, recognizable by its circular shape, white center, black band around the top, and grey body",
         "pokeball": "a pixelated, greyscale Poke Ball sprite, recognizable by its circular shape, white center, black band around the top, and grey body",
@@ -14,6 +34,8 @@ class PokemonLocateAction(LocateAction):
 
 
     def is_valid(self, target=None):
+        # TODO: `self._state_tracker` is defined by no class in this hierarchy — this
+        # raises AttributeError. Decide where the state tracker should come from.
         if (
             self._state_tracker.get_episode_metric(("pokemon_core", "agent_state"))
             != AgentState.FREE_ROAM
@@ -64,13 +86,21 @@ class CheckInteractionAction(ExecutorAction):
     Description:
     """
 
+    # TODO: cannot be instantiated — `verbalize` and `string_to_kwargs` are abstract on
+    # ExecutorAction and are not implemented here.
+
     def is_valid(self, **kwargs):
+        # TODO: `self._state_tracker` is defined by no class in this hierarchy — this
+        # raises AttributeError. Decide where the state tracker should come from.
         return (
             self._state_tracker.get_episode_metric(("pokemon_core", "agent_state"))
             == AgentState.FREE_ROAM
         )
 
     def parse_result(self, output):
+        # TODO: substring matching on the whole answer clause — "no, yes it is absent"
+        # scores as True. Use `parse_yes_no(output, "Answer")` from utils, as
+        # utils.vlm.object_detection now does, and drop this method.
         if "answer:" not in output.lower():
             return output.strip(), None
         description_part, answer_part = output.lower().split("answer:")
@@ -82,10 +112,14 @@ class CheckInteractionAction(ExecutorAction):
             return description_part.strip(), None
 
     def _execute(self):
+        # TODO: `self._emulator` is defined by no class in this hierarchy — this raises
+        # AttributeError. ExecutorAction subclasses reach the game some other way.
         current_frame = self._emulator.get_current_frame()
         grid_cells = self._emulator.state_parser.capture_grid_cells(
             current_frame=current_frame
         )
+        # TODO: `infer` is an instance method — calling it on the class is a TypeError.
+        # Construct an ExecutorVLM (or take one in __init__) and call it on that.
         orientation_output = ExecutorVLM.infer(
             texts=[self.orientation_prompt],
             images=[grid_cells[(0, 0)]],

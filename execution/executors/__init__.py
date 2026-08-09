@@ -36,9 +36,7 @@ from execution.executors.stateful import (
 from execution.executors.deliberative import (
     ActionValueEstimatorExecutor,
     AdversarialSamplingExecutor,
-    ConfidenceGatedExecutor,
     ReflectiveExecutor,
-    SelfConsistencyExecutor,
 )
 
 __all__ = [
@@ -52,9 +50,7 @@ __all__ = [
     "ScreenDiffExecutor",
     "SpatialMapExecutor",
     "BeliefStateExecutor",
-    "SelfConsistencyExecutor",
     "ReflectiveExecutor",
-    "ConfidenceGatedExecutor",
     "ActionValueEstimatorExecutor",
     "AdversarialSamplingExecutor",
 ]

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Calls the VLM to propose candidate tasks for a single game/init_state without
 # any prior trajectory data (zero-shot). Results are saved to the project's task
-# store and can be augmented with extra examples via --extra and --extra_k. Use
-# propose_all_zeroshot.sh to run across all init_states for a game.
+# store. Use propose_all_zeroshot.sh to run across all init_states for a game.
 
 source scripts/core/utils.sh
 
@@ -78,8 +77,6 @@ model_name="${ARGS["model_name"]}"
 vlm_kind="${ARGS["vlm_kind"]}"
 init_states="${ARGS["init_states"]}"
 max_new_tokens="${ARGS["max_new_tokens"]}"
-extra="${ARGS["extra"]}"
-extra_k="${ARGS["extra_k"]}"
 
 if [[ "${ARGS["overwrite"]}" == "true" || "${ARGS["overwrite"]}" == "yes" || "${ARGS["overwrite"]}" == "y" ]]; then
     overwrite_flag="--overwrite"
@@ -93,12 +90,6 @@ else
     verbose_flag=""
 fi
 
-if [[ "$extra" == "none" ]]; then
-    extra_flag=""
-else
-    extra_flag="--extra $extra --extra_k $extra_k"
-fi
-
 python vlm.py --game $game --model_name $model_name --vlm_kind $vlm_kind \
     --max_new_tokens $max_new_tokens $overwrite_flag $verbose_flag \
-    propose_tasks_zeroshot --init_states $init_states --run_name "${ARGS["run_name"]}" $extra_flag
+    propose_tasks_zeroshot --init_states $init_states

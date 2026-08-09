@@ -120,7 +120,7 @@ _RATE_LIMITS: dict[str, int] = {
 
 # Model names for which the "not found in _RATE_LIMITS" warning has already
 # been logged once. Avoids re-logging the same warning every time a model
-# with no explicit rate limit is instantiated (e.g. once per practice episode).
+# with no explicit rate limit is instantiated (e.g. once per attempt episode).
 _WARNED_MISSING_RATE_LIMIT: set[str] = set()
 
 
@@ -250,14 +250,17 @@ class InferenceModel(ABC):
     def do_infer(
         self,
         texts: list[str],
+        images: list[list[Image.Image]],
         max_new_tokens: int,
-        images: list[list[Image.Image]] = None,
         temperature: Optional[float] = None,
         stop_strings: list[str] = None,
         num_return_sequences: int = 1,
     ) -> list[list[str]]:
         """
         Run inference on a batch of text prompts with associated images. Assumes validated inputs
+
+        ``images`` is positional and precedes ``max_new_tokens``: implementations
+        are called from :meth:`infer` and must keep this order.
 
         :param texts: List of text prompts, one per sample.
         :type texts: list[str]
@@ -413,7 +416,14 @@ class InferenceModel(ABC):
         for i in range(0, len(texts), batch_size):
             batch_texts = texts[i : i + batch_size]
             batch_images = images[i : i + batch_size]
-            batch_results = self.do_infer(batch_texts, batch_images, max_new_tokens, temperature=temperature, stop_strings=stop_strings, num_return_sequences=num_return_sequences)
+            batch_results = self.do_infer(
+                texts=batch_texts,
+                images=batch_images,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                stop_strings=stop_strings,
+                num_return_sequences=num_return_sequences,
+            )
             results.extend(batch_results)
         if num_return_sequences == 1:
             if passed_in_str:
@@ -935,7 +945,12 @@ class OpenAIAPIModel(OpenAICompatibleAPIBase, APIModel):
                     # exponential backoff with time_to_wait between attempts, plus jitter so
                     # concurrent coroutines retrying after the same failure don't all collide
                     backoff_time = self.seconds_to_wait * (2 ** attempt) * random.uniform(1.0, 1.5)
-                    log_info(f"Waiting for {backoff_time:.2f} seconds before retrying...")
+                    if backoff_time < 0:
+                        # Unmetered endpoints (vLLM) carry a negative seconds_to_wait, so
+                        # there is no backoff to report — the retry is immediate.
+                        log_info("Got connection error with vLLM, trying again.")
+                    else:
+                        log_info(f"Waiting for {backoff_time:.2f} seconds before retrying...")
                     await asyncio.sleep(backoff_time)
         raise RuntimeError(f"OpenAI API call failed after {max_tries} attempts. Last error: {last_error}") from last_error
 
@@ -1062,7 +1077,7 @@ class AnthropicModel(APIModel):
         :type max_new_tokens: int
         :param temperature: Sampling temperature. None means model default.
         :type temperature: Optional[float]
-        :param stop_strings: Additional stop sequences passed through to the API.
+        :param stop_strings: Additional stop sequences. ``"[STOP]"`` is always included.
         :type stop_strings: list[str] or None
         :param num_return_sequences: Unused (Anthropic has no native multi-sample API); kept for signature compatibility.
         :type num_return_sequences: int
@@ -1072,8 +1087,7 @@ class AnthropicModel(APIModel):
         kwargs = dict(model=self.model, messages=messages, max_tokens=max_new_tokens)
         if temperature is not None:
             kwargs["temperature"] = temperature
-        if stop_strings:
-            kwargs["stop_sequences"] = stop_strings
+        kwargs["stop_sequences"] = list(dict.fromkeys(["[STOP]"] + (stop_strings or [])))
         max_tries = 3
         last_error = None
         for attempt in range(max_tries):

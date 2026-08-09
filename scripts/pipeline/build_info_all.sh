@@ -13,7 +13,7 @@
 # Output per source, under <dirname(stem)>/info_<model_save_name>/:
 #   insights.jsonl   stage A leaves — all that benchmark_info_all.sh --hint_mode init_state needs
 #   frames/          representative frames, for visual matching
-#   merge/, info.md  stage B — needed for --hint_mode retrieval
+#   merge/, info.json  stage B — needed for --hint_mode retrieval
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 
@@ -102,6 +102,9 @@ for source in $sources; do
     echo ""
     echo "=== Building info document: $source ==="
     ARGS["trajectory_path"]="$stem"
+    # Recorded as the document's provenance rather than re-derived from the output path by
+    # every reader. It is known here: the vertical is the loop variable.
+    ARGS["source"]="$source"
     flags=$(args_to_flags_subset ARGS BUILD_INFO_ARG_KEYS)
     bash scripts/vlm/build_info.sh $flags || exit 1
     echo "  -> $info_dir"
@@ -118,15 +121,8 @@ if [[ "${ARGS["do_debug"]}" == "true" ]]; then
         debug_source="$source"
         if [[ "$source" == "zeroshot" ]]; then debug_source="attempt"; fi
 
-        # paths.py addresses the attempts dir through a NAMED --extra, while the stem above
-        # was found by probing suffixes. Without translating, the report is asked to read
-        # the plain zeroshot_tasks_<executor>_attempts dir while the build wrote to a
-        # prior_* one, and it fails on a file that was never going to be there.
-        stem=$(info_source_stem "$game" "$model_save_name" "$run_name" "$executor" "$source")
-        extra=$(info_extra_from_stem "$stem")
-
         echo ""
-        echo "=== Diagnostics: $source (--extra $extra) ==="
+        echo "=== Diagnostics: $source ==="
         # Separate --output_dir per source, or the second report overwrites the first.
         # NOT fatal: the documents are the product, this is a report about them. A game
         # whose documents built fine must still reach its benchmark.
@@ -137,8 +133,7 @@ if [[ "${ARGS["do_debug"]}" == "true" ]]; then
             --output_dir "$results_dir/debug/$game/info_$source" \
             info \
             --model_name "${ARGS["model_name"]}" \
-            --source "$debug_source" \
-            --extra "$extra"; then
+            --source "$debug_source"; then
             echo "WARNING: diagnostics failed for $source; documents are built, continuing."
         else
             echo "  -> $results_dir/debug/$game/info_$source/info/report.md"

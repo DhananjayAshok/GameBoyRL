@@ -21,7 +21,7 @@ from typing import Any, List, Optional
 from execution.report import EnvironmentStepRecord, ExecutorReport, parse_completion
 from execution.supervisors._format import action_trace, attempt_history_line
 from execution.supervisors.checker import summarise_trajectory_segments
-from execution.supervisors.info_hint import InfoHintSupervisor, _RecordingVLM
+from execution.supervisors.info_hint import InfoHintSupervisor, RecordingVLM
 from execution.supervisors.prompts import (
     DISTILL_INSIGHTS_PROMPT,
     FILTER_INSIGHTS_PROMPT,
@@ -135,7 +135,7 @@ class InfoPlanSupervisor(InfoHintSupervisor):
         # writes it to the CSV so the supervisor's reasoning is as inspectable after the
         # fact as the executor's already is.
         self.supervisor_calls: List[dict] = []
-        self._plan_vlm = _RecordingVLM(
+        self._plan_vlm = RecordingVLM(
             self._hint_vlm if plan_vlm_model is None else VLM(plan_vlm_model, plan_vlm_kind),
             self.supervisor_calls,
         )
@@ -166,7 +166,7 @@ class InfoPlanSupervisor(InfoHintSupervisor):
     def _call(self, stage: str, **kwargs):
         """Tag the recorded call with *stage*, then make it.
 
-        ``_RecordingVLM`` labels whatever it is asked to infer with whatever ``stage`` was
+        ``RecordingVLM`` labels whatever it is asked to infer with whatever ``stage`` was
         last assigned, so setting the stage and calling were two separate statements at
         every one of these sites — and a site that forgot to set it would be logged under
         the *previous* stage, silently. ``supervisor_calls`` is the only record of this
@@ -444,6 +444,15 @@ class InfoPlanSupervisor(InfoHintSupervisor):
         written against the belief can correct it directly — telling a player who thinks
         they are already on the icon that they are two tiles left of it beats telling them
         again to go to the icon.
+
+        Returns ``None`` when no hint could be written — a truncated reply, or the writer
+        declining. **Both callers keep the previous attempt's hint in that case**
+        (``write_resume_hint(...) or hint``) rather than retrying unaided. A stale hint is
+        advice about an earlier failure and may no longer describe where the player is,
+        which is a real cost; it is accepted because the alternative throws away the only
+        guidance available at the exact moment the writer is already struggling, and a
+        retry with nothing is the weaker of the two. The two call sites disagreed on this
+        for a while — if that reasoning is ever revisited, change both.
         """
         prior_block = (f'Previous hint, which did not work (do not simply repeat it):\n'
                        f'"{previous_hint}"\n\n' if previous_hint else "")
@@ -549,14 +558,25 @@ class InfoPlanSupervisor(InfoHintSupervisor):
 
     def _run_leg(self, leg_task: str, hint: Optional[str], self_terminate: bool,
                  budget: int) -> ExecutorReport:
-        """One executor attempt, capped at the smaller of the leg cap and what is left."""
+        """One executor attempt, capped at the smaller of the leg cap and what is left.
+
+        ``self._max_steps`` is what :meth:`Supervisor.call_executor` hands the executor, so
+        it has to be narrowed to this leg's cap and put back afterwards. Restored in a
+        ``finally`` here, beside the write, rather than once after the loop in
+        :meth:`evaluate`: an executor that raises would otherwise leave the supervisor with
+        a single leg's budget standing in for the whole episode's.
+        """
         if hint is None:
             self._executor_kwargs.pop("hint", None)
         else:
             self._executor_kwargs["hint"] = hint
         self._executor_kwargs["allow_self_termination"] = self_terminate
+        episode_budget = self._max_steps
         self._max_steps = min(self.max_leg_steps, budget)
-        return self.call_executor(leg_task)
+        try:
+            return self.call_executor(leg_task)
+        finally:
+            self._max_steps = episode_budget
 
     def evaluate(self) -> Any:
         """Plan, then supervise the executor through the plan until it lands or the budget ends.
@@ -592,12 +612,16 @@ class InfoPlanSupervisor(InfoHintSupervisor):
         self.completed_steps = []
         self.n_replans = 0
         budget = self._max_steps
-        episode_budget = budget
         last_report = None
 
         # No plan (nothing retrieved, or an unparseable planner reply) degrades to the
         # unplanned baseline rather than to a fabricated plan.
-        steps = self.plan if self.plan else [None]
+        #
+        # A copy, not self.plan itself: the replan paths below splice into `steps` in place
+        # and then rebind self.plan to a freshly filtered list, so aliasing them would mean
+        # the two names refer to the same object before the first replan and different
+        # objects after it. `steps` is the working list; self.plan is derived from it.
+        steps = list(self.plan) if self.plan else [None]
         if not self.plan:
             log_warn("[plan] no plan produced; running the task unplanned.", self._parameters)
 
@@ -745,13 +769,16 @@ class InfoPlanSupervisor(InfoHintSupervisor):
                               f"attempts; moving on.")
                     break
 
+                # ``or hint`` keeps the previous attempt's hint when the writer produces
+                # none — see the note on :meth:`write_resume_hint`. The final-step path
+                # above does the same; the two used to disagree, and an unaided retry is
+                # not what either of them meant.
                 hint = self.write_resume_hint(summaries, step, reasoning, hint or "",
-                                              report=report, regression=regression)
+                                              report=report, regression=regression) or hint
                 if self.last_diagnosis:
                     attempt["diagnosis"] = self.last_diagnosis
 
             self.step_log.append(record)
             index += 1
 
-        self._max_steps = episode_budget
         return last_report

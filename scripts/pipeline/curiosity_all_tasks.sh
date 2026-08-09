@@ -61,9 +61,6 @@ for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
-_do_guidance=false
-[[ "${ARGS["do_guidance_and_practice"]}" == "true" || "${ARGS["do_guidance_and_practice"]}" == "yes" || "${ARGS["do_guidance_and_practice"]}" == "y" || "${ARGS["do_guidance_and_practice"]}" == "t" ]] && _do_guidance=true
-
 game="${ARGS["game"]}"
 IFS=',' read -ra init_states_arr <<< "${TRAIN_STATES[$game]}"
 grouped_pkls=()
@@ -100,11 +97,6 @@ ARGS["overwrite"]="$saved_overwrite"
 bash scripts/vlm/infer_tasks.sh $infer_flags || exit 1
 
 model_save_name="${ARGS["model_name"]##*/}"
-gp_trajectory_path="$storage_dir/proposed_tasks/${game}/${model_save_name}/curiosity/${ARGS["run_name"]}/trajectory_annotation"
-if [[ "$_do_guidance" == "true" ]]; then
-    ARGS["trajectory_path"]="$gp_trajectory_path"
-    guidance_flags=$(args_to_flags_subset ARGS GUIDANCE_AND_PRACTICE_ARG_KEYS)
-    bash scripts/pipeline/guidance_and_practice.sh $guidance_flags || exit 1
-else
-    echo "trajectory_path for guidance_and_practice: $gp_trajectory_path"
-fi
+# Terminal artifact of the curiosity vertical: <stem>.json + <stem>.pkl. build_info.sh
+# consumes this stem.
+echo "curiosity trajectory stem: $storage_dir/proposed_tasks/${game}/${model_save_name}/curiosity/${ARGS["run_name"]}/trajectory_annotation"

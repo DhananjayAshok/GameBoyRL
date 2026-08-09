@@ -2,7 +2,7 @@ import seaborn as sns
 import pandas as pd
 from typing import Any, Callable, Optional
 from utils.parameter_handling import load_parameters
-from utils.log_handling import log_error, log_info, log_warn, log_dict
+from utils.log_handling import log_error, log_info, log_warn
 import matplotlib.pyplot as plt
 import os
 
@@ -16,8 +16,7 @@ class Plotter:
     Typical Workflows:
     1. Create a Plotter object
     2. Create a plot function using get_stacked_bar_plot_func or by defining your own function that creates a plot.
-    3. Use test_sizes to test different sizes for the plot and find the best one. This will show the plot and ask if you want to keep trying different sizes.
-    4. Do not use plt.show(), instead use plotter.show()
+    3. Do not use plt.show(), instead use plotter.show()
     """
 
     COLOURS = (
@@ -161,36 +160,6 @@ class Plotter:
                     f"Got {got}, but it must be a number", parameters=self.parameters
                 )
                 continue
-
-    def test_sizes(self, plot_func: Callable[[], None]) -> None:
-        """
-        Interactively test different font size parameters for a plot.
-
-        Renders the plot, displays it, then prompts the user to either accept the
-        current sizes or enter new values for each size parameter. Repeats until
-        the user accepts.
-
-        :param plot_func: A zero-argument callable that creates a matplotlib plot.
-        :type plot_func: Callable[[], None]
-        """
-        self.set_size_default()
-        done = False
-        while not done:
-            log_info(f"Plot with sizes: ", parameters=self.parameters)
-            log_dict(self.size_params, n_indents=1, parameters=self.parameters)
-            plot_func()
-            plt.show()
-            keepgoing = input(
-                "Do you want to keep trying different sizes? (only y will keep going):"
-            )
-            if keepgoing.lower().strip() == "y":
-                for key in self.size_params:
-                    self.size_params[key] = self.get_size_input_number(key)
-                self.set_size_parameters_from_dict(self.size_params)
-            else:
-                done = True
-                break
-        return
 
     def show(self, save_path: Optional[str] = None) -> None:
         """

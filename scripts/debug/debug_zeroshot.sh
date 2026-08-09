@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Reports zero-shot task proposal: for every init_state, the first frame the proposer saw,
 # the tasks it proposed, and the benchmark tasks actually anchored to that state. Writes
-# one <results_dir>/debug/<game>/zeroshot/report_<extra>.md per proposal variant.
+# <results_dir>/debug/<game>/zeroshot/report.md.
 #
 # This is the only debug script that starts an emulator (the first frame is saved nowhere),
 # so it needs the game's ROM. No GPU and no VLM.
@@ -14,7 +14,6 @@ REQUIRED_ARGS=()
 populate_array DEBUG_MODEL_ESSENTIALS REQUIRED_ARGS
 populate_dict DEBUG_MODEL_DEFAULTS ARGS
 
-ARGS["extra"]="all"
 ARGS["controller_variant"]="low_level"
 
 # --- Argument parsing (copy verbatim) ---
@@ -64,5 +63,4 @@ group_flags=$(debug_group_flags ARGS)
 
 python debug.py $group_flags zeroshot \
     --model_name "${ARGS["model_name"]}" \
-    --extra "${ARGS["extra"]}" \
     --controller_variant "${ARGS["controller_variant"]}" || exit 1

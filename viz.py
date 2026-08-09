@@ -7,10 +7,9 @@ import os
 
 import click
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 
-from utils import load_parameters, log_error, log_info, log_warn, Plotter
+from utils import load_parameters, log_error, log_warn, Plotter
 
 
 MODEL_MAP = {

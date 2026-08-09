@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Distils (task, example trajectory) pairs into a consolidated info document for the
-# context-engineering arm. Input is a trajectory stem (--trajectory_path, the same stem
-# infer_guidance.sh takes); all output lands in <dirname(stem)>/info_<model>_<executor>/.
+# context-engineering arm. Input is a trajectory stem (--trajectory_path, i.e. the
+# <stem>.json + <stem>.pkl pair the data-collection legs terminate in); all output lands
+# in <dirname(stem)>/info_<model>_<executor>/.
 # --stage a stops after extracting insights.jsonl, which is all benchmark_info.sh needs
-# for --mode init_state; --stage all also builds the merge tree and info.md.
+# for --mode init_state; --stage all also builds the merge tree and info.json.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 
@@ -85,4 +86,5 @@ python vlm.py \
     --max_concurrency "${ARGS["max_concurrency"]}" \
     --stage "${ARGS["stage"]}" \
     --executor "${ARGS["executor"]}" \
+    --source "${ARGS["source"]}" \
     $from_round_arg

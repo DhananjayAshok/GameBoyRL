@@ -1,53 +1,117 @@
 """
-The info document: a game's distilled knowledge as plain markdown.
+The info document: a game's distilled knowledge, as JSON.
 
 The document is the shared artifact of the context-engineering vertical. It is written by
 vlm_scripts/build_info.py, read by execution.supervisors.InfoHintSupervisor at test time, and
 rendered by debug_scripts/info.py. This module owns its *shape* so those three never disagree
 about it.
 
-Format (exactly two sections, no task-agnostic "general knowledge" section — every insight
-hangs off either a task category or an image category)::
+Exactly two sections of entries, no task-agnostic "general knowledge" section — every insight
+hangs off either a task category or an image category::
 
-    # Info: <game>
+    {
+      "schema": 1,
+      "game": "<game>",
+      "provenance": {"source": "curiosity", "executor": "history", ...},
+      "frames_root": "proposed_tasks/<game>/<model>/.../info_<model>_<executor>",
+      "task_entries":  [{"category": ..., "description": ..., "insights": [...], ...}],
+      "image_entries": [...]
+    }
 
-    ## 1. Task Understanding
-
-    ### Task category: <short name>
-    **Description:** <what this category of task is>
-    **Frame:** frames/<id>.png
-    **Examples:**
-    - <what was attempted and what happened>
-    **Insights:**
-    - <non-obvious insight>
-
-    ## 2. Image Understanding
-
-    ### Image category: <short name>
-    ...
-
-``Description`` / ``Examples`` / ``Insights`` are kept strictly separate and never collapsed
-into prose: the merge decides identity from Description + Examples + Frame and writes only
-into Insights, which is what makes that decision well-posed rather than a judgement over a
+``description`` / ``examples`` / ``insights`` are kept strictly separate and never collapsed
+into prose: the merge decides identity from description + examples + frame and writes only
+into insights, which is what makes that decision well-posed rather than a judgement over a
 blob of text.
 
-Round-tripping is exact for documents this module wrote (``parse_document(render_document(d))
-== d``), which is what lets the merge tree checkpoint to disk as markdown rather than as an
-opaque pickle.
+**Why JSON rather than the markdown this used to be.** The markdown was never the format the
+model saw (:meth:`Entry.evidence_block` builds that) nor the one humans read
+(``debug_scripts/info.py`` renders its own). It was storage only, and as storage it cost a
+hand-written parser that had to stay the exact inverse of the renderer, plus three
+representational holes — values could not contain a newline, list values could not contain a
+comma, and an item reading exactly ``(none recorded)`` was silently dropped. Serialising to
+JSON makes the round trip free and removes all three. :func:`render_document` survives as a
+**one-way** markdown view for humans.
+
+**Provenance is recorded, not inferred.** It used to be reconstructed at load time by parsing
+the directory the document was found in, which meant every reader re-derived it and
+``execution/`` had to import a top-level CLI script to do so. ``build_info`` knows all of it
+at write time and now stamps it in.
+
+**Frame paths.** Entries store a path relative to :attr:`InfoDocument.frames_root`, which is
+itself relative to ``storage_dir``. That keeps a document portable — an absolute path would
+pin the artifact to one machine — while staying unambiguous once entries from several
+documents are unioned. :func:`load_document` resolves each entry's
+:attr:`Entry.resolved_frame` so readers never have to know the scheme.
 """
 
 from __future__ import annotations
 
+import json
 import os
-import re
 from dataclasses import dataclass, field, replace
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
+
+from utils.fundamental import file_makedir
+from utils.parameter_handling import load_parameters
+
+#: Bumped when the on-disk shape changes incompatibly, so a stale document is detected
+#: rather than silently misread.
+SCHEMA_VERSION = 1
 
 TASK_SECTION = "Task Understanding"
 IMAGE_SECTION = "Image Understanding"
 
-_TASK_HEADING = "Task category:"
-_IMAGE_HEADING = "Image category:"
+
+@dataclass
+class Provenance:
+    """Where a document came from, recorded by its producer.
+
+    Every field is written by ``build_info`` at the moment the document is built. Nothing
+    here is ever re-derived from a path: that is the whole point of the block existing.
+
+    :param source: The vertical — ``"curiosity"`` or ``"zeroshot"``. This alone is the
+        provenance label.
+    :param executor: Executor whose trajectories were distilled.
+    :param model: Model that did the distilling (the save name, not the full path).
+    :param trajectory_stem: The input stem, relative to ``storage_dir``. The curiosity
+        run name is a component of this, so it is not recorded a second time.
+    :param built_at: ISO-8601 UTC timestamp.
+    """
+
+    source: str = ""
+    executor: Optional[str] = None
+    model: Optional[str] = None
+    trajectory_stem: Optional[str] = None
+    built_at: Optional[str] = None
+
+    @property
+    def label(self) -> str:
+        """The single string readers use to attribute an entry.
+
+        Matches what :func:`utils.paths.source_label` reconstructs from directory names:
+        the vertical the trajectories came from.
+        """
+        return self.source
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "source": self.source,
+            "executor": self.executor,
+            "model": self.model,
+            "trajectory_stem": self.trajectory_stem,
+            "built_at": self.built_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "Provenance":
+        data = data or {}
+        return cls(
+            source=data.get("source", ""),
+            executor=data.get("executor"),
+            model=data.get("model"),
+            trajectory_stem=data.get("trajectory_stem"),
+            built_at=data.get("built_at"),
+        )
 
 
 @dataclass
@@ -58,10 +122,20 @@ class Entry:
     description: str = ""
     examples: List[str] = field(default_factory=list)
     insights: List[str] = field(default_factory=list)
-    frame: Optional[str] = None          # path relative to the info dir
+    frame: Optional[str] = None          # relative to the document's frames_root
     example_frames: List[str] = field(default_factory=list)
     init_states: List[str] = field(default_factory=list)
-    source: Optional[str] = None         # provenance label, set at load time (§4.3)
+
+    #: Provenance label, set by :func:`load_document` from the document's
+    #: :class:`Provenance`. Not persisted per entry — it belongs to the document — but it
+    #: is carried on the entry because a union mixes entries from several documents into
+    #: one candidate list, after which the entry is all a reader has.
+    source: Optional[str] = None
+
+    #: Absolute path to :attr:`frame`, resolved by :func:`load_document`. Not persisted.
+    #: ``None`` when the entry has no frame, or when the document was built in memory
+    #: rather than loaded.
+    resolved_frame: Optional[str] = None
 
     def evidence_block(self, include_frame_note: bool = False) -> str:
         """Description + Examples — the fields identity is judged from. Never Insights."""
@@ -76,17 +150,62 @@ class Entry:
     def insights_block(self) -> str:
         return "\n".join(f"- {i}" for i in self.insights)
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Persisted fields only — ``source`` and ``resolved_frame`` are load-time."""
+        return {
+            "category": self.category,
+            "description": self.description,
+            "examples": list(self.examples),
+            "insights": list(self.insights),
+            "frame": self.frame,
+            "example_frames": list(self.example_frames),
+            "init_states": list(self.init_states),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Entry":
+        return cls(
+            category=data.get("category", ""),
+            description=data.get("description", ""),
+            examples=list(data.get("examples") or []),
+            insights=list(data.get("insights") or []),
+            frame=data.get("frame"),
+            example_frames=list(data.get("example_frames") or []),
+            init_states=list(data.get("init_states") or []),
+        )
+
 
 @dataclass
 class InfoDocument:
     game: str = ""
     task_entries: List[Entry] = field(default_factory=list)
     image_entries: List[Entry] = field(default_factory=list)
+    provenance: Provenance = field(default_factory=Provenance)
+
+    #: Directory the entries' frame paths are relative to, itself relative to
+    #: ``storage_dir``. Empty for a document built in memory that has not been written yet.
+    frames_root: str = ""
+
+    @staticmethod
+    def _check_section(section: str) -> None:
+        """Reject an unrecognised section name.
+
+        Both accessors used to treat anything that was not :data:`TASK_SECTION` as the
+        image section, so a typo silently read — or, through ``set_entries``, silently
+        overwrote — the wrong list.
+        """
+        if section not in (TASK_SECTION, IMAGE_SECTION):
+            raise ValueError(
+                f"Unknown info-document section {section!r}. "
+                f"Expected {TASK_SECTION!r} or {IMAGE_SECTION!r}."
+            )
 
     def entries(self, section: str) -> List[Entry]:
+        self._check_section(section)
         return self.task_entries if section == TASK_SECTION else self.image_entries
 
     def set_entries(self, section: str, entries: List[Entry]) -> None:
+        self._check_section(section)
         if section == TASK_SECTION:
             self.task_entries = entries
         else:
@@ -97,22 +216,61 @@ class InfoDocument:
         return len(self.task_entries) + len(self.image_entries)
 
     def copy(self) -> "InfoDocument":
+        """Deep-ish copy: new Entry objects with their own list fields."""
+        def copied(entries: List[Entry]) -> List[Entry]:
+            return [replace(e, examples=list(e.examples), insights=list(e.insights),
+                            example_frames=list(e.example_frames),
+                            init_states=list(e.init_states))
+                    for e in entries]
+
         return InfoDocument(
             game=self.game,
-            task_entries=[replace(e, examples=list(e.examples), insights=list(e.insights),
-                                  example_frames=list(e.example_frames),
-                                  init_states=list(e.init_states))
-                          for e in self.task_entries],
-            image_entries=[replace(e, examples=list(e.examples), insights=list(e.insights),
-                                   example_frames=list(e.example_frames),
-                                   init_states=list(e.init_states))
-                           for e in self.image_entries],
+            task_entries=copied(self.task_entries),
+            image_entries=copied(self.image_entries),
+            provenance=replace(self.provenance),
+            frames_root=self.frames_root,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """The persisted shape. Inverse of :meth:`from_dict`."""
+        return {
+            "schema": SCHEMA_VERSION,
+            "game": self.game,
+            "provenance": self.provenance.to_dict(),
+            "frames_root": self.frames_root,
+            "task_entries": [e.to_dict() for e in self.task_entries],
+            "image_entries": [e.to_dict() for e in self.image_entries],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "InfoDocument":
+        """Inverse of :meth:`to_dict`.
+
+        Does **not** populate :attr:`Entry.source` or :attr:`Entry.resolved_frame` — those
+        are load-time concerns and belong to :func:`load_document`, which knows where the
+        document came from. An in-memory document built during a merge has neither.
+        """
+        schema = data.get("schema", SCHEMA_VERSION)
+        if schema != SCHEMA_VERSION:
+            raise ValueError(
+                f"Info document has schema {schema}, this code understands "
+                f"{SCHEMA_VERSION}. Rebuild it with vlm_scripts/build_info.py."
+            )
+        return cls(
+            game=data.get("game", ""),
+            task_entries=[Entry.from_dict(e) for e in data.get("task_entries") or []],
+            image_entries=[Entry.from_dict(e) for e in data.get("image_entries") or []],
+            provenance=Provenance.from_dict(data.get("provenance")),
+            frames_root=data.get("frames_root", ""),
         )
 
 
 # ---------------------------------------------------------------------------
-# Render
+# Markdown view (one-way — for humans, never parsed back)
 # ---------------------------------------------------------------------------
+
+_TASK_HEADING = "Task category:"
+_IMAGE_HEADING = "Image category:"
 
 
 def _render_entry(entry: Entry, heading: str) -> str:
@@ -131,8 +289,18 @@ def _render_entry(entry: Entry, heading: str) -> str:
 
 
 def render_document(doc: InfoDocument) -> str:
-    """Render to the markdown of the module docstring. Inverse of :func:`parse_document`."""
-    out = [f"# Info: {doc.game}", "", f"## 1. {TASK_SECTION}", ""]
+    """Render a document as markdown, for reading.
+
+    **One-way.** There is no parser for this text and there should not be one: JSON is the
+    stored format, and a second representation that had to round-trip is exactly the
+    coupling this module shed. Use it for display (``debug_scripts/info.py``) and for
+    eyeballing a document; use :func:`load_document` / :func:`dump_document` for anything
+    a program reads back.
+    """
+    out = [f"# Info: {doc.game}", ""]
+    if doc.provenance.source:
+        out += [f"*Source: {doc.provenance.label}*", ""]
+    out += [f"## 1. {TASK_SECTION}", ""]
     for entry in doc.task_entries:
         out.append(_render_entry(entry, _TASK_HEADING))
         out.append("")
@@ -145,131 +313,63 @@ def render_document(doc: InfoDocument) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Parse
+# Load / dump
 # ---------------------------------------------------------------------------
 
-_FIELD_RE = re.compile(r"^\*\*(?P<name>[^:*]+):\*\*\s*(?P<value>.*)$")
 
+def resolve_frame(doc: InfoDocument, frame: Optional[str],
+                  parameters: Optional[dict] = None) -> Optional[str]:
+    """Turn one of ``doc``'s frame paths into an absolute path that can be opened.
 
-def _split_csv(value: str) -> List[str]:
-    return [p.strip() for p in value.split(",") if p.strip()]
+    Entry frame paths are relative to ``doc.frames_root``, which is relative to
+    ``storage_dir``. Most readers do not need this — :func:`load_document` has already
+    filled in :attr:`Entry.resolved_frame` — but a document built in memory has not been
+    through that, so the resolution lives here rather than only inside the loader.
 
-
-def _parse_entries(block: str, heading: str) -> List[Entry]:
-    entries: List[Entry] = []
-    current: Optional[Entry] = None
-    bullet_target: Optional[str] = None
-
-    for raw in block.splitlines():
-        line = raw.rstrip()
-        stripped = line.strip()
-
-        if stripped.startswith("### "):
-            title = stripped[4:].strip()
-            if title.lower().startswith(heading.lower()):
-                title = title[len(heading):].strip()
-            current = Entry(category=title)
-            entries.append(current)
-            bullet_target = None
-            continue
-
-        if current is None:
-            continue
-
-        match = _FIELD_RE.match(stripped)
-        if match:
-            name = match.group("name").strip().lower()
-            value = match.group("value").strip()
-            bullet_target = None
-            if name == "description":
-                current.description = value
-            elif name == "frame":
-                current.frame = value or None
-            elif name == "init states":
-                current.init_states = _split_csv(value)
-            elif name == "example frames":
-                current.example_frames = _split_csv(value)
-            elif name == "examples":
-                bullet_target = "examples"
-            elif name == "insights":
-                bullet_target = "insights"
-            continue
-
-        if stripped.startswith("- ") and bullet_target:
-            item = stripped[2:].strip()
-            if item and item != "(none recorded)":
-                getattr(current, bullet_target).append(item)
-
-    return entries
-
-
-def parse_document(text: str) -> InfoDocument:
-    """Parse the markdown of the module docstring. Inverse of :func:`render_document`."""
-    game = ""
-    for line in text.splitlines():
-        if line.startswith("# Info:"):
-            game = line[len("# Info:"):].strip()
-            break
-
-    task_block, image_block = "", ""
-    section = None
-    buckets = {"task": [], "image": []}
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            lowered = stripped.lower()
-            if TASK_SECTION.lower() in lowered:
-                section = "task"
-                continue
-            if IMAGE_SECTION.lower() in lowered:
-                section = "image"
-                continue
-            section = None
-            continue
-        if section:
-            buckets[section].append(line)
-
-    task_block = "\n".join(buckets["task"])
-    image_block = "\n".join(buckets["image"])
-
-    return InfoDocument(
-        game=game,
-        task_entries=_parse_entries(task_block, _TASK_HEADING),
-        image_entries=_parse_entries(image_block, _IMAGE_HEADING),
-    )
-
-
-def load_document(path: str, source: Optional[str] = None) -> InfoDocument:
+    :param doc: The document the path belongs to.
+    :param frame: A stored frame path, or ``None``.
+    :param parameters: Loaded parameters dict. If None, loads from config.
+    :return: An absolute path, or ``None`` if ``frame`` was ``None``.
     """
-    Read and parse an info document, tagging every entry with a provenance label.
+    if not frame:
+        return None
+    if os.path.isabs(frame):
+        return frame
+    storage_dir = load_parameters(parameters)["storage_dir"]
+    return os.path.join(storage_dir, doc.frames_root, frame)
 
-    Frame paths are rewritten to absolute so an entry stays loadable once several documents
-    from different directories are unioned together (§4.3).
+
+def dump_document(doc: InfoDocument, path: str) -> None:
+    """Write a document to ``path`` as JSON, atomically.
+
+    Atomic because the merge tree writes a node per round and a partial file read back on
+    resume would be indistinguishable from a completed one.
+    """
+    file_makedir(path)
+    tmp = f"{path}.tmp"
+    with open(tmp, "w") as handle:
+        json.dump(doc.to_dict(), handle, indent=2)
+    os.replace(tmp, path)
+
+
+def load_document(path: str, parameters: Optional[dict] = None) -> InfoDocument:
+    """
+    Read a document and fill in the two load-time fields on every entry.
+
+    :attr:`Entry.source` comes from the document's own recorded
+    :attr:`Provenance.label` — not from the directory ``path`` sits in. It is copied onto
+    each entry because a union mixes entries from several documents into one list, after
+    which the entry is all a reader has to attribute it by.
+
+    :attr:`Entry.resolved_frame` is the absolute path to the entry's frame, so no reader
+    has to know that stored paths are relative to ``frames_root``.
     """
     with open(path, "r") as handle:
-        doc = parse_document(handle.read())
+        doc = InfoDocument.from_dict(json.load(handle))
 
-    root = os.path.dirname(os.path.abspath(path))
+    parameters = load_parameters(parameters)
+    label = doc.provenance.label
     for entry in doc.task_entries + doc.image_entries:
-        entry.source = source
-        if entry.frame and not os.path.isabs(entry.frame):
-            entry.frame = os.path.join(root, entry.frame)
-        entry.example_frames = [
-            f if os.path.isabs(f) else os.path.join(root, f) for f in entry.example_frames
-        ]
+        entry.source = label or None
+        entry.resolved_frame = resolve_frame(doc, entry.frame, parameters)
     return doc
-
-
-def source_label(info_dir: str) -> str:
-    """
-    Provenance label for an info dir, reusing create_dataset's labelling.
-
-    ``create_dataset._source_label`` already knows every naming quirk of these directory
-    layouts (including the ``--extra curiosity`` collision it documents), and an info dir sits
-    at exactly the same depth as a practice dir in both verticals — ``.../curiosity/<run>/
-    info_<model>`` and ``.../<tasks>_<executor>_attempts/info_<model>`` — so it labels both
-    correctly with no second scheme to keep in sync.
-    """
-    from create_dataset import _source_label
-
-    return _source_label(os.path.normpath(info_dir))

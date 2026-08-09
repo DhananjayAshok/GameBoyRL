@@ -36,9 +36,15 @@ import pandas as pd
 
 from utils import log_info, log_warn
 from debug_scripts import markdown as md
-from debug_scripts.paths import Paths
+from utils.paths import Paths
 from debug_scripts.stats import mcnemar_exact, wilson, wilson_str
 
+# TODO: this parses ExecutorReport.__str__ output and assumes ONE "│ → " outcome line
+# per call. That is no longer guaranteed: a VLM call now owns a list of steps
+# (VLMCallRecord.steps), and SequencePlannerExecutor emits several outcome lines under a
+# single call header. Reports from the "sequence" executor will therefore lose all but
+# one outcome here, and episode_actions() in compare.py inherits that. Fix by collecting
+# a list of outcomes per call rather than a single "outcome" field.
 CALL_HEADER = re.compile(r"^\s*┌─ \[([A-Z_]+)\] \(call (\d+)\)")
 CALL_FOOTER = re.compile(r"^\s*└─+")
 PROMPT_MARK = "| Prompt:"

@@ -7,8 +7,8 @@ pattern it uses to read a long trajectory: describe each segment separately, the
 consolidate those descriptions into one verdict or hint.
 
 They live here rather than in a utility module because they exist to serve that
-pattern, and ``derive_critique_hint`` is imported alongside the class by both
-``vlm_scripts.attempt_tasks`` and ``vlm_scripts.practice_tasks``.
+pattern, and ``derive_critique_hint`` is imported alongside the class by
+``vlm_scripts.attempt_tasks``.
 """
 
 from __future__ import annotations
@@ -19,16 +19,15 @@ from gameboy_worlds.interface import Environment
 
 from execution.executors import Executor
 from execution.report import EnvironmentStepRecord, ExecutorReport
-from execution.supervisors.base import Supervisor, _frame_to_call_cutoff
+from execution.supervisors.base import Supervisor
 from execution.supervisors.prompts import (
     CRITIQUE_CONSOLIDATE_PROMPT,
     CRITIQUE_SLICE_PROMPT,
     DESCRIBE_CONSOLIDATE_PROMPT,
     DESCRIBE_SLICE_PROMPT,
     JUDGE_BINARY_PROMPT,
-    JUDGE_SCORE_PROMPT,
 )
-from utils import log_warn, parse_int, parse_key_value, parse_yes_no, VLM
+from utils import parse_int, parse_key_value, parse_yes_no, VLM
 
 
 class SimpleCheckerSupervisor(Supervisor):
@@ -39,10 +38,8 @@ class SimpleCheckerSupervisor(Supervisor):
     Stage 1 — DESCRIBE: inspects the last ``evaluation_lookback`` env-step
     frames *without* task context and produces a description of what happened.
 
-    Stage 2 — JUDGE: given the task, the description, and the same frames
-    (plus optional step-by-step guidance), produces either a binary
-    success/fail (``score_mode=False``) or a 1-10 quality score
-    (``score_mode=True``).
+    Stage 2 — JUDGE: given the task, the description, and the same frames,
+    produces a binary success/fail verdict.
 
     :param task: Natural-language task the executor should attempt.
     :param executor_class: :class:`~execution.executors.Executor` subclass to use.
@@ -51,8 +48,6 @@ class SimpleCheckerSupervisor(Supervisor):
     :param max_steps: Env-step budget forwarded to the executor.
     :param max_tool_calls: Tool-call budget forwarded to the executor.
     :param evaluation_lookback: Number of final env-step frames passed to the checker VLM.
-    :param score_mode: ``True`` → return a 1-10 score; ``False`` → return binary success.
-    :param guidance: Optional step-by-step solution description shown to the judge.
     :param checker_vlm_model: Model name for the checker VLM.
     :param checker_vlm_kind: VLM kind for the checker (``"openai"``, ``"anthropic"``, …).
     :param checker_max_new_tokens: Token budget for each checker VLM call (default 2000).
@@ -69,9 +64,6 @@ class SimpleCheckerSupervisor(Supervisor):
         max_steps: int,
         max_tool_calls: int,
         evaluation_lookback: int = 8,
-        score_mode: bool = False,
-        guidance: Optional[str] = None,
-        goal_condition: Optional[str] = None,
         hint: Optional[str] = None,
         allow_self_termination: bool = False,
         checker_vlm_model: str = None,
@@ -82,9 +74,6 @@ class SimpleCheckerSupervisor(Supervisor):
     ) -> None:
         self._task = task
         self._evaluation_lookback = evaluation_lookback
-        self._score_mode = score_mode
-        self._guidance = guidance
-        self._goal_condition = goal_condition
         self._hint = hint
         if hint is not None:
             executor_kwargs["hint"] = hint
@@ -142,7 +131,7 @@ class SimpleCheckerSupervisor(Supervisor):
         return parse_key_value(output, "Description") or output.strip()
 
     def process_executor_return(self, report: ExecutorReport) -> dict:
-        self._last_report = report
+        self.last_report = report
         env_steps = [s for s in report.steps if isinstance(s, EnvironmentStepRecord)]
         k = min(self._evaluation_lookback, len(env_steps))
 
@@ -159,7 +148,8 @@ class SimpleCheckerSupervisor(Supervisor):
         }
 
         if k == 0:
-            empty = {
+            return {
+                "success": False,
                 "description": "",
                 "reasoning": "No environment steps were taken.",
                 "safe_success_point": None,
@@ -167,26 +157,15 @@ class SimpleCheckerSupervisor(Supervisor):
                 "steps": report.steps,
                 **run_meta,
             }
-            return {**empty, "score": 1} if self._score_mode else {**empty, "success": False}
 
         # Stage 1: describe full trajectory in slices
         description = self._describe_trajectory(env_steps)
 
         # Stage 2: judge using final k frames + full description
         final_frames = [s.frame_after for s in env_steps[-k:]]
-        goal_condition_block = (
-            f"This task is considered complete if: {self._goal_condition}\n\n"
-            if self._goal_condition else ""
-        )
-        guidance_block = (
-            f"Correct solution guidance:\n{self._guidance}\n\n" if self._guidance else ""
-        )
-        template = JUDGE_SCORE_PROMPT if self._score_mode else JUDGE_BINARY_PROMPT
         judge_prompt = (
-            template
+            JUDGE_BINARY_PROMPT
             .replace("[TASK]", self._task)
-            .replace("[GOAL_CONDITION_BLOCK]", goal_condition_block)
-            .replace("[GUIDANCE_BLOCK]", guidance_block)
             .replace("[DESCRIPTION]", description)
         )
         judge_output = self._checker_vlm.infer(
@@ -198,38 +177,47 @@ class SimpleCheckerSupervisor(Supervisor):
         reasoning = parse_key_value(judge_output, "Reasoning") or ""
         # The judge reports a *frame number*; we immediately convert it to a
         # vlm_call_log slice index and store THAT under "safe_success_point".
-        # i.e. consumers of this key (practice_tasks.py -> results.csv ->
-        # create_dataset.py) receive a call-log index, not a frame number. This
-        # overloading is deliberate: it lets create_dataset slice the saved
-        # vlm_call_log directly without also needing the (unsaved) steps list.
+        # i.e. consumers of this key receive a call-log index, not a frame number, so they
+        # can slice the saved call log directly.
         safe_frame = parse_int(judge_output, "Safe success point")
-        safe_success_point = _frame_to_call_cutoff(report.vlm_call_log, report.steps, safe_frame)
+        safe_success_point = _frame_to_call_cutoff(report.vlm_call_log, safe_frame)
+        # "steps" is the flattened view over the same call log, kept in the result dict
+        # for callers that want every step without walking the calls themselves.
         executor_meta = {"vlm_call_log": report.vlm_call_log, "steps": report.steps, **run_meta}
 
-        if self._score_mode:
-            score = parse_int(judge_output, "Score", lo=1, hi=10)
-            if score is None:
-                # Scored 1 either way, but the event is now visible. A judgement whose
-                # Score line was truncated away is otherwise indistinguishable from a
-                # genuine 1, and downstream (practice_tasks retry, create_dataset) treats
-                # it as a real failed attempt.
-                log_warn("[checker] no parseable Score in judgement (truncated?); "
-                         "scoring 1", self._parameters)
-                score = 1
-            return {"score": score, "safe_success_point": safe_success_point, "description": description, "reasoning": reasoning, **executor_meta}
-        else:
-            success = parse_yes_no(judge_output, "Success") is True
-            return {"success": success, "safe_success_point": safe_success_point, "description": description, "reasoning": reasoning, **executor_meta}
+        success = parse_yes_no(judge_output, "Success") is True
+        return {"success": success, "safe_success_point": safe_success_point, "description": description, "reasoning": reasoning, **executor_meta}
 
 
-# ---------------------------------------------------------------------------
-# Parse helpers for ExplorationSupervisor
-# ---------------------------------------------------------------------------
+def _frame_to_call_cutoff(
+    vlm_call_log: list,
+    safe_frame: Optional[int],
+) -> Optional[int]:
+    """Convert a 1-based env-frame number into a vlm_call_log slice index.
 
+    The judge VLM reports ``safe_success_point`` as a *frame number* — the earliest env
+    frame by which the task is surely complete. Consumers downstream slice the saved call
+    log, so the frame number is converted to "how many leading calls to keep" here.
 
-# ---------------------------------------------------------------------------
-# ExplorationSupervisor
-# ---------------------------------------------------------------------------
+    NOTE: the returned value is what gets stored under the ``safe_success_point``
+    key (see process_executor_return) — i.e. that key carries a *call-log index*,
+    NOT the original frame number. The frame number is intentionally not
+    preserved.
+
+    Each call owns the steps it produced, so counting env steps per call is a direct
+    walk. A call may own several (a planned sequence), and the cutoff keeps the whole
+    call: the frame that proved completion cannot be separated from the others that call
+    produced without splitting the record it belongs to. Returns ``None`` (no truncation
+    downstream) when ``safe_frame`` is None — the judge couldn't pin down a frame.
+    """
+    if safe_frame is None:
+        return None
+    env_frames = 0
+    for call_idx, entry in enumerate(vlm_call_log):
+        env_frames += len(entry.env_steps)
+        if env_frames >= safe_frame:
+            return call_idx + 1  # keep through the call that produced this frame
+    return len(vlm_call_log)
 
 
 def window_trajectory(
@@ -347,10 +335,9 @@ def derive_critique_hint(
     """Slice the failed trajectory into fixed-size windows, critique each with images,
     then consolidate into a single hint with a text-only call.
 
-    Lives here rather than in vlm_scripts so both the task-attempt pipeline
-    (vlm_scripts/attempt_tasks.py) and the practice pipeline (vlm_scripts/practice_tasks.py)
-    derive hints from the identical prompts — a difference in wording between the two
-    would make their numbers incomparable.
+    Lives here rather than in vlm_scripts so every pipeline that derives a hint
+    (currently vlm_scripts/attempt_tasks.py) uses the identical prompts — a difference in
+    wording between two callers would make their numbers incomparable.
     """
     if not env_steps:
         return previous_hint

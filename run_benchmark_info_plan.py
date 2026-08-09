@@ -181,7 +181,7 @@ def run_task(row, max_resets, controller_variant, executor_class, max_tool_calls
 @click.command()
 @click.option("--game", default="pokemon_red", type=click.Choice(AVAILABLE_GAMES))
 @click.option("--info_docs", default=None, type=str,
-              help="Comma-separated info.md path(s). Required for --mode retrieval.")
+              help="Comma-separated info.json path(s). Required for --mode retrieval.")
 @click.option("--insights_paths", default=None, type=str,
               help="Comma-separated insights.jsonl path(s). Required for --mode init_state.")
 @click.option("--mode", default="retrieval", type=click.Choice(["retrieval", "init_state"]),

@@ -11,10 +11,10 @@ ocr_max_new_tokens: 20
 executor_vlm_model: gpt-4o # The VLM that handles simple goal directed usage of High Level Actions. 
 executor_vlm_kind: openai
 executor_vlm_max_new_tokens: 2000
-ocr_vlm_model: gpt-4o-mini # The VLM that handles OCR. 
+ocr_vlm_model: gpt-4o-mini # The VLM that handles OCR.
 ocr_vlm_kind: openai
-object_detection_model: gpt-4o-mini # The VLM that handles object detection.
-object_detection_model_kind: openai
+object_detection_vlm_model: gpt-4o-mini # The VLM that handles object detection.
+object_detection_vlm_kind: openai
 executor_action_buffer_size: 5
 executor_retries_per_action: 3
 executor_max_steps: 15

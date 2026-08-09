@@ -23,8 +23,6 @@ from debug_scripts import (
     debug_infer,
     debug_zeroshot,
     debug_attempt,
-    debug_practice,
-    debug_dataset,
     debug_benchmark,
     debug_compare,
     debug_info,
@@ -37,7 +35,7 @@ from debug_scripts import (
 @click.option("--run_name", default="my_run", show_default=True,
               help="Run name used by the RL/curiosity stages and the fine-tuned model name.")
 @click.option("--executor", default="history", show_default=True,
-              help="Executor short name; selects the attempts/practice dirs and benchmark CSVs.")
+              help="Executor short name; selects the attempts dirs and benchmark CSVs.")
 @click.option("--mode", default="both", show_default=True,
               type=click.Choice(["curiosity_only", "zeroshot_only", "both"]),
               help="Which full.sh --mode produced the fine-tuned model; part of its served name.")
@@ -64,8 +62,6 @@ main.add_command(debug_curiosity, name="curiosity")
 main.add_command(debug_infer, name="infer")
 main.add_command(debug_zeroshot, name="zeroshot")
 main.add_command(debug_attempt, name="attempt")
-main.add_command(debug_practice, name="practice")
-main.add_command(debug_dataset, name="dataset")
 main.add_command(debug_benchmark, name="benchmark")
 main.add_command(debug_compare, name="compare")
 main.add_command(debug_info, name="info")

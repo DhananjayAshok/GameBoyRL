@@ -12,7 +12,6 @@ REQUIRED_ARGS=()
 populate_array DEBUG_MODEL_ESSENTIALS REQUIRED_ARGS
 populate_dict DEBUG_MODEL_DEFAULTS ARGS
 
-ARGS["extra"]="none"
 ARGS["n_frames"]=8
 ARGS["max_trajectories"]=40
 
@@ -63,6 +62,5 @@ group_flags=$(debug_group_flags ARGS)
 
 python debug.py $group_flags attempt \
     --model_name "${ARGS["model_name"]}" \
-    --extra "${ARGS["extra"]}" \
     --n_frames "${ARGS["n_frames"]}" \
     --max_trajectories "${ARGS["max_trajectories"]}" || exit 1

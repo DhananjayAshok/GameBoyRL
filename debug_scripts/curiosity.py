@@ -42,7 +42,7 @@ import pandas as pd
 from utils import log_info, log_warn, log_error
 from debug_scripts import markdown as md
 from debug_scripts.frames import trajectory_strip
-from debug_scripts.paths import Paths
+from utils.paths import Paths
 
 
 GB = 1024 ** 3

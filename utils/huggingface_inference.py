@@ -1,8 +1,13 @@
-from utils.lm_inference import *
-from abc import ABC, abstractmethod
+from abc import ABC
 from dataclasses import dataclass, field
+from typing import Any, Optional, Union
+
+from PIL import Image
+
+from utils.lm_inference import InferenceModel
+from utils.log_handling import log_error, log_info, log_warn
+from utils.parameter_handling import load_parameters
 from transformers import (
-    AutoModel,
     AutoTokenizer,
     AutoProcessor,
     AutoModelForCausalLM,
@@ -73,12 +78,15 @@ class HuggingFaceModel(HuggingFaceModelBase, InferenceModel):
     def __init__(
         self,
         model: str,
-        model_kind: str = None,
+        model_kind: str,
         parameters: dict[str, Any] = None,
         **model_kwargs,
     ) -> None:
-        if model_kind is None:
-            model_kind = infer_model_kind(model, error_out=True)
+        if model_kind not in SPECIAL_MODEL_KINDS:
+            log_error(
+                f"model_kind {model_kind!r} not recognised. Must be one of: {SPECIAL_MODEL_KINDS}",
+                parameters=parameters,
+            )
         self.model_kind = model_kind
         self._init_store(
             model=model,
@@ -286,17 +294,3 @@ def load_model_into_store(model_name, model_kind, model_kwargs) -> None:
         log_error(
             f"Model class {model_kind} not recognised. Cannot load model {model_name} into store."
         )
-
-
-def infer_model_kind(model: str, error_out: bool = False) -> Optional[str]:
-    special_inclusions = []
-    for special_class in SPECIAL_MODEL_KINDS:
-        if special_class.lower() in model.lower():
-            special_inclusions.append(special_class)
-    if len(special_inclusions) == 1:
-        return special_inclusions[0]
-    if error_out:
-        log_error(
-            f"Could not infer model class for {model}. Specify `model_kind` as one of: {SPECIAL_MODEL_KINDS}"
-        )
-    return None

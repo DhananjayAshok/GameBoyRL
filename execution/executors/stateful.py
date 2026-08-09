@@ -60,6 +60,7 @@ class ScreenDiffExecutor(SimpleExecutor):
 
     def _on_execute_start(self) -> None:
         self._prev_frame = None
+        super()._on_execute_start()
 
     def _query_vlm(self, prompt: str, frame) -> str:
         images = [self._prev_frame, frame] if self._prev_frame is not None else [frame]

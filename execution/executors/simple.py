@@ -42,9 +42,11 @@ class SimpleExecutor(Executor):
          environment step.
        - **Valid env action**: steps the environment, increments the env-step
          counter.
-       - **Unparseable or unrecognised**: logs to :attr:`~execution.report.SimpleReport.invalid_steps`,
-         passes an error message into the next prompt, and counts as an
-         environment step to prevent infinite loops.
+       - **Unparseable or unrecognised**: records an
+         :class:`~execution.report.InvalidStepRecord` in ``steps`` (surfaced as
+         :attr:`~execution.report.ExecutorReport.invalid_steps`), passes an error
+         message into the next prompt, and counts as an environment step to prevent
+         infinite loops.
 
     4. When *allow_self_termination* is enabled, asks the VLM whether the task
        is now complete (:meth:`~execution.executors.Executor._maybe_self_terminate`)
@@ -118,7 +120,7 @@ Reasoning: <your reasoning>
             action_success=action_success,
             reward=reward,
         )
-        self.report.steps.append(record)
+        self._record_step(record)
         self._last_terminated = terminated
         self._last_truncated = truncated
         self._last_frame_changed = info["core"].get("frame_changed", True)
@@ -333,7 +335,7 @@ Reasoning: <your reasoning>
         Kept as a method, delegating to :func:`utils.parsing.parse_action_line`, because it
         is part of the extension surface the executor variants are built on — a subclass
         reading actions out of a different format overrides this. The format itself is a
-        cross-module contract shared with create_dataset and the frame tooling, so it is
+        cross-module contract shared with the frame tooling, so it is
         defined once in utils.parsing rather than here.
         """
         return parse_action_line(response)
@@ -367,7 +369,8 @@ class HistoryAwareExecutor(SimpleExecutor):
 
     def __init__(self, env, task, max_steps, max_tool_calls, history_k: int = 5, **kwargs):
         self._history_k = history_k
-        self._action_history: List[tuple] = []  # (action_class, action_str, success_code)
+        # (action_class, action_str, success_code, frame_changed)
+        self._action_history: List[tuple] = []
         super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
 
     def _take_action(self, action_class, **kwargs) -> EnvironmentStepRecord:

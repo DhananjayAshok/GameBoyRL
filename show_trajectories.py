@@ -12,16 +12,15 @@ images are organized by group and trajectory index. Use --help for CLI options.
 # rewards is a list of floats with shape (num_frames-1,)
 # the grouping is done by similarity of the final frames of the trajectories
 
-import json
 import os
 import pickle
 from tqdm import tqdm
 import random
 import numpy as np
 import click
-from PIL import Image, ImageDraw, ImageFont
+from PIL import ImageDraw, ImageFont
 
-from utils import load_parameters, log_info, VLM, convert_numpy_greyscale_to_pillow
+from utils import load_parameters, log_info, convert_numpy_greyscale_to_pillow
 
 
 try:

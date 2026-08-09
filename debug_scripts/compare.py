@@ -49,7 +49,7 @@ from utils import log_info, log_warn, log_error
 from debug_scripts import markdown as md
 from debug_scripts import frames as frames_mod
 from debug_scripts.benchmark import parse_report, _load
-from debug_scripts.paths import Paths
+from utils.paths import Paths
 from debug_scripts.stats import mcnemar_exact, wilson_str
 
 # `ENV   LowLevelAction({'low_level_action': <LowLevelActions.PRESS_BUTTON_A: 5>})`
@@ -113,6 +113,13 @@ def episode_actions(report: str) -> list[dict]:
     :return: list of ``{"call", "kind", "action", "kwargs", "label", "text"}`` where *kind*
         is ``"env"`` (advanced the emulator), ``"invalid"`` (unparseable model output) or
         ``"other"`` (tool calls and anything unrecognised).
+
+    .. todo:: Assumes one outcome per call (``call["outcome"]``, singular). A VLM call can
+        now own several steps — see ``VLMCallRecord.steps`` and
+        ``SequencePlannerExecutor`` — so an episode from the "sequence" executor silently
+        loses every action but one. Depends on the matching fix in
+        ``debug_scripts.benchmark.parse_report``, which drops the extra outcome lines
+        before they ever reach here.
     """
     records = []
     for call in parse_report(report):

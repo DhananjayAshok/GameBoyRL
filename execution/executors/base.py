@@ -33,12 +33,15 @@ triggered a second time — the executor is sealed after construction.
 
 .. note:: **Variants that bypass this loop**
 
-    Most executors customise behaviour by overriding the hooks below.  Two do not:
-    :class:`~execution.executors.planning.SequencePlannerExecutor` and
-    :class:`~execution.executors.deliberative.ActionValueEstimatorExecutor`
-    override :meth:`_execute` outright.  They sit in different modules because they
-    override it for different reasons, which means "which executors bypass the base
-    loop" can no longer be answered by reading a single file — hence this note.
+    Most executors customise behaviour by overriding the hooks below.  Exactly one does
+    not: :class:`~execution.executors.planning.SequencePlannerExecutor` overrides
+    :meth:`_execute` outright, because it runs a whole planned sequence per VLM call
+    rather than one action.  Every other executor — including
+    :class:`~execution.executors.deliberative.ActionValueEstimatorExecutor`, which
+    customises :meth:`_query_vlm` and :meth:`_pick_action` — uses the base loop.
+
+    Keep this note accurate: it exists so that "which executors bypass the base loop"
+    is answerable from this file alone.
 """
 
 from __future__ import annotations
@@ -51,7 +54,7 @@ from gameboy_worlds.interface import Environment, HighLevelAction
 from execution.executor_action import ExecutorAction
 from execution.report import (EnvironmentStepRecord, ExecutorReport, InvalidStepRecord,
                               ToolCallRecord, VLMCallRecord, parse_completion)
-from utils import load_parameters, log_info, ExecutorVLM, parse_key_value
+from utils import load_parameters, log_error, log_info, ExecutorVLM, parse_key_value
 
 MAX_CONSECUTIVE_INVALID = 10
 DEBUG_ON_INVALID = False
@@ -187,6 +190,16 @@ Reasoning: <why, referring to what is visible in image 2>
         hint: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
+        self._parameters = load_parameters(parameters)
+        # A blank task is never a real request, and it is silently destructive downstream:
+        # ExecutorReport._save_images derives its output directory by slugifying the task,
+        # and an empty slug collapses that path onto the executor directory, which it then
+        # rmtree's. Refuse here rather than at the end of an episode that cost real tokens.
+        if not task or not task.strip():
+            log_error(
+                f"Executor task must be a non-empty string, got {task!r}.",
+                parameters=self._parameters,
+            )
         self._env = env
         self._task = task
         self._hint = hint
@@ -194,7 +207,6 @@ Reasoning: <why, referring to what is visible in image 2>
         self._max_steps = max_steps
         self._max_tool_calls = max_tool_calls
         self._allow_self_termination = allow_self_termination
-        self._parameters = load_parameters(parameters)
         if vlm_model is not None:
             self._parameters["executor_vlm_model"] = vlm_model
         if vlm_kind is not None:
@@ -207,6 +219,9 @@ Reasoning: <why, referring to what is visible in image 2>
         # for the completion check. Set by _pick_action; None until the first parse, and on
         # executors whose action call produces no reasoning at all.
         self._last_reasoning: Optional[str] = None
+        # The VLM call currently being acted on. Set by _vlm_call, read by _record_step so
+        # every step is filed under the call that caused it. None before the first call.
+        self._current_call: Optional[VLMCallRecord] = None
 
         self.report = self._make_report(task, kwargs, max_steps, max_tool_calls)
 
@@ -270,7 +285,7 @@ Reasoning: <why, referring to what is visible in image 2>
           or :meth:`~gameboy_worlds.interface.Environment.step_str` — never
           access the emulator directly.
         - Build an :class:`~execution.report.EnvironmentStepRecord` and append
-          it to ``self.report.steps``.
+          it via :meth:`_record_step`, which files it under the current VLM call.
         - Return the record.
 
         :return: The record of the environment step that was taken.
@@ -282,18 +297,37 @@ Reasoning: <why, referring to what is visible in image 2>
     # Concrete helpers — uniform across all executors
     # ------------------------------------------------------------------
 
-    def _record_invalid(self, response: str, reason: str = "parse failure") -> None:
-        """Append an invalid step and trigger a breakpoint if DEBUG_ON_INVALID is set.
+    def _record_step(self, step) -> None:
+        """File a step under the VLM call that caused it.
 
-        Records both in ``invalid_steps`` (for counts/back-compat) and as an
-        ordered :class:`InvalidStepRecord` in ``steps``, so ``steps`` stays a
-        complete 1:1 log of every action call's outcome and the report renderer
-        can pair calls to steps without guessing.
+        The single write path for every step an executor takes. Ownership is recorded
+        here, at the moment the step happens, rather than reconstructed later by pairing
+        two lists — which is what used to go wrong whenever a call produced anything
+        other than exactly one step.
+
+        :param step: An :class:`~execution.report.EnvironmentStepRecord`,
+            :class:`~execution.report.ToolCallRecord` or
+            :class:`~execution.report.InvalidStepRecord`.
+        """
+        if self._current_call is None:
+            log_error(
+                f"{type(step).__name__} recorded before any VLM call was made, so it has "
+                "no owning call. Every step must follow the _vlm_call that decided it.",
+                parameters=self._parameters,
+            )
+        self._current_call.steps.append(step)
+
+    def _record_invalid(self, response: str, reason: str = "parse failure") -> None:
+        """Record an invalid step and trigger a breakpoint if DEBUG_ON_INVALID is set.
+
+        Files an :class:`InvalidStepRecord` under the current call, so a call whose reply
+        was unusable is recorded as having produced *that* rather than nothing at all —
+        which is what keeps a failed parse visible in the report and countable in
+        :attr:`~execution.report.ExecutorReport.invalid_steps`.
 
         :param reason: ``"parse failure"`` or ``"unrecognised action"``.
         """
-        self.report.invalid_steps.append(response)
-        self.report.steps.append(InvalidStepRecord(response=response, reason=reason))
+        self._record_step(InvalidStepRecord(response=response, reason=reason))
         log_info(f"Invalid response recorded: \n{response}", parameters=self._parameters)
         if DEBUG_ON_INVALID:
             breakpoint()
@@ -309,8 +343,8 @@ Reasoning: <why, referring to what is visible in image 2>
 
         The action receives the current environment state via
         :meth:`_get_state` but does **not** advance the emulator.  The
-        resulting :class:`~execution.report.ToolCallRecord` is appended to
-        ``self.report.steps`` before being returned.
+        resulting :class:`~execution.report.ToolCallRecord` is filed under the current
+        VLM call (see :meth:`_record_step`) before being returned.
 
         :param executor_action_class: The
             :class:`~execution.executor_action.ExecutorAction` subclass to
@@ -330,7 +364,7 @@ Reasoning: <why, referring to what is visible in image 2>
             result=result,
             success_code=success_code,
         )
-        self.report.steps.append(record)
+        self._record_step(record)
         self._n_tool_calls += 1
         return record
 
@@ -356,26 +390,37 @@ Reasoning: <why, referring to what is visible in image 2>
 
     def _vlm_call(self, tag: str, **kwargs: Any):
         """
-        Invoke the VLM and log every response to :attr:`report.vlm_call_log`.
+        Invoke the VLM, log the call, and make it the owner of any steps that follow.
 
         This is the **only** way executors should call the VLM — never call
         ``self._vlm.infer`` directly.  All keyword arguments are forwarded
         verbatim to :meth:`~utils.vlm.ExecutorVLM.infer`.
 
-        When ``n_outputs > 1`` the VLM returns a :class:`list` of strings;
-        each element is logged as a separate :class:`~execution.report.VLMCallRecord`
-        with the same *tag*.  The raw return value (``str`` or ``List[str]``)
-        is returned unchanged so callers can use it as before.
+        Exactly **one** :class:`~execution.report.VLMCallRecord` is appended per call,
+        and it becomes :attr:`_current_call`.  Every step recorded afterwards —
+        :meth:`_take_action`, :meth:`_use_tool`, :meth:`_record_invalid` — is filed
+        under it, so a call owns precisely what it caused.  A later ``_vlm_call``
+        takes ownership from here on.
+
+        ``n_outputs > 1`` is **not supported**: several sampled responses to one call
+        have no single owner for the resulting step, and logging one record per sample
+        is what made an executor's calls and steps drift apart.  Ask once, or make each
+        sample its own ``_vlm_call``.
 
         :param tag: Short label for the call's role, e.g. ``"action"``,
             ``"reflection"``, ``"map_update"``, ``"belief_update"``,
-            ``"decompose"``, ``"score"``, ``"rethink"``, ``"propose"``,
-            ``"challenge"``, ``"decide"``, ``"done_check"``.
+            ``"decompose"``, ``"score"``, ``"propose"``, ``"challenge"``,
+            ``"decide"``, ``"done_check"``.
+
+            .. important:: If this call is the one that decides the action, its tag must
+                be in :data:`~execution.report.ACTION_TAGS`. Ownership of the step that
+                follows goes to the **last** call made, and the consumers that
+                reconstruct an action sequence filter on that set — so an action decided
+                in an auxiliary call is silently dropped from the dataset.
         :type tag: str
         :param kwargs: Keyword arguments forwarded to
             :meth:`~utils.vlm.ExecutorVLM.infer`.
-        :return: Raw VLM output — a single string or a list of strings when
-            ``n_outputs > 1``.
+        :return: The raw VLM output string.
         """
         kwargs.setdefault("max_new_tokens", self._max_new_tokens)
         result = self._vlm.infer(**kwargs)
@@ -383,10 +428,16 @@ Reasoning: <why, referring to what is visible in image 2>
         images = kwargs["images"]
         assert isinstance(texts, str)
         if isinstance(result, list):
-            for i, r in enumerate(result):
-                self.report.vlm_call_log.append(VLMCallRecord(tag=tag, prompt=texts, images=images, response=r))
-        else:
-            self.report.vlm_call_log.append(VLMCallRecord(tag=tag, prompt=texts, images=images, response=result))
+            log_error(
+                f"_vlm_call({tag!r}) received {len(result)} responses. Multi-sample calls "
+                "are unsupported: the steps that follow would have no single owning call, "
+                "which is how VLM calls and steps came to be mis-paired. Drop n_outputs, "
+                "or issue one _vlm_call per sample.",
+                parameters=self._parameters,
+            )
+        record = VLMCallRecord(tag=tag, prompt=texts, images=images, response=result)
+        self.report.vlm_call_log.append(record)
+        self._current_call = record
         return result
 
     def _get_action_strings(self, return_all: bool = False) -> Dict[Type[HighLevelAction], str]:

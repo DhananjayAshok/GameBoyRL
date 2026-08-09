@@ -5,14 +5,13 @@ Turning past attempts into a hint for the next one.
 task at hand and writes a hint from what survives.  :class:`InfoPlanSupervisor`
 subclasses it, so anything added here is inherited by the plan arm.
 
-:class:`_RecordingVLM` is a thin wrapper that captures every call made through it so
+:class:`RecordingVLM` is a thin wrapper that captures every call made through it so
 the calls can be attributed to the supervisor rather than the executor.
 """
 
 from __future__ import annotations
 
 import os
-import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, List, Optional, Type
 
@@ -21,7 +20,6 @@ from gameboy_worlds.interface import Environment
 from execution.executors import Executor
 from execution.report import ExecutorReport
 from execution.supervisors.base import Supervisor
-from execution.supervisors.checker import summarise_trajectory_segments
 from execution.supervisors.prompts import RELEVANCE_PROMPT, WRITE_HINT_PROMPT
 from utils import log_warn, parse_key_value, parse_yes_no, VLM
 
@@ -130,9 +128,14 @@ class InfoHintSupervisor(Supervisor):
     def _entry_frame(entry):
         from PIL import Image
 
-        if not entry.frame or not os.path.exists(entry.frame):
+        # Stored frame paths are relative to their document's frames_root, so they are not
+        # openable on their own. Whoever produced the entry — load_document, or
+        # _init_state_candidates for rows read straight off insights.jsonl — has already
+        # resolved it.
+        path = entry.resolved_frame
+        if not path or not os.path.exists(path):
             return None
-        return Image.open(entry.frame).convert("RGB")
+        return Image.open(path).convert("RGB")
 
     def _judge_relevance(self, entry, kind: str, screen) -> tuple:
         """One yes/no call for a single entry. Returns (is_relevant, reason)."""
@@ -194,7 +197,7 @@ class InfoHintSupervisor(Supervisor):
 
     def _init_state_candidates(self):
         """Stage-A rows for this episode's init state, as entries for the same relevance pass."""
-        from execution.info_doc import TASK_SECTION, parse_document
+        from execution.info_doc import TASK_SECTION, InfoDocument, resolve_frame
 
         available = sorted({row.get("init_state") for row in self._insight_rows
                             if row.get("init_state")})
@@ -211,13 +214,18 @@ class InfoHintSupervisor(Supervisor):
 
         candidates = []
         for row in matching:
-            document = parse_document(row["document"])
+            document = InfoDocument.from_dict(row["document"])
             for entry in document.entries(TASK_SECTION):
-                # Prefer the provenance label the loader attached; group_idx is only a
-                # fallback, and is not comparable across verticals (each numbers its groups
-                # independently, so the same key means different things in each).
-                label = row.get("source")
+                # These rows come straight off insights.jsonl rather than through
+                # load_document, so the two load-time fields have to be filled in here.
+                #
+                # Prefer the document's own recorded provenance; the row's "source" (set by
+                # the loader that read the file) is the fallback, and group_idx alone is the
+                # last resort — it is not comparable across verticals, since each numbers
+                # its groups independently.
+                label = document.provenance.label or row.get("source")
                 entry.source = f"{label}/{row.get('group_idx')}" if label else row.get("group_idx")
+                entry.resolved_frame = resolve_frame(document, entry.frame, self._parameters)
                 candidates.append((entry, "task"))
         return candidates
 
@@ -273,7 +281,7 @@ class InfoHintSupervisor(Supervisor):
         return report
 
 
-class _RecordingVLM:
+class RecordingVLM:
     """Wraps a VLM so every call the supervisor makes is kept, tagged with its stage.
 
     The supervisor's own calls — filter, distil, plan, judge, hint, revise — go straight to

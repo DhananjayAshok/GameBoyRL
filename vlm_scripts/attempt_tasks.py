@@ -17,7 +17,6 @@ For each line (line_number = 0-indexed position in the JSONL):
            task          = task_str,
            executor_class = <click option>,
            env           = env for this init_state,
-           score_mode    = False,   # binary success/fail only
            ...
        ).evaluate()
        Collect result dict (success, description, reasoning, vlm_call_log, steps).
@@ -77,12 +76,11 @@ from gameboy_worlds import get_environment
 from execution.registry import AVAILABLE_EXECUTORS
 from execution.report import EnvironmentStepRecord
 from execution.supervisors import SimpleCheckerSupervisor, derive_critique_hint
-from utils import log_info, log_error, VLM, HuggingFaceModel
+from utils import log_info, log_warn, log_error, VLM, HuggingFaceModel
 
 
 # The critique prompts and the slice-then-consolidate implementation live in
-# execution/supervisors/checker.py, shared with vlm_scripts/practice_tasks.py so both derive hints
-# from identical prompts.
+# execution/supervisors/checker.py so every caller derives hints from identical prompts.
 
 
 def _reconstruct_trajectory(env_steps: list, init_state: str) -> tuple:
@@ -152,7 +150,6 @@ def _attempt_task(
                 max_tool_calls=max_tool_calls,
                 evaluation_lookback=lookback,
                 allow_self_termination=True,
-                score_mode=False,
                 checker_vlm_model=model_name,
                 checker_vlm_kind=vlm_kind,
                 checker_max_new_tokens=checker_max_new_tokens,
@@ -297,8 +294,31 @@ def attempt_tasks_cmd(
     if os.path.exists(checkpoint_json) and not overwrite:
         with open(checkpoint_json, "r") as f:
             results = json.load(f)
-        with open(checkpoint_pkl, "rb") as f:
-            trajectories = pickle.load(f)
+        # An absent pkl means every result is unpaired, which the reconciliation below
+        # turns into a full recompute. Reading it unconditionally would instead be a
+        # FileNotFoundError on a resume where the small json write landed and the large
+        # pkl write did not (SIGTERM between the two, or a /project2 quota failure).
+        trajectories = {}
+        if os.path.exists(checkpoint_pkl):
+            with open(checkpoint_pkl, "rb") as f:
+                trajectories = pickle.load(f)
+        # A group is "done" only when BOTH its result and its trajectory are on disk.
+        # The two checkpoints are separate non-atomic writes (json first), so a run
+        # killed between them resumes with a result whose trajectory never landed. The
+        # skip check below keys off `results` alone, so without this that group would be
+        # skipped forever and its frames lost silently — and since
+        # success_trajectories.{json,pkl} are derived from these two different dicts, the
+        # json would claim a success the pkl has no trajectory for. Dropping the unpaired
+        # results makes the pair the unit of truth and the mismatch self-healing.
+        unpaired = [group_idx for group_idx in results if group_idx not in trajectories]
+        for group_idx in unpaired:
+            del results[group_idx]
+        if unpaired:
+            log_warn(
+                f"checkpoint mismatch: {len(unpaired)} group_idx(s) had a saved result but "
+                f"no saved trajectory ({unpaired[:5]}{' ...' if len(unpaired) > 5 else ''}) "
+                "— rerunning them."
+            )
         log_info(
             f"Resuming from checkpoint — {len(results)} group_idxs already done.",
             parameters,
@@ -397,15 +417,14 @@ def attempt_tasks_cmd(
     success_trajectories = {gid: traj for gid, traj in trajectories.items() if results.get(gid, {}).get("success")}
     success_json = {gid: res["task_string"] for gid, res in results.items() if res.get("success")}
 
-    # Fail here rather than let an empty success set propagate. guidance_and_practice keys
-    # off success_trajectories, and an empty one surfaces three stages later as an opaque
-    # pandas EmptyDataError on a 0-byte practice results.csv. The success files are NOT
-    # written, so infer_guidance fails loudly on a missing input rather than silently
-    # producing empty guidance; the checkpoints are left for inspection.
+    # Fail here rather than let an empty success set propagate. build_info keys off this
+    # stem, and an empty one yields an empty info document with no error. The success files
+    # are NOT written, so build_info fails loudly on a missing input rather than silently
+    # distilling nothing; the checkpoints are left for inspection.
     if not success_json:
         log_error(
             f"attempt_tasks: 0 of {len(results)} attempted tasks succeeded, so there are no "
-            f"trajectories to derive guidance from. Attempt records were still written to "
+            f"trajectories to distil an info document from. Attempt records were still written to "
             f"{csv_path} — inspect them before rerunning. Rerunning this stage needs "
             "--overwrite, since that CSV is its skip-if-exists marker.",
             parameters,

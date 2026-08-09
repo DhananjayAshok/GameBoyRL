@@ -10,7 +10,7 @@ if [ -z "$model" ]; then
     exit 1
 fi
 
-executors=("simple" "history" "sequence" "subgoal" "screendiff" "selfconsistency" "reflective" "spatialmap" "confidence" "value" "belief" "adversarial" )
+executors=("simple" "history" "sequence" "subgoal" "screendiff" "reflective" "spatialmap" "value" "belief" "adversarial" )
 
 for game in "${games[@]}"; do
     echo "Running benchmark for game: $game"

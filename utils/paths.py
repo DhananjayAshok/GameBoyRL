@@ -1,10 +1,22 @@
 """
-Single source of truth for every path the debug commands read or write.
+The pipeline's path scheme: one implementation, used by producers and consumers alike.
 
-All derivations mirror the producing scripts exactly:
-  - ``model_save_name`` follows propose_tasks_zeroshot.py (``model_name.split("/")[-1]``)
-  - attempts/practice suffixes follow propose_and_attempt_all.sh and practice_tasks.py
-  - the fine-tuned served-model name follows serve_and_benchmark.sh
+Every artifact path is a pure function of a small identity — ``(storage_dir, game,
+model_name, run_name, executor)`` plus a source vertical. This module owns that function,
+in both directions: :class:`Paths` builds a path from an identity, and
+:func:`source_label` recovers the vertical from a path that was built.
+
+It used to live in ``debug_scripts/``, described as mirroring the producers — its own
+docstring said *"All derivations mirror the producing scripts exactly"*. Mirroring by hand
+is the failure mode: the producers built their paths with f-strings, the debug commands
+rebuilt them here, and Bash built them a third way. A change to one silently
+desynchronised the rest, and the symptom was a debug command reporting a missing artifact
+for a run that finished fine. The producers now call this module, so there is nothing left
+to mirror.
+
+``tests/test_paths.py`` pins the scheme: a frozen fixture of every accessor over the full
+input grid, a differential against the Bash helpers in ``scripts/core/utils.sh``, and a
+check against artifacts actually on disk. Run it after touching anything here.
 
 Every accessor that reads a pipeline artifact goes through :meth:`Paths.require`, which
 raises (via ``log_error``) naming both the missing path and the script that produces it.
@@ -13,7 +25,10 @@ Nothing here reads ``logs/``, wandb, or slurm — only artifacts the pipeline gu
 
 import os
 
-from utils import load_parameters, log_error
+# Submodule imports rather than ``from utils import ...``: this module is imported by
+# producers that have no reason to pull in the VLM stack that utils/__init__ carries.
+from utils.log_handling import log_error
+from utils.parameter_handling import load_parameters
 
 
 # Which script to point the user at when an artifact is missing.
@@ -22,25 +37,43 @@ PRODUCERS = {
     "curiosity": "scripts/vlm/infer_tasks.sh (via scripts/pipeline/curiosity_all_tasks.sh)",
     "tasks": "scripts/vlm/propose_zeroshot.sh",
     "attempts": "scripts/vlm/attempt_tasks.sh",
-    "guidance": "scripts/vlm/infer_guidance.sh",
-    "practice": "scripts/vlm/practice_tasks.sh",
-    "clean": "scripts/vlm/clean_practice.sh",
-    "dataset": "scripts/vlm/create_dataset.sh",
     "benchmark": "scripts/benchmark.sh (via scripts/pipeline/serve_and_benchmark.sh)",
     "info": "scripts/vlm/build_info.sh",
     "insights": "scripts/vlm/build_info.sh (stage A)",
 }
 
 GROUPED_FILENAME = "grouped_global_high_reward_trajectories.pkl"
-INFO_DOC_FILENAME = "info.md"
+INFO_DOC_FILENAME = "info.json"
 INSIGHTS_FILENAME = "insights.jsonl"
 
-EXTRA_SUFFIXES = {
-    "none": "",
-    "zeroshot": "_prior_zeroshot",
-    "curiosity": "_prior_curiosity",
-    "zeroshot_with_curiosity": "_prior_zeroshot_with_curiosity",
-}
+
+def source_label(artifact_dir: str) -> str:
+    """
+    Short provenance label for an artifact dir, recovered from its path.
+
+    The **inverse** of the scheme :class:`Paths` builds, which is why it lives beside it.
+    The two verticals lay their directories out differently::
+
+        curiosity  .../curiosity/<run_name>/info_<model>_<executor>    -> "curiosity"
+        zeroshot   .../zeroshot/zeroshot_tasks_<executor>_attempts/... -> "zeroshot"
+
+    Prefer a *recorded* label where one exists — an info document carries its own
+    provenance (see :class:`~execution.info_doc.Provenance`) and should be read, not
+    re-derived. This function is the fallback for artifacts that record nothing.
+
+    Falls back to the parent directory name for anything unrecognised, so an unusual
+    layout still produces a distinguishable label rather than crashing.
+    """
+    parts = os.path.normpath(artifact_dir).split(os.sep)
+    if len(parts) >= 3 and parts[-3] == 'curiosity':
+        return 'curiosity'
+    stem = parts[-2] if len(parts) >= 2 else os.path.basename(artifact_dir)
+    if stem.endswith('_attempts'):
+        stem = stem[: -len('_attempts')]
+        stem = stem.rsplit('_', 1)[0]  # drop the trailing _<executor>
+    if stem.startswith('zeroshot_tasks'):
+        return 'zeroshot'
+    return stem or 'unknown'
 
 
 class Paths:
@@ -132,7 +165,7 @@ class Paths:
         return states
 
     # ------------------------------------------------------------------
-    # Task proposal / attempt / practice
+    # Task proposal / attempt
     # ------------------------------------------------------------------
 
     def proposed_tasks_dir(self) -> str:
@@ -145,49 +178,31 @@ class Paths:
     def zeroshot_dir(self) -> str:
         return os.path.join(self.proposed_tasks_dir(), "zeroshot")
 
-    def tasks_file(self, extra: str = "none") -> str:
-        if extra not in EXTRA_SUFFIXES:
-            log_error(f"Unknown --extra '{extra}'. Choose from {sorted(EXTRA_SUFFIXES)}.", self.parameters)
-        return os.path.join(self.zeroshot_dir(), f"zeroshot_tasks{EXTRA_SUFFIXES[extra]}.jsonl")
+    def tasks_file(self) -> str:
+        return os.path.join(self.zeroshot_dir(), "zeroshot_tasks.jsonl")
 
-    def available_extras(self) -> list[str]:
-        """Every --extra variant whose tasks jsonl is actually on disk."""
-        return [e for e in EXTRA_SUFFIXES if os.path.exists(self.tasks_file(e))]
-
-    def attempts_dir(self, extra: str = "none") -> str:
-        stem = self.tasks_file(extra)[: -len(".jsonl")]
+    def attempts_dir(self) -> str:
+        stem = self.tasks_file()[: -len(".jsonl")]
         return f"{stem}_{self.executor}_attempts"
 
-    def all_trajectories_csv(self, extra: str = "none") -> str:
-        return os.path.join(self.attempts_dir(extra), "all_trajectories.csv")
+    def all_trajectories_csv(self) -> str:
+        return os.path.join(self.attempts_dir(), "all_trajectories.csv")
 
-    def success_trajectories_json(self, extra: str = "none") -> str:
-        return os.path.join(self.attempts_dir(extra), "success_trajectories.json")
+    def success_trajectories_json(self) -> str:
+        return os.path.join(self.attempts_dir(), "success_trajectories.json")
 
-    def success_trajectories_pkl(self, extra: str = "none") -> str:
-        return os.path.join(self.attempts_dir(extra), "success_trajectories.pkl")
-
-    def guidance_json(self, extra: str = "none") -> str:
-        return os.path.join(self.attempts_dir(extra), "success_trajectories_guidance.json")
-
-    def practice_dir(self, extra: str = "none") -> str:
-        return os.path.join(self.attempts_dir(extra), f"practice_{self.executor}")
-
-    def curiosity_practice_dir(self) -> str:
-        """The curiosity vertical's practice dir — dirname(trajectory_annotation)/practice_<executor>."""
-        return os.path.join(os.path.dirname(self.curiosity_annotation()),
-                            f"practice_{self.executor}")
+    def success_trajectories_pkl(self) -> str:
+        return os.path.join(self.attempts_dir(), "success_trajectories.pkl")
 
     # ------------------------------------------------------------------
     # Info documents (context-engineering vertical)
     # ------------------------------------------------------------------
     # build_info.py writes next to its own input stem, so these two accessors just
-    # re-derive that rule per vertical — exactly like practice_dir /
-    # curiosity_practice_dir above.
+    # re-derive that rule per vertical.
 
-    def info_dir(self, extra: str = "none") -> str:
+    def info_dir(self) -> str:
         """The zeroshot/attempt vertical's info dir — attempts_dir/info_<model>_<executor>."""
-        return os.path.join(self.attempts_dir(extra),
+        return os.path.join(self.attempts_dir(),
                             f"info_{self.model_save_name}_{self.executor}")
 
     def curiosity_info_dir(self) -> str:
@@ -195,72 +210,20 @@ class Paths:
         return os.path.join(os.path.dirname(self.curiosity_annotation()),
                             f"info_{self.model_save_name}_{self.executor}")
 
-    def source_info_dir(self, source: str, extra: str = "none") -> str:
+    def source_info_dir(self, source: str) -> str:
         """Info dir for a named source. ``source`` is 'attempt' or 'curiosity'."""
         if source == "curiosity":
             return self.curiosity_info_dir()
         if source == "attempt":
-            return self.info_dir(extra)
+            return self.info_dir()
         log_error(f"Unknown --source '{source}'. Choose from ['attempt', 'curiosity'].",
                   self.parameters)
 
-    def info_doc(self, source: str = "attempt", extra: str = "none") -> str:
-        return os.path.join(self.source_info_dir(source, extra), INFO_DOC_FILENAME)
+    def info_doc(self, source: str = "attempt") -> str:
+        return os.path.join(self.source_info_dir(source), INFO_DOC_FILENAME)
 
-    def insights_jsonl(self, source: str = "attempt", extra: str = "none") -> str:
-        return os.path.join(self.source_info_dir(source, extra), INSIGHTS_FILENAME)
-
-    def merged_dataset_dir(self) -> str:
-        """Where merge_practices writes; mirrors merged_dataset_dir() in scripts/core/utils.sh."""
-        return os.path.join(self.storage_dir, "datasets", self.game,
-                            self.model_save_name, self.run_name, "merged")
-
-    def leg_dir(self, leg: str, extra: str = "none") -> str:
-        """
-        Resolve a data-collection leg to its practice dir.
-
-        A *leg* is a vertical that produces practice output: ``curiosity`` or ``zeroshot``.
-        The merged dataset is deliberately not a leg — it is an *output* of merging the two,
-        holds only train/validation CSVs (no results.csv, clean_decisions.csv or episode
-        pkls), and carries a ``source`` column that reconstructs the per-leg split. Inspect
-        the legs; the merge is their concatenation.
-
-        This is the selector the debug commands expose, because ``--extra`` can only name
-        variants *within* the zeroshot vertical — it cannot address the curiosity vertical.
-        """
-        if leg == "curiosity":
-            return self.curiosity_practice_dir()
-        if leg == "zeroshot":
-            return self.practice_dir(extra)
-        log_error(f"Unknown leg '{leg}'. Choose from: curiosity, zeroshot.", self.parameters)
-
-    # The files inside a practice dir. Keyed on the *directory* rather than on --extra, so
-    # they work for both verticals: the curiosity leg's practice dir is not addressable by
-    # --extra at all. Use leg_dir() to obtain the directory.
-
-    @staticmethod
-    def practice_results_csv(practice_dir: str) -> str:
-        return os.path.join(practice_dir, "results.csv")
-
-    @staticmethod
-    def clean_decisions_csv(practice_dir: str) -> str:
-        return os.path.join(practice_dir, "clean_decisions.csv")
-
-    @staticmethod
-    def paraphrases_json(practice_dir: str) -> str:
-        return os.path.join(practice_dir, "paraphrases.json")
-
-    @staticmethod
-    def practice_episode_pkl(practice_dir: str, group_idx, attempt) -> str:
-        return os.path.join(practice_dir, f"{group_idx}_{attempt}.pkl")
-
-    @staticmethod
-    def train_csv(practice_dir: str) -> str:
-        return os.path.join(practice_dir, "train_dataset.csv")
-
-    @staticmethod
-    def validation_csv(practice_dir: str) -> str:
-        return os.path.join(practice_dir, "validation_dataset.csv")
+    def insights_jsonl(self, source: str = "attempt") -> str:
+        return os.path.join(self.source_info_dir(source), INSIGHTS_FILENAME)
 
     # ------------------------------------------------------------------
     # Benchmark

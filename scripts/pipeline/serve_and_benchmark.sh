@@ -3,7 +3,7 @@
 # its series (the train game + the shifted eval game(s)) for a single executor.
 #
 # The checkpoint path is derived the same way train_vlm.sh writes it:
-#   $storage_dir/models/${game}-${run_name}/${model_name#*/}/final_checkpoint
+#   $storage_dir/models/${game}-${run_name}/${model_name##*/}/final_checkpoint
 # The server is started via scripts/core/serve_vllm.sh on the largest tensor-parallel
 # size that fits the available GPUs (max of {8,4,2}), and always stopped on exit.
 #
@@ -71,7 +71,10 @@ game="${ARGS["game"]}"
 model_name="${ARGS["model_name"]}"
 run_name="${ARGS["run_name"]}"
 executor="${ARGS["executor"]}"
-model_save_name="${model_name#*/}"   # strip any org/ prefix, matching train_vlm.sh
+# '##*/' matches train_vlm.sh and Python's model_name.split("/")[-1]. This value feeds
+# served_model_name below, which debug_scripts.paths.finetuned_model_name rebuilds — the two
+# have to derive it the same way or the debug command looks for a CSV nothing served.
+model_save_name="${model_name##*/}"
 
 # Single source of truth for the name vLLM registers the model under AND the name the
 # benchmark asks the vLLM API for. These MUST be identical or the benchmark 404s on the

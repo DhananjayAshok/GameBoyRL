@@ -4,13 +4,13 @@
 # only interpretable against.
 #
 # Paths are re-derived from the same utils.sh helpers build_info_all.sh used, never passed
-# between the two scripts (the merged_dataset_dir pattern).
+# between the two scripts (the info_source_stem pattern).
 #
 # --mode      which source verticals to draw knowledge from (curiosity_only/zeroshot_only/both).
 #             Several sources are unioned into one comma-separated list, and each entry keeps
 #             a provenance label so the hint writer knows verified solutions from exploration.
 # --hint_mode which test-time selection path to run:
-#               retrieval   ask per entry whether it fits this task and screen (needs info.md)
+#               retrieval   ask per entry whether it fits this task and screen (needs info.json)
 #               init_state  key off the episode's init state (needs only insights.jsonl)
 #               both        run each in turn — the pair is what decomposes "do hints help?"
 #                           into "are the insights good?" and "is selection working?"
@@ -107,7 +107,7 @@ for source in $sources; do
     info_dir=$(info_dir_for_stem "$stem" "$model_save_name" "$executor")
 
     insights="$info_dir/insights.jsonl"
-    doc="$info_dir/info.md"
+    doc="$info_dir/info.json"
 
     if [[ ! -f "$insights" ]]; then
         echo "Error: $source insights not found at $insights"
@@ -119,7 +119,7 @@ for source in $sources; do
     if [[ -f "$doc" ]]; then
         info_docs+="${info_docs:+,}$doc"
     elif [[ "$hint_modes" == *retrieval* ]]; then
-        echo "Error: $source info.md not found at $doc, but --hint_mode includes retrieval."
+        echo "Error: $source info.json not found at $doc, but --hint_mode includes retrieval."
         echo "  Produced by: scripts/pipeline/build_info_all.sh --mode $mode --stage all"
         echo "  (--stage a builds only insights.jsonl, which is enough for init_state.)"
         exit 1

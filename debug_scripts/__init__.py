@@ -22,8 +22,6 @@ from debug_scripts.curiosity import debug_curiosity
 from debug_scripts.infer import debug_infer
 from debug_scripts.zeroshot import debug_zeroshot
 from debug_scripts.attempt import debug_attempt
-from debug_scripts.practice import debug_practice
-from debug_scripts.dataset import debug_dataset
 from debug_scripts.benchmark import debug_benchmark
 from debug_scripts.compare import debug_compare
 from debug_scripts.info import debug_info, debug_info_hint
@@ -34,8 +32,6 @@ __all__ = [
     "debug_infer",
     "debug_zeroshot",
     "debug_attempt",
-    "debug_practice",
-    "debug_dataset",
     "debug_benchmark",
     "debug_compare",
     "debug_info",

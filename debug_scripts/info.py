@@ -26,8 +26,8 @@ of it. These two commands are the instrument.
 Input (all produced by scripts/vlm/build_info.sh)
 ------------------------------------------------
 <info_dir>/insights.jsonl
-<info_dir>/merge/round_<r>/<i>.{md,matches.json,meta.json}
-<info_dir>/info.md
+<info_dir>/merge/round_<r>/<i>.{json,matches.json,meta.json}
+<info_dir>/info.json
 
 Output
 ------
@@ -47,8 +47,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from debug_scripts import markdown as md
-from debug_scripts.paths import Paths
-from execution.info_doc import TASK_SECTION, parse_document
+from utils.paths import Paths
+from execution.info_doc import TASK_SECTION, InfoDocument
+from utils.paths import INFO_DOC_FILENAME
 from utils import log_info, log_warn
 
 # Phrases that signal an insight has drifted into unfalsifiable advice, and the concrete
@@ -93,9 +94,13 @@ def _round_dirs(info_dir: str) -> list[str]:
 
 def _round_documents(round_dir: str) -> list:
     docs = []
-    for md_path in sorted(glob.glob(os.path.join(round_dir, "*.md"))):
-        with open(md_path, "r") as handle:
-            docs.append(parse_document(handle.read()))
+    # Node documents only: the sibling .matches.json / .meta.json are the merge's audit
+    # trail, not documents, and would fail InfoDocument.from_dict.
+    for doc_path in sorted(glob.glob(os.path.join(round_dir, "[0-9]*.json"))):
+        if doc_path.endswith((".matches.json", ".meta.json")):
+            continue
+        with open(doc_path, "r") as handle:
+            docs.append(InfoDocument.from_dict(json.load(handle)))
     return docs
 
 
@@ -170,12 +175,10 @@ def _document_stats(docs: list) -> dict:
 @click.option("--source", default="attempt", show_default=True,
               type=click.Choice(["attempt", "curiosity"]),
               help="Which vertical's info dir to read; selects the paths.py accessor.")
-@click.option("--extra", default="none", show_default=True,
-              help="Proposal variant, for the attempt vertical's paths.")
 @click.option("--max_entries", default=40, show_default=True,
               help="Cap on entries rendered in full (0 = no cap).")
 @click.pass_obj
-def debug_info(obj, model_name, source, extra, max_entries):
+def debug_info(obj, model_name, source, max_entries):
     """Info-document build diagnostics: funnel, coverage, merge curve, drift, match audit."""
     paths = Paths(
         parameters=obj["parameters"], game=obj["game"], run_name=obj["run_name"],
@@ -185,19 +188,19 @@ def debug_info(obj, model_name, source, extra, max_entries):
     report_dir = paths.debug_dir("info")
     images_dir = paths.debug_dir("info", "images")
 
-    info_dir = paths.source_info_dir(source, extra)
+    info_dir = paths.source_info_dir(source)
     insights_path = paths.require(os.path.join(info_dir, "insights.jsonl"), "insights")
     rows = _load_insights(insights_path)
     log_info(f"[info] {len(rows)} stage-A leaves from {insights_path}")
 
-    leaf_docs = [parse_document(row["document"]) for row in rows]
+    leaf_docs = [InfoDocument.from_dict(row["document"]) for row in rows]
     leaf_stats = _document_stats(leaf_docs)
 
     # --- Funnel -----------------------------------------------------------
     # The number of pairs that went in is the annotation json's length; insights.jsonl only
     # holds the survivors, so the difference is the NONE rate.
     n_pairs = None
-    for candidate in (paths.success_trajectories_json(extra) if source == "attempt"
+    for candidate in (paths.success_trajectories_json() if source == "attempt"
                       else paths.curiosity_annotation(),):
         if os.path.exists(candidate):
             with open(candidate) as handle:
@@ -306,10 +309,10 @@ def debug_info(obj, model_name, source, extra, max_entries):
 
     # --- The document itself ---------------------------------------------
     doc_blocks = []
-    doc_path = os.path.join(info_dir, "info.md")
+    doc_path = os.path.join(info_dir, INFO_DOC_FILENAME)
     if os.path.exists(doc_path):
         with open(doc_path) as handle:
-            document = parse_document(handle.read())
+            document = InfoDocument.from_dict(json.load(handle))
         summary = pd.DataFrame([
             {"section": "task", "category": e.category,
              "examples": len(e.examples), "insights": len(e.insights),
@@ -337,7 +340,7 @@ def debug_info(obj, model_name, source, extra, max_entries):
             doc_blocks.append(md.details(f"{entry.category}", body))
     else:
         doc_blocks = [md.h2("Final document"),
-                      md.warn(f"No `info.md` at {doc_path} — stage B has not been run.")]
+                      md.warn(f"No `{INFO_DOC_FILENAME}` at {doc_path} — stage B has not been run.")]
 
     blocks = [
         md.h1(f"Info document — {paths.game} / {paths.model_save_name} / source={source}"),
@@ -360,7 +363,6 @@ def debug_info(obj, model_name, source, extra, max_entries):
 @click.option("--model_name", required=True, help="VLM that built the document.")
 @click.option("--source", default="attempt", show_default=True,
               type=click.Choice(["attempt", "curiosity"]))
-@click.option("--extra", default="none", show_default=True)
 @click.option("--hint_mode", default="retrieval", show_default=True,
               type=click.Choice(["retrieval", "init_state", "both"]),
               help="Which selection path to exercise. 'both' writes both hints for the same "
@@ -371,7 +373,7 @@ def debug_info(obj, model_name, source, extra, max_entries):
               help="Benchmark tasks to spot-check (0 = all).")
 @click.option("--max_concurrency", default=8, show_default=True)
 @click.pass_obj
-def debug_info_hint(obj, model_name, source, extra, hint_mode, hint_vlm_model, hint_vlm_kind,
+def debug_info_hint(obj, model_name, source, hint_mode, hint_vlm_model, hint_vlm_kind,
                     n_tasks, max_concurrency):
     """Hint spot-check: run the hint pipeline on benchmark screens without playing the game."""
     import time
@@ -379,7 +381,7 @@ def debug_info_hint(obj, model_name, source, extra, hint_mode, hint_vlm_model, h
     from gameboy_worlds import get_benchmark_tasks, get_test_environment
 
     from debug_scripts.frames import to_pil
-    from execution.info_doc import load_document, source_label
+    from execution.info_doc import load_document
     from execution.registry import AVAILABLE_EXECUTORS
     from execution.supervisors import InfoHintSupervisor
 
@@ -390,13 +392,15 @@ def debug_info_hint(obj, model_name, source, extra, hint_mode, hint_vlm_model, h
     )
     report_dir = paths.debug_dir("info_hint")
     images_dir = paths.debug_dir("info_hint", "images")
-    info_dir = paths.source_info_dir(source, extra)
+    info_dir = paths.source_info_dir(source)
 
     modes = ["retrieval", "init_state"] if hint_mode == "both" else [hint_mode]
     documents, insight_rows = None, None
     if "retrieval" in modes:
-        doc_path = paths.require(os.path.join(info_dir, "info.md"), "info")
-        documents = [load_document(doc_path, source=source_label(info_dir))]
+        doc_path = paths.require(os.path.join(info_dir, INFO_DOC_FILENAME), "info")
+        # No source= argument: the document records its own provenance, and load_document
+        # copies the label onto every entry.
+        documents = [load_document(doc_path, parameters=obj["parameters"])]
     if "init_state" in modes:
         insights_path = paths.require(os.path.join(info_dir, "insights.jsonl"), "insights")
         insight_rows = _load_insights(insights_path)

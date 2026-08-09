@@ -14,34 +14,16 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from execution.report import (DONE_CHECK_TAG, EnvironmentStepRecord, iter_call_steps,
+from execution.report import (ACTION_TAGS, DONE_CHECK_TAG, EnvironmentStepRecord,
                               says_complete)
 from utils import parse_key_value
-
-
-def action_names(env_steps: list) -> str:
-    """The buttons this attempt actually pressed, in order.
-
-    .. note:: Currently unreferenced. Kept because it is the cheap half of
-        :func:`action_trace` — the button list without the reasoning — and is the obvious
-        thing to reach for in a prompt that needs the sequence but cannot afford the
-        reasoning beside it.
-    """
-    names = []
-    for step in env_steps:
-        try:
-            names.append(step.action_class.get_action_name(**step.kwargs))
-        except Exception:      # an action whose name needs kwargs it did not record
-            names.append(step.action_class.__name__)
-    return ", ".join(names) if names else "(no actions taken)"
 
 
 def action_trace(report, max_chars: int = 0) -> str:
     """Each action the executor took, beside the reasoning it gave for taking it.
 
-    Already on the report — ``vlm_call_log`` holds every response verbatim and
-    ``iter_call_steps`` pairs each with the step it produced — so this costs nothing
-    and has simply never been read.
+    Already on the report — ``vlm_call_log`` holds every response verbatim, and each call
+    holds the steps it produced — so this costs nothing and has simply never been read.
 
     Pairing the two is what makes a failure diagnosable. The button alone shows a run
     of identical presses; the reasoning beside it shows *why*, and the usual answer is
@@ -68,27 +50,34 @@ def action_trace(report, max_chars: int = 0) -> str:
         return text
 
     lines, n_actions = [], 0
-    for _, entry, step in iter_call_steps(report.vlm_call_log, report.steps):
+    for entry in report.vlm_call_log:
         if entry.tag == DONE_CHECK_TAG:
             verdict = "yes" if says_complete(entry.response) else "no"
             reason = compress(parse_key_value(entry.response, "Reasoning"))
             lines.append(f"            ↳ finished? {verdict}"
                          + (f" — {reason}" if reason else ""))
             continue
-        if entry.tag not in ("action", "score", "decide"):
+        if entry.tag not in ACTION_TAGS:
             continue
-        if isinstance(step, EnvironmentStepRecord):
-            try:
-                name = step.action_class.get_action_name(**step.kwargs)
-            except Exception:
-                name = step.action_class.__name__
-        elif step is None:
-            name = "(no action)"
-        else:
-            name = "INVALID"
-        n_actions += 1
         reason = compress(parse_key_value(entry.response, "Reasoning"))
-        lines.append(f"         {n_actions}. {name} — {reason or '(no reasoning given)'}")
+        # A call usually owns one step, but a planned sequence owns several. Each gets its
+        # own numbered line so the count still reads as "actions taken", while the reasoning
+        # is shown once, on the first — it was given once, for the whole sequence.
+        for i, step in enumerate(entry.steps or [None]):
+            if isinstance(step, EnvironmentStepRecord):
+                try:
+                    name = step.action_class.get_action_name(**step.kwargs)
+                except Exception:
+                    name = step.action_class.__name__
+            elif step is None:
+                name = "(no action)"
+            else:
+                name = "INVALID"
+            n_actions += 1
+            if i == 0:
+                lines.append(f"         {n_actions}. {name} — {reason or '(no reasoning given)'}")
+            else:
+                lines.append(f"         {n_actions}. {name} — (same planned sequence)")
     return "\n".join(lines) if lines else "         (no actions taken)"
 
 

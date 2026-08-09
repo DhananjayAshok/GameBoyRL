@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Single init_state version of curiosity_and_zeroshot_all.sh: proposes with no prior
-# (extra=none), attempts, then runs guidance and practice. The curiosity annotation is
-# checked for but is no longer used as a proposal prior — see curiosity_and_zeroshot_all.sh
-# for why that arm was dropped.
+# Single init_state version of curiosity_and_zeroshot_all.sh: proposes and attempts.
+# The curiosity annotation is checked for but is not used as a proposal prior — see
+# curiosity_and_zeroshot_all.sh for why that arm was dropped.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 
@@ -11,7 +10,6 @@ REQUIRED_ARGS=()
 
 populate_array PROPOSE_AND_ATTEMPT_ESSENTIALS REQUIRED_ARGS
 populate_dict PROPOSE_AND_ATTEMPT_DEFAULTS ARGS
-unset ARGS["extra"]
 
 # --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -67,11 +65,10 @@ if [[ ! -f "$curiosity_dir/trajectory_annotation.pkl" ]]; then
     exit 1
 fi
 
-# Zeroshot leg for this single init_state: propose (no prior), attempt, then guidance and
-# practice. The curiosity annotation checked for above is this game's curiosity vertical
-# output; it is no longer consumed as a proposal prior (see curiosity_and_zeroshot_all.sh
-# for why), so there is only one leg here.
-ARGS["extra"]="none"
+# Zeroshot leg for this single init_state: propose, then attempt.
+# The curiosity annotation checked for above is this game's curiosity vertical output; it
+# is not consumed as a proposal prior (see curiosity_and_zeroshot_all.sh for why), so
+# there is only one leg here.
 ARGS["propose_only"]="false"
 flags=$(args_to_flags_subset ARGS PROPOSE_AND_ATTEMPT_ARG_KEYS)
 bash scripts/pipeline/propose_and_attempt.sh $flags || exit 1

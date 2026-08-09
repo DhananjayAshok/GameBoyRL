@@ -34,7 +34,7 @@ from benchmark_scripts import common
 
 @click.command(name="info")
 @click.option("--info_docs", default=None, type=str,
-              help="Comma-separated info.md path(s). Entries from all of them are unioned "
+              help="Comma-separated info.json path(s). Entries from all of them are unioned "
                    "and tagged with a source label. Required for --mode retrieval.")
 @click.option("--insights_paths", default=None, type=str,
               help="Comma-separated insights.jsonl path(s). Required for --mode init_state.")

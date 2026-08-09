@@ -99,7 +99,10 @@ done
 
 
 model_name="${ARGS["model_name"]}"
-model_save_name="${model_name#*/}"
+# '##*/' (after the LAST slash), matching model_name.split("/")[-1] in Python. '#*/' strips
+# only up to the FIRST slash, which agrees for a one-slash name like google/gemma-4-31b-it
+# but not for org/team/model — and the served-model name is rebuilt on the Python side.
+model_save_name="${model_name##*/}"
 
 # if overwrite is true, t, yes or y, set --restore_from_checkpoint False, else set it to empty string
 if [[ "${ARGS["overwrite"]}" == "true" || "${ARGS["overwrite"]}" == "yes" || "${ARGS["overwrite"]}" == "y" ]]; then
@@ -116,7 +119,7 @@ else
 fi
 
 # If a validation file is provided, forward it and let the trainer use it directly
-# (leakage-free split from create_dataset). Otherwise fall back to an internal
+# (a leakage-free split is the caller's responsibility). Otherwise fall back to an internal
 # 0.85 train/validation split of the train file.
 if [[ "${ARGS["validation_file"]}" != "none" ]]; then
     validation_flag="--validation_file ${ARGS["validation_file"]}"

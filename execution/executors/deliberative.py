@@ -1,85 +1,36 @@
 """
 Executors that change how a single decision is reached.
 
-Each variant here intervenes at the point of choosing one action — sampling several
-candidates, scoring them, reflecting on the last one, or gating on confidence — via
-:meth:`_query_vlm` or :meth:`_pick_action`.  The state carried between steps is
-unchanged from :class:`~execution.executors.simple.SimpleExecutor`.
+Each variant here intervenes at the point of choosing one action — scoring candidates,
+reflecting on the last one, or arguing with itself — via :meth:`_query_vlm` or
+:meth:`_pick_action`.  The state carried between steps is unchanged from
+:class:`~execution.executors.simple.SimpleExecutor`.
 
-:class:`ActionValueEstimatorExecutor` overrides :meth:`_execute` outright instead of
-using the base class hooks — see the note in :mod:`execution.executors.base`.
+**The call that decides the action must be the last one, and must be action-tagged.**
+Whichever VLM call an executor makes last before returning from :meth:`_query_vlm` is the
+one that owns the resulting step (see :meth:`~execution.executors.base.Executor._vlm_call`),
+and consumers that reconstruct an action sequence filter on
+:data:`~execution.report.ACTION_TAGS`. Two executors were removed for breaking that rather
+than being reconciled with it: a ``SelfConsistencyExecutor`` logged several action calls
+per step, and a ``ConfidenceGatedExecutor`` decided the action in a ``"rethink"`` call,
+so every action it took was dropped from the dataset.
+
+Auxiliary calls (``"reflection"``, ``"propose"``, ``"challenge"``) own no steps and are
+free to be as numerous as they like, provided an action-tagged call comes last.
+
+Every executor in this module uses the base class loop; none overrides :meth:`_execute`
+— see the note in :mod:`execution.executors.base` for the one that does.
 """
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from gameboy_worlds.interface.action import LowLevelAction
 
 from execution.executors.simple import SimpleExecutor
 from execution.report import EnvironmentStepRecord
 from utils import parse_int
-
-
-class SelfConsistencyExecutor(SimpleExecutor):
-    """
-    Samples the VLM *k* times at a given temperature and takes a majority vote
-    on the chosen action.  Falls back to the first parseable response if there
-    is no majority.
-
-    :param k: Number of samples per decision (default 3).
-    :type k: int
-    :param temperature: Sampling temperature (default 0.7).
-    :type temperature: float
-    """
-
-    def __init__(self, env, task, max_steps, max_tool_calls,
-                 k: int = 3, temperature: float = 0.7, **kwargs):
-        self._k = k
-        self._temperature = temperature
-        super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
-
-    def _query_vlm(self, prompt: str, frame) -> List[str]:
-        return self._vlm_call(
-            "action",
-            texts=prompt,
-            images=[frame],
-            temperature=self._temperature,
-            n_outputs=self._k,
-        )
-
-    def _pick_action(self, vlm_output: List[str]) -> Optional[str]:
-        action_str = self._majority_vote(vlm_output)
-        # k samples means k candidate reasonings. The completion check wants the one that
-        # argued for the action actually taken, not an arbitrary sample — showing a losing
-        # sample's reasoning beside the winning action would describe a step that never
-        # happened.
-        for response in vlm_output:
-            parsed = self._parse_action(response)
-            if parsed is not None and action_str is not None and parsed.lower() == action_str.lower():
-                self._last_reasoning = self._parse_reasoning(response) or self._last_reasoning
-                break
-        return action_str
-
-    def _majority_vote(self, responses: List[str]) -> Optional[str]:
-        """Parse each response and return the most common action string."""
-        parsed = []
-        for r in responses:
-            action = self._parse_action(r)
-            if action is not None:
-                parsed.append(action)
-        if not parsed:
-            return None
-        # Majority vote (case-insensitive key, return original casing of first occurrence)
-        counts: Dict[str, int] = {}
-        first_seen: Dict[str, str] = {}
-        for a in parsed:
-            key = a.lower()
-            counts[key] = counts.get(key, 0) + 1
-            if key not in first_seen:
-                first_seen[key] = a
-        best_key = max(counts, key=lambda k: counts[k])
-        return first_seen[best_key]
 
 
 class ReflectiveExecutor(SimpleExecutor):
@@ -145,86 +96,6 @@ Briefly critique whether the recent actions made progress toward the task. Then 
         return f"Current plan: {self._plan_summary}\n\n" if self._plan_summary else ""
 
 
-# ---------------------------------------------------------------------------
-# Second generation executors
-# ---------------------------------------------------------------------------
-
-class ConfidenceGatedExecutor(SimpleExecutor):
-    """
-    Asks the VLM to also output a confidence score 1-5 with each action.
-    If the score is at or below *low_confidence_threshold*, the VLM is
-    re-queried once with an explicit "think harder" instruction before
-    the action is executed.
-
-    Response format::
-
-        Reasoning: <text>
-        Confidence: <1-5>
-        Action: <action>
-        [STOP]
-
-    :param low_confidence_threshold: Re-query if confidence ≤ this value (default 2).
-    :type low_confidence_threshold: int
-    """
-
-    def __init__(self, env, task, max_steps, max_tool_calls,
-                 low_confidence_threshold: int = 2, **kwargs):
-        self._low_confidence_threshold = low_confidence_threshold
-        super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
-
-    def _parse_confidence(self, response: str) -> Optional[int]:
-        """The 1-5 self-reported confidence, or None if the model did not give one.
-
-        A method for the same reason as :meth:`_parse_action` — it is a subclass hook. The
-        range is the one this executor's prompt asks for, so it is passed rather than baked
-        into the parser.
-        """
-        return parse_int(response, "Confidence", 1, 5)
-
-    STEP_PROMPT = """Task: [TASK][HINT_BLOCK]
-
-You are playing a GameBoy game. The current screen is shown in the image.
-
-[ERROR_BLOCK][TOOL_RESULT_BLOCK]Available environment actions:
-[ACTION_LIST]
-
-[TOOLS_BLOCK][CONTEXT_SECTION]Reason about the best next action, then respond in exactly this format:
-Reasoning: <your reasoning>
-Confidence: <1-5 how confident you are this is the right action>
-[ACTION_FORMAT]
-[STOP]"""
-
-    RETHINK_PROMPT = """[FRAME_CONTEXT]
-
-Your previous response had low confidence:
-[ORIGINAL_RESPONSE]
-
-Think more carefully. What are you missing? Reconsider all options, then provide your final answer with higher confidence if possible.
-Reasoning: <your revised reasoning>
-Confidence: <1-5>
-Action: <one environment action>
-[STOP]"""
-
-    def _build_rethink_prompt(self, original_response: str, frame_context: str) -> str:
-        return (
-            self.RETHINK_PROMPT
-            .replace("[FRAME_CONTEXT]", frame_context)
-            .replace("[ORIGINAL_RESPONSE]", original_response)
-        )
-
-    def _query_vlm(self, prompt: str, frame) -> str:
-        response = self._vlm_call("action", texts=prompt, images=[frame])
-        confidence = self._parse_confidence(response)
-        if confidence is not None and confidence <= self._low_confidence_threshold:
-            rethink_prompt = self._build_rethink_prompt(response, prompt)
-            response = self._vlm_call("rethink", texts=rethink_prompt, images=[frame])
-        return response
-
-
-# ---------------------------------------------------------------------------
-# Third generation executors
-# ---------------------------------------------------------------------------
-
 class ActionValueEstimatorExecutor(SimpleExecutor):
     """
     Instead of asking the VLM to directly choose an action, this executor asks
@@ -275,16 +146,13 @@ Respond with one line per action in exactly this format:
             stripped = line.strip()
             if ":" not in stripped:
                 continue
-            # Find last colon to split action from score
-            last_colon = stripped.rfind(":")
-            action_part = stripped[:last_colon].strip()
-            score_part = stripped[last_colon + 1:].strip()
-            # Parse score digit
-            score = None
-            for ch in score_part:
-                if ch.isdigit():
-                    score = int(ch)
-                    break
+            # Split on the LAST colon: an action string may contain one, a score may not.
+            action_part = stripped[:stripped.rfind(":")].strip()
+            # parse_int rather than scanning for the first digit character: that read "10"
+            # as 1, and accepted any digit anywhere in the line. It also range-checks
+            # against the 1-5 scale the prompt asks for, so an out-of-range score is
+            # discarded rather than allowed to win the max.
+            score = parse_int(stripped, action_part, 1, 5)
             if score is None:
                 continue
             if score > best_score:
@@ -317,6 +185,14 @@ class AdversarialSamplingExecutor(SimpleExecutor):
 
     More expensive but forces consideration of counterarguments before acting.
     """
+
+    def __init__(self, env, task, max_steps, max_tool_calls, **kwargs):
+        # Set before super(), which runs the whole episode — see the initialisation-order
+        # warning in executors/base.py. It used to be created in _on_execute_start, which
+        # happens to run early enough but leaves the attribute undefined on an instance
+        # whose _execute never reaches that hook.
+        self._last_proposal: str = ""
+        super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
 
     def _propose(self, prompt: str, frame) -> Optional[str]:
         """First call: propose a candidate action."""
@@ -369,7 +245,8 @@ Action: <one environment action>
         return self._vlm_call("decide", texts=prompt, images=[frame], max_new_tokens=400)
 
     def _on_execute_start(self) -> None:
-        self._last_proposal: str = ""
+        self._last_proposal = ""
+        super()._on_execute_start()
 
     def _query_vlm(self, prompt: str, frame) -> str:
         proposal = self._propose(prompt, frame)

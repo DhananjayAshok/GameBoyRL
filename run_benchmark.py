@@ -4,7 +4,6 @@ Called by scripts/benchmark.sh. Use --help for CLI options.
 
 from gameboy_worlds import (
     AVAILABLE_GAMES,
-    get_environment,
     get_benchmark_tasks,
     get_test_environment,
 )

@@ -10,7 +10,7 @@ Called by scripts/vlm/build_info.sh (via vlm.py build_info). Use --help for CLI 
 #            into doc1: per entry, one visual match call, then either an LM-driven combine of
 #            the Insights or a verbatim append. Never a wholesale rewrite of a document.
 #
-# Input files (derived from trajectory_path, same as infer_guidance.py):
+# Input files (derived from trajectory_path):
 #   <trajectory_path>.json  -> {group_idx: task_string}
 #   <trajectory_path>.pkl   -> {group_idx: trajectory | [trajectory, ...]}
 #
@@ -18,8 +18,8 @@ Called by scripts/vlm/build_info.sh (via vlm.py build_info). Use --help for CLI 
 #   <dirname(trajectory_path)>/info_<model_save_name>/
 #     insights.jsonl                                stage A leaves (one row per pair)
 #     frames/<group_idx>_{task,image}.png           representative frames, for visual matching
-#     merge/round_<r>/<i>.{md,matches.json,meta.json}   every merge node, kept as the debug trail
-#     info.md                                       the final document
+#     merge/round_<r>/<i>.{json,matches.json,meta.json} every merge node, kept as the debug trail
+#     info.json                                     the final document
 #
 # The merge tree is deliberately NOT cleaned up on success: the round-by-round documents are
 # the primary diagnostic for insight drift and match quality (see debug.py info).
@@ -29,6 +29,7 @@ import os
 import pickle
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 
 import click
 from tqdm import tqdm
@@ -39,14 +40,14 @@ from execution.info_doc import (
     TASK_SECTION,
     Entry,
     InfoDocument,
-    parse_document,
-    render_document,
+    Provenance,
+    dump_document,
 )
 from utils import (HuggingFaceModel, VLM, log_error, log_info, log_warn, parse_key_value,
                    parse_list, strip_stop)
 
 INSIGHTS_FILENAME = "insights.jsonl"
-INFO_DOC_FILENAME = "info.md"
+INFO_DOC_FILENAME = "info.json"
 
 # ---------------------------------------------------------------------------
 # Prompts
@@ -219,9 +220,14 @@ def extract_insights(trajectory, task, vlm, game, max_new_tokens, n_frames=8, ve
 
 
 def _leaf_document(parsed: dict, game: str, group_idx: str, init_state: str,
-                   task_frame_rel: str, image_frame_rel: str | None) -> InfoDocument:
-    """Build the one-entry-per-section document that becomes a leaf of the merge tree."""
-    doc = InfoDocument(game=game)
+                   task_frame_rel: str, image_frame_rel: str | None,
+                   provenance: Provenance, frames_root: str) -> InfoDocument:
+    """Build the one-entry-per-section document that becomes a leaf of the merge tree.
+
+    ``provenance`` and ``frames_root`` are stamped on every leaf so the merge carries them
+    through to the final document without anything having to be re-derived from a path.
+    """
+    doc = InfoDocument(game=game, provenance=provenance, frames_root=frames_root)
     doc.task_entries.append(Entry(
         category=parsed["task_category"],
         description=parsed["task_description"],
@@ -243,7 +249,7 @@ def _leaf_document(parsed: dict, game: str, group_idx: str, init_state: str,
 
 
 def run_stage_a(task_map, traj_map, out_dir, vlm, game, max_new_tokens, n_frames,
-                max_concurrency, verbose, overwrite, parameters):
+                max_concurrency, verbose, overwrite, parameters, provenance, frames_root):
     """Extract insights for every pair, writing insights.jsonl and frames/. Resumable per pair."""
     insights_path = os.path.join(out_dir, INSIGHTS_FILENAME)
     frames_dir = os.path.join(out_dir, "frames")
@@ -312,13 +318,17 @@ def run_stage_a(task_map, traj_map, out_dir, vlm, game, max_new_tokens, n_frames
                     to_pil(observations[0]).save(os.path.join(out_dir, image_frame_rel))
 
                 doc = _leaf_document(parsed, game, group_idx, init_state,
-                                     task_frame_rel, image_frame_rel)
+                                     task_frame_rel, image_frame_rel,
+                                     provenance, frames_root)
                 row = {
                     "group_idx": group_idx,
                     "init_state": init_state,
                     "task": task,
                     "insights": parsed["insights"],
-                    "document": render_document(doc),
+                    # A nested object, not rendered text: the row is already JSON, and the
+                    # readers (stage B, debug.py info, InfoHintSupervisor) all want the
+                    # document back rather than a string to re-parse.
+                    "document": doc.to_dict(),
                 }
                 sink.write(json.dumps(row) + "\n")
                 sink.flush()
@@ -443,12 +453,12 @@ def _node_paths(out_dir: str, round_idx: int, node_idx: int) -> tuple[str, str, 
     round_dir = os.path.join(out_dir, "merge", f"round_{round_idx}")
     os.makedirs(round_dir, exist_ok=True)
     stem = os.path.join(round_dir, f"{node_idx:03d}")
-    return f"{stem}.md", f"{stem}.matches.json", f"{stem}.meta.json"
+    return f"{stem}.json", f"{stem}.matches.json", f"{stem}.meta.json"
 
 
-def _node_complete(md_path: str, matches_path: str, meta_path: str) -> bool:
+def _node_complete(doc_path: str, matches_path: str, meta_path: str) -> bool:
     """All three files, or the node is redone — a run killed mid-merge is never trusted."""
-    return all(os.path.exists(p) for p in (md_path, matches_path, meta_path))
+    return all(os.path.exists(p) for p in (doc_path, matches_path, meta_path))
 
 
 def _write_atomic(path: str, text: str) -> None:
@@ -464,7 +474,7 @@ def run_stage_b(leaves, out_dir, vlm, game, max_new_tokens, max_concurrency, ver
     if not leaves:
         log_error("No stage-A leaves to merge — nothing to build.", parameters)
 
-    docs = [parse_document(row["document"]) for row in leaves]
+    docs = [InfoDocument.from_dict(row["document"]) for row in leaves]
     labels = [row["group_idx"] for row in leaves]
     effective_workers = 1 if (verbose or isinstance(vlm._vlm, HuggingFaceModel)) else max_concurrency
 
@@ -476,12 +486,12 @@ def run_stage_b(leaves, out_dir, vlm, game, max_new_tokens, max_concurrency, ver
         next_docs: list[InfoDocument | None] = [None] * len(pairs)
         jobs = []
         for node_idx, (start, left, right) in enumerate(pairs):
-            md_path, matches_path, meta_path = _node_paths(out_dir, round_idx, node_idx)
-            reuse = (_node_complete(md_path, matches_path, meta_path)
+            doc_path, matches_path, meta_path = _node_paths(out_dir, round_idx, node_idx)
+            reuse = (_node_complete(doc_path, matches_path, meta_path)
                      and (overwrite_from_round is None or round_idx < overwrite_from_round))
             if reuse:
-                with open(md_path, "r") as handle:
-                    next_docs[node_idx] = parse_document(handle.read())
+                with open(doc_path, "r") as handle:
+                    next_docs[node_idx] = InfoDocument.from_dict(json.load(handle))
                 continue
             jobs.append((node_idx, left, right, labels[start], labels[start + 1]))
 
@@ -496,8 +506,8 @@ def run_stage_b(leaves, out_dir, vlm, game, max_new_tokens, max_concurrency, ver
                 for future in tqdm(as_completed(futures), total=len(futures), desc=desc):
                     node_idx, lab_l, lab_r = futures[future]
                     merged, matches = future.result()
-                    md_path, matches_path, meta_path = _node_paths(out_dir, round_idx, node_idx)
-                    _write_atomic(md_path, render_document(merged))
+                    doc_path, matches_path, meta_path = _node_paths(out_dir, round_idx, node_idx)
+                    dump_document(merged, doc_path)
                     _write_atomic(matches_path, json.dumps(matches, indent=2))
                     _write_atomic(meta_path, json.dumps({
                         "round": round_idx,
@@ -518,7 +528,7 @@ def run_stage_b(leaves, out_dir, vlm, game, max_new_tokens, max_concurrency, ver
         round_idx += 1
 
     final_path = os.path.join(out_dir, INFO_DOC_FILENAME)
-    _write_atomic(final_path, render_document(docs[0]))
+    dump_document(docs[0], final_path)
     log_info(f"Saved info document → {final_path} "
              f"({len(docs[0].task_entries)} task / {len(docs[0].image_entries)} image entries)")
     return docs[0]
@@ -549,9 +559,15 @@ def run_stage_b(leaves, out_dir, vlm, game, max_new_tokens, max_concurrency, ver
                    "output dir (info_<model>_<executor>) so documents from different "
                    "executors cannot overwrite each other — the curiosity stem carries no "
                    "executor of its own.")
+@click.option("--source", required=True, type=click.Choice(["curiosity", "zeroshot"]),
+              help="The vertical these trajectories came from. Recorded in the document's "
+                   "provenance. Required, and never inferred: readers used to reconstruct "
+                   "it by parsing the output directory's name, which is the coupling this "
+                   "flag exists to remove. scripts/pipeline/build_info_all.sh has it as a "
+                   "loop variable and passes it through.")
 @click.pass_obj
 def build_info_cmd(obj, trajectory_path, n_frames, max_concurrency, stage, overwrite_from_round,
-                   executor):
+                   executor, source):
     """Distil (task, trajectory) pairs into a consolidated info document."""
     game = obj["game"]
     model_name = obj["model_name"]
@@ -578,7 +594,7 @@ def build_info_cmd(obj, trajectory_path, n_frames, max_concurrency, stage, overw
             log_error(f"trajectory annotation {kind} not found at {path}.", parameters)
 
     # Output goes next to the input stem — the script never reconstructs a path from
-    # --game/--run_name, exactly like practice_tasks.py. The executor is in the dir name
+    # --game/--run_name, exactly like the stages that produce its input. The executor is in the dir name
     # because it is the identity of the trajectories distilled: the zeroshot stem already
     # encodes it, but the curiosity stem does not, so without it two executors' curiosity
     # documents land on the same path and the second silently overwrites the first.
@@ -604,11 +620,27 @@ def build_info_cmd(obj, trajectory_path, n_frames, max_concurrency, stage, overw
     with open(annotation_pkl, "rb") as handle:
         traj_map = {str(k): v for k, v in pickle.load(handle).items()}
 
+    # Provenance and frames_root are stamped onto every leaf here, at the one point that
+    # knows them, rather than reconstructed later from the directory layout. frames_root is
+    # out_dir relative to storage_dir, so a written document carries no machine-specific
+    # path and stays readable from anywhere storage_dir is configured.
+    storage_dir = parameters["storage_dir"]
+    frames_root = os.path.relpath(os.path.abspath(out_dir), os.path.abspath(storage_dir))
+    provenance = Provenance(
+        source=source,
+        executor=executor,
+        model=model_save_name,
+        trajectory_stem=os.path.relpath(os.path.abspath(trajectory_path),
+                                        os.path.abspath(storage_dir)),
+        built_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    )
+
     log_info(f"Building info document for {game} from {len(task_map)} pairs → {out_dir}")
 
     if stage in ("all", "a"):
         leaves_map = run_stage_a(task_map, traj_map, out_dir, vlm, game, max_new_tokens,
-                                 n_frames, max_concurrency, verbose, overwrite, parameters)
+                                 n_frames, max_concurrency, verbose, overwrite, parameters,
+                                 provenance, frames_root)
     else:
         insights_path = os.path.join(out_dir, INSIGHTS_FILENAME)
         if not os.path.exists(insights_path):

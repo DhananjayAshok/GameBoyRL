@@ -5,6 +5,10 @@ Both variants here decide on a sequence of moves up front rather than choosing o
 action at a time.  :class:`SequencePlannerExecutor` overrides :meth:`_execute`
 outright instead of using the base class hooks — see the note in
 :mod:`execution.executors.base`.
+
+:class:`SequencePlannerExecutor` is the one executor whose VLM calls own several steps
+each — see its class docstring.  :class:`SubgoalDecomposerExecutor` takes one action per
+call like everything else.
 """
 
 from __future__ import annotations
@@ -15,7 +19,7 @@ from gameboy_worlds.interface.action import LowLevelAction
 
 from execution.executors.base import MAX_CONSECUTIVE_INVALID
 from execution.executors.simple import SimpleExecutor
-from execution.report import EnvironmentStepRecord, SimpleReport
+from execution.report import EnvironmentStepRecord
 
 
 class SequencePlannerExecutor(SimpleExecutor):
@@ -35,6 +39,21 @@ class SequencePlannerExecutor(SimpleExecutor):
     without a failed action.  A committed plan is the unit this executor reasons about, so
     a partially-executed one is a state its planner never intended to be judged in.
     :data:`DONE_CHECK_EVERY_K_STEPS` does not apply here; see :meth:`_done_check_due`.
+
+    .. note:: **This is the executor that owns several steps per VLM call.**
+
+        One ``_vlm_call("action", ...)`` per *sequence*, then one
+        :class:`~execution.report.EnvironmentStepRecord` per *action in that sequence* —
+        so its :attr:`~execution.report.VLMCallRecord.steps` holds N entries where every
+        other executor's holds one.  That is representable because ownership is stored on
+        the call record as each step is taken.
+
+        It was disabled for a while: ``steps`` used to be a second list on the report,
+        paired with the call log by position, and a call that produced three steps slid
+        that pairing out of alignment from the *next* call onward.  The steps were
+        attributed to the wrong calls, and every consumer inherited the offset.  Nothing
+        reconstructs the pairing now, so the failure mode is gone rather than worked
+        around.
     """
 
     # This executor reasons once per *plan*, then executes several actions from it, so the
@@ -55,17 +74,6 @@ class SequencePlannerExecutor(SimpleExecutor):
         rather than combined.
         """
         return True
-
-    def _make_report(self, task, init_kwargs, max_steps, max_tool_calls) -> SimpleReport:
-        return SimpleReport(
-            task=task,
-            executor_name=self.__class__.__name__,
-            game=self._game,
-            init_kwargs=init_kwargs,
-            max_steps=max_steps,
-            max_tool_calls=max_tool_calls,
-            initial_state=self._get_state(),
-        )
 
     def _execute(self) -> int:
         self._last_terminated = False
@@ -140,7 +148,7 @@ class SequencePlannerExecutor(SimpleExecutor):
             # If action failed, abort remaining sequence and re-plan.
             # LowLevelActions always return success=0 by convention (not a failure signal),
             # so skip the check for them entirely.
-            last_record = self.report.steps[-1]
+            last_record = self._current_call.steps[-1]
             action_failed = (
                 not issubclass(action_class, LowLevelAction)
                 and isinstance(last_record, EnvironmentStepRecord)
@@ -268,6 +276,7 @@ Reasoning: <your reasoning>
         self._subgoals = self._decompose_task()
         self._subgoal_idx = 0
         self._steps_on_subgoal = 0
+        super()._on_execute_start()
 
     def _on_env_step(self, record: EnvironmentStepRecord) -> None:
         self._steps_on_subgoal += 1

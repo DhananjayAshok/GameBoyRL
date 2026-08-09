@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Zero-shot task proposal followed by attempt for a single init_state: runs
-# propose_zeroshot then attempt_tasks. tasks_path is derived from game, model_name,
-# and extra.
+# propose_zeroshot then attempt_tasks. tasks_path is derived from game and model_name.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 
@@ -57,18 +56,9 @@ _propose_only=false
 _attempt_only=false
 [[ "${ARGS["propose_only"]}" == "true" || "${ARGS["propose_only"]}" == "yes" || "${ARGS["propose_only"]}" == "y" || "${ARGS["propose_only"]}" == "t" ]] && _propose_only=true
 [[ "${ARGS["attempt_only"]}" == "true" || "${ARGS["attempt_only"]}" == "yes" || "${ARGS["attempt_only"]}" == "y" || "${ARGS["attempt_only"]}" == "t" ]] && _attempt_only=true
-_do_guidance=false
-[[ "${ARGS["do_guidance_and_practice"]}" == "true" || "${ARGS["do_guidance_and_practice"]}" == "yes" || "${ARGS["do_guidance_and_practice"]}" == "y" || "${ARGS["do_guidance_and_practice"]}" == "t" ]] && _do_guidance=true
-
 model_save_name="${ARGS["model_name"]##*/}"
 base="$storage_dir/proposed_tasks/${ARGS["game"]}/${model_save_name}/zeroshot"
-case "${ARGS["extra"]}" in
-    none)                    tasks_file="$base/zeroshot_tasks.jsonl" ;;
-    zeroshot)                tasks_file="$base/zeroshot_tasks_prior_zeroshot.jsonl" ;;
-    curiosity)               tasks_file="$base/zeroshot_tasks_prior_curiosity.jsonl" ;;
-    zeroshot_with_curiosity) tasks_file="$base/zeroshot_tasks_prior_zeroshot_with_curiosity.jsonl" ;;
-    *) echo "Error: unknown extra value '${ARGS["extra"]}'"; exit 1 ;;
-esac
+tasks_file="$base/zeroshot_tasks.jsonl"
 
 if [[ "$_attempt_only" == "false" ]]; then
     propose_flags=$(args_to_flags_subset ARGS PROPOSE_ZEROSHOT_ARG_KEYS)
@@ -84,11 +74,7 @@ if [[ "$_propose_only" == "false" ]]; then
     attempt_flags=$(args_to_flags_subset ARGS ATTEMPT_TASKS_ARG_KEYS)
     bash scripts/vlm/attempt_tasks.sh $attempt_flags || exit 1
 
-    if [[ "$_do_guidance" == "true" ]]; then
-        ARGS["trajectory_path"]="${tasks_file%.jsonl}_${ARGS["executor"]}_attempts/success_trajectories"
-        guidance_flags=$(args_to_flags_subset ARGS GUIDANCE_AND_PRACTICE_ARG_KEYS)
-        bash scripts/pipeline/guidance_and_practice.sh $guidance_flags || exit 1
-    else
-        echo "trajectory_path for guidance_and_practice: ${tasks_file%.jsonl}_${ARGS["executor"]}_attempts/success_trajectories"
-    fi
+    # Terminal artifact of the zeroshot vertical: <stem>.json + <stem>.pkl. build_info.sh
+    # consumes this stem.
+    echo "zeroshot trajectory stem: ${tasks_file%.jsonl}_${ARGS["executor"]}_attempts/success_trajectories"
 fi

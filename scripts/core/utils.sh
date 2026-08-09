@@ -218,9 +218,6 @@ PROPOSE_ZEROSHOT_ESSENTIALS=("init_states")
 populate_array VLM_ESSENTIALS PROPOSE_ZEROSHOT_ESSENTIALS
 declare -A PROPOSE_ZEROSHOT_DEFAULTS
 populate_dict VLM_DEFAULTS PROPOSE_ZEROSHOT_DEFAULTS
-PROPOSE_ZEROSHOT_DEFAULTS["extra"]=none
-PROPOSE_ZEROSHOT_DEFAULTS["extra_k"]=20
-PROPOSE_ZEROSHOT_DEFAULTS["run_name"]=all
 
 PROPOSE_ZEROSHOT_ARG_KEYS=("${PROPOSE_ZEROSHOT_ESSENTIALS[@]}" "${!PROPOSE_ZEROSHOT_DEFAULTS[@]}")
 
@@ -249,36 +246,13 @@ INFER_TASKS_DEFAULTS["describe_pairs"]=false
 
 INFER_TASKS_ARG_KEYS=("${INFER_TASKS_ESSENTIALS[@]}" "${!INFER_TASKS_DEFAULTS[@]}")
 
-INFER_GUIDANCE_ESSENTIALS=("trajectory_path")
-populate_array VLM_ESSENTIALS INFER_GUIDANCE_ESSENTIALS
-declare -A INFER_GUIDANCE_DEFAULTS
-populate_dict VLM_DEFAULTS INFER_GUIDANCE_DEFAULTS
-INFER_GUIDANCE_DEFAULTS["max_obs_at_once"]=8
-
-INFER_GUIDANCE_ARG_KEYS=("${INFER_GUIDANCE_ESSENTIALS[@]}" "${!INFER_GUIDANCE_DEFAULTS[@]}")
-
-PRACTICE_TASKS_ESSENTIALS=("guidance_path")
-populate_array VLM_ESSENTIALS PRACTICE_TASKS_ESSENTIALS
-declare -A PRACTICE_TASKS_DEFAULTS
-populate_dict VLM_DEFAULTS PRACTICE_TASKS_DEFAULTS
-PRACTICE_TASKS_DEFAULTS["n_attempts"]=100
-PRACTICE_TASKS_DEFAULTS["max_total_practice_runs"]=4000
-PRACTICE_TASKS_DEFAULTS["n_random_actions"]=5
-PRACTICE_TASKS_DEFAULTS["score_mode"]=false
-PRACTICE_TASKS_DEFAULTS["max_steps"]=30
-PRACTICE_TASKS_DEFAULTS["max_tool_calls"]=10
-PRACTICE_TASKS_DEFAULTS["lookback"]=8
-PRACTICE_TASKS_DEFAULTS["executor"]="history"
-PRACTICE_TASKS_DEFAULTS["controller_variant"]="low_level"
-PRACTICE_TASKS_DEFAULTS["checker_max_new_tokens"]=1000
-PRACTICE_TASKS_DEFAULTS["max_concurrency"]=16
-
-PRACTICE_TASKS_ARG_KEYS=("${PRACTICE_TASKS_ESSENTIALS[@]}" "${!PRACTICE_TASKS_DEFAULTS[@]}")
-
 # build_info: distils (task, trajectory) pairs into an info document, beside its own input
-# stem (like practice_tasks/infer_guidance). --stage a is enough for benchmark_info --mode
+# stem. --stage a is enough for benchmark_info --mode
 # init_state; the full run also builds the merge tree.
-BUILD_INFO_ESSENTIALS=("trajectory_path")
+# source is required, not defaulted: it is the document's recorded provenance, and a
+# wrong-but-plausible default would be written into the artifact and believed by every
+# reader. build_info_all.sh has it in hand as a loop variable.
+BUILD_INFO_ESSENTIALS=("trajectory_path" "source")
 populate_array VLM_ESSENTIALS BUILD_INFO_ESSENTIALS
 declare -A BUILD_INFO_DEFAULTS
 populate_dict VLM_DEFAULTS BUILD_INFO_DEFAULTS
@@ -318,50 +292,22 @@ function info_mode_sources() {
 # build_info writes its output beside this stem, so this function also fixes where the
 # info dir lands (see info_dir_for_stem).
 #
-# Defined here for the same reason as merged_dataset_dir: build_info_all.sh writes these
+# Defined here because build_info_all.sh writes these
 # directories and benchmark_info_all.sh reads them, and the two must not drift — neither
-# passes the path to the other, both derive it from this function. debug_scripts/paths.py
-# re-derives the identical rule on the python side (info_dir / curiosity_info_dir).
+# passes the path to the other, both derive it from this function. utils/paths.py re-derives
+# the identical rule on the python side (info_dir / curiosity_info_dir), and
+# tests/test_paths.py pins the two against each other.
 #
 # model_save_name is in the path because a document is built from one model's own output;
 # two models sharing a game must not share an info dir.
-#
-# The zeroshot branch probes the --extra proposal variants in a fixed order and returns the
-# first that exists, because different games were proposed under different variants and the
-# arm should use whatever attempts a game actually has. The order is deterministic so build
-# and benchmark always resolve to the same stem; when nothing exists it falls back to the
-# plain variant so error messages name a sensible path.
-INFO_EXTRA_SUFFIXES=("" "_prior_zeroshot_with_curiosity" "_prior_curiosity" "_prior_zeroshot")
-
 function info_source_stem() {
-    local base
     case "$5" in
         zeroshot)
-            base="$storage_dir/proposed_tasks/$1/$2/zeroshot"
-            for sfx in "${INFO_EXTRA_SUFFIXES[@]}"; do
-                local stem="$base/zeroshot_tasks${sfx}_$4_attempts/success_trajectories"
-                if [[ -f "$stem.json" && -f "$stem.pkl" ]]; then echo "$stem"; return; fi
-            done
-            echo "$base/zeroshot_tasks_$4_attempts/success_trajectories" ;;
+            echo "$storage_dir/proposed_tasks/$1/$2/zeroshot/zeroshot_tasks_$4_attempts/success_trajectories" ;;
         curiosity)
             echo "$storage_dir/proposed_tasks/$1/$2/curiosity/$3/trajectory_annotation" ;;
         *)
             echo "" ;;
-    esac
-}
-
-# info_extra_from_stem <stem>
-#
-# The --extra name debug_scripts/paths.py knows this stem by. The bash side probes the
-# attempts dirs by literal suffix, but paths.py addresses the same dirs through the named
-# EXTRA_SUFFIXES vocabulary, so anything handing a stem to a python entry point has to
-# translate. Keep this table in step with EXTRA_SUFFIXES in debug_scripts/paths.py.
-function info_extra_from_stem() {
-    case "$(dirname "$1")" in
-        *_prior_zeroshot_with_curiosity_*) echo "zeroshot_with_curiosity" ;;
-        *_prior_curiosity_*)               echo "curiosity" ;;
-        *_prior_zeroshot_*)                echo "zeroshot" ;;
-        *)                                 echo "none" ;;
     esac
 }
 
@@ -459,65 +405,6 @@ INFO_FULL_DEFAULTS["do_benchmark"]=true
 
 INFO_FULL_ARG_KEYS=("${INFO_FULL_ESSENTIALS[@]}" "${!INFO_FULL_DEFAULTS[@]}")
 
-CLEAN_PRACTICE_ESSENTIALS=("practice_path")
-populate_array VLM_ESSENTIALS CLEAN_PRACTICE_ESSENTIALS
-declare -A CLEAN_PRACTICE_DEFAULTS
-populate_dict VLM_DEFAULTS CLEAN_PRACTICE_DEFAULTS
-CLEAN_PRACTICE_DEFAULTS["k"]=3
-CLEAN_PRACTICE_DEFAULTS["safety_margin"]=2
-CLEAN_PRACTICE_DEFAULTS["max_concurrency"]=16
-CLEAN_PRACTICE_DEFAULTS["score_threshold"]=6
-
-CLEAN_PRACTICE_ARG_KEYS=("${CLEAN_PRACTICE_ESSENTIALS[@]}" "${!CLEAN_PRACTICE_DEFAULTS[@]}")
-
-# create_dataset: builds train/validation CSVs from a cleaned practice dir.
-# Pure data step — no VLM/game args (paraphrasing/filtering live in clean_practice).
-CREATE_DATASET_ESSENTIALS=("practice_path")
-declare -A CREATE_DATASET_DEFAULTS=(
-    ["overwrite"]=false
-    ["safety_margin"]=2
-    ["val_frac"]=0.2
-    ["seed"]=0
-    ["score_threshold"]=6
-)
-CREATE_DATASET_ARG_KEYS=("${CREATE_DATASET_ESSENTIALS[@]}" "${!CREATE_DATASET_DEFAULTS[@]}")
-
-# merge_practices: combines the train/validation CSVs of several practice dirs into one
-# dataset. NOTE: "none" is a *legitimate* value of --balance here, not the absent sentinel.
-# There is no overwrite flag — the merge always regenerates (it costs seconds, and a stale
-# merged dataset would silently be trained on).
-MERGE_PRACTICES_ESSENTIALS=("practice_paths" "save_path")
-declare -A MERGE_PRACTICES_DEFAULTS=(
-    ["balance"]="none"
-    ["seed"]=0
-)
-MERGE_PRACTICES_ARG_KEYS=("${MERGE_PRACTICES_ESSENTIALS[@]}" "${!MERGE_PRACTICES_DEFAULTS[@]}")
-
-# merged_dataset_dir <game> <model_save_name> <run_name>
-#
-# Where merge_practices writes the merged train/validation pair. Defined here because
-# curiosity_and_zeroshot_all.sh writes it and full.sh reads it, and the two must
-# not drift — neither passes the path to the other, both derive it from this function.
-#
-# model_save_name is part of the path for the same reason it is part of proposed_tasks/:
-# the merged dataset is built from one model's practice output, so two models sharing a
-# game and run_name must not share a merged dataset.
-function merged_dataset_dir() {
-    echo "$storage_dir/datasets/$1/$2/$3/merged"
-}
-
-GUIDANCE_AND_PRACTICE_ESSENTIALS=("trajectory_path")
-populate_array VLM_ESSENTIALS GUIDANCE_AND_PRACTICE_ESSENTIALS
-declare -A GUIDANCE_AND_PRACTICE_DEFAULTS
-populate_dict INFER_GUIDANCE_DEFAULTS GUIDANCE_AND_PRACTICE_DEFAULTS
-populate_dict PRACTICE_TASKS_DEFAULTS GUIDANCE_AND_PRACTICE_DEFAULTS
-populate_dict CLEAN_PRACTICE_DEFAULTS GUIDANCE_AND_PRACTICE_DEFAULTS
-GUIDANCE_AND_PRACTICE_DEFAULTS["guidance_only"]=false
-GUIDANCE_AND_PRACTICE_DEFAULTS["practice_only"]=false
-GUIDANCE_AND_PRACTICE_DEFAULTS["do_clean"]=true
-
-GUIDANCE_AND_PRACTICE_ARG_KEYS=("${GUIDANCE_AND_PRACTICE_ESSENTIALS[@]}" "${!GUIDANCE_AND_PRACTICE_DEFAULTS[@]}")
-
 # curiosity_tasks + curiosity_all_tasks: create_traj → infer_tasks
 # run_name is required (no default) — removed from DEFAULTS after population
 CURIOSITY_TASKS_ESSENTIALS=("run_name")
@@ -527,9 +414,7 @@ populate_array ENV_ESSENTIALS CURIOSITY_TASKS_ESSENTIALS
 declare -A CURIOSITY_TASKS_DEFAULTS
 populate_dict CREATE_TRAJ_DEFAULTS CURIOSITY_TASKS_DEFAULTS
 populate_dict INFER_TASKS_DEFAULTS CURIOSITY_TASKS_DEFAULTS
-populate_dict GUIDANCE_AND_PRACTICE_DEFAULTS CURIOSITY_TASKS_DEFAULTS
 unset CURIOSITY_TASKS_DEFAULTS["run_name"]
-CURIOSITY_TASKS_DEFAULTS["do_guidance_and_practice"]=true
 
 CURIOSITY_TASKS_ARG_KEYS=("${CURIOSITY_TASKS_ESSENTIALS[@]}" "${!CURIOSITY_TASKS_DEFAULTS[@]}")
 
@@ -541,16 +426,18 @@ populate_array PROPOSE_ZEROSHOT_ESSENTIALS PROPOSE_AND_ATTEMPT_ESSENTIALS
 declare -A PROPOSE_AND_ATTEMPT_DEFAULTS
 populate_dict PROPOSE_ZEROSHOT_DEFAULTS PROPOSE_AND_ATTEMPT_DEFAULTS
 populate_dict ATTEMPT_TASKS_DEFAULTS PROPOSE_AND_ATTEMPT_DEFAULTS
-populate_dict GUIDANCE_AND_PRACTICE_DEFAULTS PROPOSE_AND_ATTEMPT_DEFAULTS
+# Not inherited from PROPOSE_ZEROSHOT_DEFAULTS: proposal itself has no run_name (its output
+# path is keyed on game/model only). The curiosity annotation lookup in
+# curiosity_and_zeroshot{,_all}.sh does need one.
+PROPOSE_AND_ATTEMPT_DEFAULTS["run_name"]=all
 PROPOSE_AND_ATTEMPT_DEFAULTS["propose_only"]=false
 PROPOSE_AND_ATTEMPT_DEFAULTS["attempt_only"]=false
-PROPOSE_AND_ATTEMPT_DEFAULTS["do_guidance_and_practice"]=true
 
 PROPOSE_AND_ATTEMPT_ARG_KEYS=("${PROPOSE_AND_ATTEMPT_ESSENTIALS[@]}" "${!PROPOSE_AND_ATTEMPT_DEFAULTS[@]}")
 
 # debug.py: read-only diagnostics over saved artifacts (scripts/debug/*.sh).
 # These map to debug.py's *group* options, which every subcommand shares. Per-subcommand
-# options (n_samples, n_frames, extra, ...) stay local to their own script.
+# options (n_samples, n_frames, ...) stay local to their own script.
 DEBUG_ESSENTIALS=()
 populate_array ESSENTIAL_ARGS DEBUG_ESSENTIALS
 declare -A DEBUG_DEFAULTS=(

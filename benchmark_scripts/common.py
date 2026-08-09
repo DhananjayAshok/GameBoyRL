@@ -28,7 +28,7 @@ from tqdm import tqdm
 
 from gameboy_worlds import get_test_environment
 
-from execution.info_doc import load_document, source_label
+from execution.info_doc import Provenance, load_document
 from utils import log_error, log_info
 
 
@@ -118,14 +118,14 @@ def load_checkpoint(save_path: str, regenerate: bool, columns: list,
 
 
 def load_documents(info_docs: str, parameters: dict) -> list:
-    """Parse each --info_docs path, tagging entries with a provenance label."""
+    """Load each --info_docs path. Each document carries its own provenance label."""
     documents = []
     for path in [p.strip() for p in info_docs.split(",") if p.strip()]:
         if not os.path.exists(path):
             log_error(f"info document not found at {path}. Produced by: "
                       "scripts/vlm/build_info.sh", parameters)
-        label = source_label(os.path.dirname(path))
-        document = load_document(path, source=label)
+        document = load_document(path, parameters=parameters)
+        label = document.provenance.label or "(no provenance recorded)"
         documents.append(document)
         log_info(f"Loaded info document '{label}' — {len(document.task_entries)} task / "
                  f"{len(document.image_entries)} image entries ({path})")
@@ -138,7 +138,7 @@ def load_insight_rows(insights_paths: str, parameters: dict) -> list:
     """
     Read and union the stage-A insights.jsonl files used by --mode init_state.
 
-    Every row is tagged with the provenance label of the directory it came from, the same
+    Every row is tagged with the provenance label its own leaf document records — the same
     labelling the retrieval mode applies to document entries. This matters as soon as more
     than one source is unioned: the hint writer is told which insights came from verified
     solutions (zeroshot/attempt) and which from exploration labels (curiosity), and
@@ -150,12 +150,16 @@ def load_insight_rows(insights_paths: str, parameters: dict) -> list:
         if not os.path.exists(path):
             log_error(f"insights.jsonl not found at {path}. Produced by: "
                       "scripts/vlm/build_info.sh --stage a", parameters)
-        label = source_label(os.path.dirname(path))
+        label = ""
         n_before = len(rows)
         with open(path, "r") as handle:
             for line in handle:
                 if line.strip():
                     row = json.loads(line)
+                    # Recorded by build_info on every leaf, so it is read rather than
+                    # reconstructed from the directory this file happens to sit in.
+                    label = Provenance.from_dict(
+                        (row.get("document") or {}).get("provenance")).label
                     row["source"] = label
                     rows.append(row)
         states = sorted({r.get("init_state") for r in rows[n_before:] if r.get("init_state")})

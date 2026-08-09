@@ -8,7 +8,7 @@ import os
 
 import click
 
-from debug_scripts.paths import Paths, EXTRA_SUFFIXES
+from utils.paths import Paths
 
 
 def _mark(path: str) -> str:
@@ -49,22 +49,15 @@ def hello(obj, model_name):
         print("\n(model_name not given — skipping model-keyed stages)")
         return
 
-    print("\n-- proposal / attempt / practice --")
+    print("\n-- proposal / attempt --")
     print(f"  [{_mark(paths.curiosity_annotation())}] {paths.curiosity_annotation()}")
-    for extra in EXTRA_SUFFIXES:
-        tasks = paths.tasks_file(extra)
-        if not os.path.exists(tasks):
-            continue
-        print(f"  [{_mark(tasks)}] {tasks}")
-        for label, path in [
-            ("attempts", paths.all_trajectories_csv(extra)),
-            ("guidance", paths.guidance_json(extra)),
-            ("practice", paths.practice_results_csv(extra)),
-            ("clean   ", paths.clean_decisions_csv(extra)),
-            ("train   ", paths.train_csv(extra)),
-            ("val     ", paths.validation_csv(extra)),
-        ]:
-            print(f"     [{_mark(path)}] {label}: {path}")
+    tasks = paths.tasks_file()
+    print(f"  [{_mark(tasks)}] {tasks}")
+    for label, path in [
+        ("attempts", paths.all_trajectories_csv()),
+        ("successes", paths.success_trajectories_json()),
+    ]:
+        print(f"     [{_mark(path)}] {label}: {path}")
 
     print("\n-- benchmark --")
     for model in [paths.model_save_name, paths.finetuned_model_name]:
