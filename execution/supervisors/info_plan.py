@@ -21,7 +21,7 @@ from typing import Any, List, Optional
 from execution.report import EnvironmentStepRecord, ExecutorReport, parse_completion
 from execution.supervisors._format import action_trace, attempt_history_line
 from execution.supervisors.checker import summarise_trajectory_segments
-from execution.supervisors.info_hint import InfoHintSupervisor, RecordingVLM
+from execution.supervisors.info_hint import InfoHintSupervisor
 from execution.supervisors.prompts import (
     DISTILL_INSIGHTS_PROMPT,
     FILTER_INSIGHTS_PROMPT,
@@ -131,13 +131,10 @@ class InfoPlanSupervisor(InfoHintSupervisor):
         # last, after the reasoning, so it is the call that loses its answer first when a
         # reply is cut short — and losing it silently means nothing ever clears.
         self._judge_max_new_tokens = judge_max_new_tokens
-        # Every supervisor VLM call, in order, as {stage, prompt, response}. The runner
-        # writes it to the CSV so the supervisor's reasoning is as inspectable after the
-        # fact as the executor's already is.
-        self.supervisor_calls: List[dict] = []
-        self._plan_vlm = RecordingVLM(
-            self._hint_vlm if plan_vlm_model is None else VLM(plan_vlm_model, plan_vlm_kind),
-            self.supervisor_calls,
+        # A plain VLM. Every call goes through _call -> Supervisor._vlm_call, which records
+        # it on self.report; nothing wraps the VLM itself any more.
+        self._plan_vlm = (
+            self._hint_vlm if plan_vlm_model is None else VLM(plan_vlm_model, plan_vlm_kind)
         )
         self.plan: List[str] = []
         self.step_log: List[dict] = []
@@ -149,10 +146,6 @@ class InfoPlanSupervisor(InfoHintSupervisor):
         self.n_insights_candidate = 0
         self.n_insights_kept = 0
         self.n_insights_distilled = 0
-        # Every attempt's report, tagged with which step and attempt produced it, so the
-        # runner can render one trajectory cell covering the whole episode. step_log carries
-        # the supervisor's decisions; this carries what the executor actually did.
-        self.leg_reports: List[dict] = []
 
     def _say(self, message: str) -> None:
         """Per-attempt commentary. Silent unless the caller asked for it.
@@ -164,17 +157,12 @@ class InfoPlanSupervisor(InfoHintSupervisor):
             print(message)
 
     def _call(self, stage: str, **kwargs):
-        """Tag the recorded call with *stage*, then make it.
+        """This arm's shorthand for a recorded supervisor call on its own VLM.
 
-        ``RecordingVLM`` labels whatever it is asked to infer with whatever ``stage`` was
-        last assigned, so setting the stage and calling were two separate statements at
-        every one of these sites — and a site that forgot to set it would be logged under
-        the *previous* stage, silently. ``supervisor_calls`` is the only record of this
-        arm's reasoning, so a mislabelled call is a quietly corrupted artifact rather than
-        a cosmetic problem. Binding the two together makes the mistake unavailable.
+        Every one of this class's VLM calls goes through here, so all of them land on
+        ``self.report.event_log`` in order, interleaved with the executor legs they drove.
         """
-        self._plan_vlm.stage = stage
-        return self._plan_vlm.infer(**kwargs)
+        return self._vlm_call(stage, self._plan_vlm, **kwargs)
 
     # -- Planning --------------------------------------------------------------
 
@@ -335,12 +323,12 @@ class InfoPlanSupervisor(InfoHintSupervisor):
     # -- Judging and repair ----------------------------------------------------
 
     def _segment_summaries(self, env_steps: list, step: str) -> List[str]:
-        # The one site that cannot use _call: the infer happens inside
-        # summarise_trajectory_segments, which is handed the recording VLM and calls it
-        # itself, so the stage has to be set on the object beforehand.
-        self._plan_vlm.stage = "judge_slice"
+        # The infer happens inside summarise_trajectory_segments, which batches the windows
+        # itself, so it takes a recording caller rather than a VLM. This used to be the one
+        # site that could not use _call and had to set a stage on a wrapper object first.
         return summarise_trajectory_segments(
-            env_steps, JUDGE_SLICE_PROMPT, self._game, step, self._plan_vlm,
+            env_steps, JUDGE_SLICE_PROMPT, self._game, step,
+            self._vlm_caller("judge_slice", self._plan_vlm),
             self._plan_max_new_tokens, self._max_frames_per_slice,
         )
 
@@ -578,7 +566,7 @@ class InfoPlanSupervisor(InfoHintSupervisor):
         finally:
             self._max_steps = episode_budget
 
-    def evaluate(self) -> Any:
+    def _evaluate(self) -> dict:
         """Plan, then supervise the executor through the plan until it lands or the budget ends.
 
         Intermediate steps are given to the executor as its **task** with
@@ -600,19 +588,15 @@ class InfoPlanSupervisor(InfoHintSupervisor):
         an action, so every attempt spends at least one env step and the budget always
         moves. The cap is now purely about step quality.
 
-        :return: The report of the last attempt that ran, whose ``termination_reason``
-            decides the episode.
+        :return: This arm's extra values. ``Supervisor.evaluate`` attaches the
+            :class:`~execution.report.SupervisorReport`, whose last executor leg carries the
+            ``termination_reason`` that decides the episode.
         """
-        # Cleared before write_plan so the log covers exactly this evaluate() call.
-        self.supervisor_calls.clear()
-        self._plan_vlm.context = {"phase": "planning"}
         self.write_plan()
         self.step_log = []
-        self.leg_reports = []
         self.completed_steps = []
         self.n_replans = 0
         budget = self._max_steps
-        last_report = None
 
         # No plan (nothing retrieved, or an unparseable planner reply) degrades to the
         # unplanned baseline rather than to a fabricated plan.
@@ -653,17 +637,11 @@ class InfoPlanSupervisor(InfoHintSupervisor):
                 if leg_hint and leg_hint != step:
                     self._say(f"      hint: {leg_hint}")
 
-                # Every supervisor call from here until the next leg — judging, hinting,
-                # revising — belongs to this attempt, and is tagged so the replay can slot
-                # them in after the executor calls they respond to.
-                self._plan_vlm.context = {"phase": "leg", "step_index": index,
-                                          "attempt": len(record["attempts"]) + 1}
+                # _run_leg -> call_executor files the report into report.event_log, after the
+                # supervisor calls that produced this leg's hint and before the ones that
+                # judge it. That ordering is the record; no per-leg tagging is needed, since
+                # each ExecutorReport carries its own task and hint.
                 report = self._run_leg(leg_task, leg_hint, self_terminate, budget)
-                last_report = report
-                self.leg_reports.append({
-                    "step_index": index, "attempt": len(record["attempts"]) + 1,
-                    "step": step, "hint": leg_hint, "report": report,
-                })
                 env_steps = [s for s in report.steps if isinstance(s, EnvironmentStepRecord)]
                 budget -= len(env_steps)
                 attempt = {"termination_reason": report.termination_reason,
@@ -781,4 +759,15 @@ class InfoPlanSupervisor(InfoHintSupervisor):
             self.step_log.append(record)
             index += 1
 
-        return last_report
+        # Only this arm's extras. Supervisor.evaluate attaches the report, and the last
+        # executor leg in its event_log is what used to be returned as `last_report`.
+        return {
+            "plan": list(self.plan),
+            "selected_ids": list(self.selected_ids),
+            "step_log": self.step_log,
+            "insights_block": self.insights_block,
+            "n_replans": self.n_replans,
+            "n_insights_candidate": self.n_insights_candidate,
+            "n_insights_kept": self.n_insights_kept,
+            "n_insights_distilled": self.n_insights_distilled,
+        }

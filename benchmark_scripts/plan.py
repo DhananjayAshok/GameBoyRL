@@ -33,40 +33,28 @@ from utils import log_error, log_info
 from benchmark_scripts import common
 
 
-def _join_leg_reports(supervisor) -> str | None:
-    """One `report` cell covering every attempt, under greppable headers.
+def _plan_summary(result: dict, report) -> dict:
+    """Flat counts for the CSV, from the supervisor's returned extras and its report.
 
-    Storing only the final attempt would hide the retries, which in this arm are the
-    interesting part: the same step attempted three times under three hints is the record of
-    what the supervisor tried and how the executor responded to each.
+    Reads the ``evaluate()`` return value rather than the supervisor object: the return
+    value is the contract, so a count here cannot go stale against an attribute that was
+    renamed. ``_join_leg_reports`` used to live beside this to stitch the per-attempt
+    trajectories into one CSV cell; ``SupervisorReport.__str__`` renders the interleaved
+    event log directly, so the stitching is gone.
     """
-    if not supervisor.leg_reports:
-        return None
-    blocks = []
-    for leg in supervisor.leg_reports:
-        step = leg["step"] if leg["step"] is not None else "(unplanned)"
-        header = (f"===== STEP {leg['step_index'] + 1} ATTEMPT {leg['attempt']} "
-                  f"[{leg['report'].termination_reason}] {step} =====")
-        if leg["hint"] and leg["hint"] != leg["step"]:
-            header += f"\nHINT: {leg['hint']}"
-        blocks.append(f"{header}\n{leg['report']}")
-    return "\n\n".join(blocks)
-
-
-def _plan_summary(supervisor) -> dict:
-    """Flat counts for the CSV, derived from step_log and the supervisor's own counters."""
-    attempts = [a for record in supervisor.step_log for a in record["attempts"]]
+    step_log = result["step_log"]
+    attempts = [a for record in step_log for a in record["attempts"]]
     return {
-        "n_plan_steps": len(supervisor.plan),
-        "n_steps_cleared": sum(1 for r in supervisor.step_log if r["cleared"]),
+        "n_plan_steps": len(result["plan"]),
+        "n_steps_cleared": sum(1 for r in step_log if r["cleared"]),
         "n_attempts": len(attempts),
-        "n_replans": sum(len(r["replans"]) for r in supervisor.step_log),
+        "n_replans": sum(len(r["replans"]) for r in step_log),
         # Without these an over-aggressive filter and a bad planner are indistinguishable
         # from the outcome alone.
-        "n_insights_candidate": supervisor.n_insights_candidate,
-        "n_insights_kept": supervisor.n_insights_kept,
-        "n_insights_distilled": supervisor.n_insights_distilled,
-        "n_supervisor_calls": len(supervisor.supervisor_calls),
+        "n_insights_candidate": result["n_insights_candidate"],
+        "n_insights_kept": result["n_insights_kept"],
+        "n_insights_distilled": result["n_insights_distilled"],
+        "n_supervisor_calls": len(report.supervisor_calls),
     }
 
 
@@ -164,10 +152,11 @@ def plan_cmd(obj, info_docs, insights_paths, mode, plan_vlm_model, plan_vlm_kind
         "hint",
         *SUMMARY_COLUMNS,
         "selected_entry_ids", "insights_block", "step_log",
-        # Every prompt and reply the supervisor produced. Large, and deliberately so: it is
-        # the only place the filter, the distillation, the plan and the judgements can be
-        # read back after a run.
-        "supervisor_calls",
+        # The supervisor's prompts and replies are NOT a column any more. They live on the
+        # archived SupervisorReport's event_log, interleaved with the executor legs they
+        # drove — which is both where the frames are and where the ordering is meaningful.
+        # As a JSON cell they were megabytes of text per row with numpy arrays degraded to
+        # str() by `default=str`.
         common.SESSION_COLUMN,
     ]
     tasks = common.select_tasks(get_benchmark_tasks(game=game), obj["n_tasks"])
@@ -177,7 +166,7 @@ def plan_cmd(obj, info_docs, insights_paths, mode, plan_vlm_model, plan_vlm_kind
                                                   columns, parameters)
 
     def run_one(row):
-        def play(environment, reset_idx):
+        def play(environment):
             supervisor = InfoPlanSupervisor(
                 task=row["task"],
                 executor_class=executor_class,
@@ -204,40 +193,28 @@ def plan_cmd(obj, info_docs, insights_paths, mode, plan_vlm_model, plan_vlm_kind
                 vlm_model=obj["executor_vlm_model"],
                 vlm_kind=obj["executor_vlm_kind"],
             )
-            report = supervisor.evaluate()
-            report_str = _join_leg_reports(supervisor)
+            result = supervisor.evaluate()
+            report = result["report"]
             if obj["verbose"]:
-                print(f"\n----- trajectory (attempt {reset_idx}) " + "-" * 44)
-                print(report_str)
+                print("\n----- trajectory " + "-" * 44)
+                print(str(report))
             return common.PlayResult(
                 report=report,
-                report_str=report_str,
-                n_invalid=sum(len(leg["report"].invalid_steps)
-                              for leg in supervisor.leg_reports),
-                # One entry per executor call, labelled with the step and attempt it served.
-                # Flattening these would lose which hint produced which actions, which is
-                # the whole record this arm exists to leave.
-                legs=[{"label": f"step {leg['step_index'] + 1} attempt {leg['attempt']}",
-                       "call_log": leg["report"].vlm_call_log}
-                      for leg in supervisor.leg_reports],
                 extras={
-                    "plan": PLAN_SEPARATOR.join(supervisor.plan) if supervisor.plan else None,
-                    "selected_ids": list(supervisor.selected_ids),
-                    "summary": _plan_summary(supervisor),
-                    # step_log holds the supervisor's decisions; supervisor_calls holds the
-                    # prompts and replies behind them. Strip nothing from either — they are
-                    # the only record of the supervisor's own reasoning, which never reaches
-                    # an ExecutorReport.
-                    "step_log": supervisor.step_log,
-                    "supervisor_calls": list(supervisor.supervisor_calls),
-                    "insights_block": supervisor.insights_block,
+                    "plan": PLAN_SEPARATOR.join(result["plan"]) if result["plan"] else None,
+                    "selected_ids": result["selected_ids"],
+                    "summary": _plan_summary(result, report),
+                    # The supervisor's decisions. The prompts and replies behind them are on
+                    # the report's event_log, interleaved with the executor legs they drove,
+                    # so they are no longer carried separately.
+                    "step_log": result["step_log"],
+                    "insights_block": result["insights_block"],
                 },
             )
 
         return common.run_episode(
             row, play,
             arm="plan",
-            max_resets=obj["max_resets"],
             controller_variant=obj["controller_variant"],
             executor_name=executor_class.__name__,
             model=model_save_name,
@@ -255,7 +232,6 @@ def plan_cmd(obj, info_docs, insights_paths, mode, plan_vlm_model, plan_vlm_kind
             # default=str so a report object or anything else non-serialisable that finds
             # its way into step_log degrades to text instead of losing the whole row.
             json.dumps(extras.get("step_log", []), default=str),
-            json.dumps(extras.get("supervisor_calls", []), default=str),
             json.dumps(outcome.session_dirs),
         ]
 

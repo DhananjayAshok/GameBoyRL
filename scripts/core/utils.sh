@@ -383,7 +383,6 @@ declare -A BENCHMARK_INFO_ALL_DEFAULTS=(
     ["hint_mode"]="both"
     ["baseline"]=true
     ["max_steps"]=50
-    ["max_resets"]=1
     ["max_concurrency"]=8
     ["hint_vlm_model"]=none
     ["hint_vlm_kind"]=none

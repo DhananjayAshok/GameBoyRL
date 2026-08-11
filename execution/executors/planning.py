@@ -44,7 +44,7 @@ class SequencePlannerExecutor(SimpleExecutor):
 
         One ``_vlm_call("action", ...)`` per *sequence*, then one
         :class:`~execution.report.EnvironmentStepRecord` per *action in that sequence* —
-        so its :attr:`~execution.report.VLMCallRecord.steps` holds N entries where every
+        so its :attr:`~execution.report.ExecutorVLMCallRecord.steps` holds N entries where every
         other executor's holds one.  That is representable because ownership is stored on
         the call record as each step is taken.
 

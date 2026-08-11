@@ -83,7 +83,7 @@ def info_cmd(obj, info_docs, insights_paths, mode, hint_vlm_model, hint_vlm_kind
                                                   columns, parameters)
 
     def run_one(row):
-        def play(environment, reset_idx):
+        def play(environment):
             supervisor = InfoHintSupervisor(
                 task=row["task"],
                 executor_class=executor_class,
@@ -101,28 +101,26 @@ def info_cmd(obj, info_docs, insights_paths, mode, hint_vlm_model, hint_vlm_kind
                 vlm_model=obj["executor_vlm_model"],
                 vlm_kind=obj["executor_vlm_kind"],
             )
-            report = supervisor.evaluate()
-            # Which entries the hint was synthesised from, kept per episode so a hint can be
-            # traced back to its evidence from the CSV alone. In init_state mode each id
-            # pins the exact stage-A row (source/group_idx#category) in insights.jsonl.
-            selected_ids = list(supervisor.selected_ids)
+            result = supervisor.evaluate()
+            # `selected_ids` says which entries the hint was synthesised from, kept per
+            # episode so a hint can be traced back to its evidence from the CSV alone. In
+            # init_state mode each id pins the exact stage-A row
+            # (source/group_idx#category) in insights.jsonl. Read from the returned dict
+            # rather than off the supervisor: the return value is the contract.
+            hint, selected_ids = result["hint"], result["selected_ids"]
             if obj["verbose"]:
-                print(f"\n  Hint for '{row['task']}': {supervisor.hint}")
+                print(f"\n  Hint for '{row['task']}': {hint}")
                 print(f"  Synthesised from {len(selected_ids)} entr(ies): {selected_ids}")
-                print(f"\n  Reset {reset_idx} trajectory:")
-                report.show()
+                for leg in result["report"].executor_reports:
+                    leg.show()
             return common.PlayResult(
-                report=report,
-                report_str=str(report),
-                n_invalid=len(report.invalid_steps),
-                legs=[{"label": "episode", "call_log": report.vlm_call_log}],
-                extras={"hint": supervisor.hint, "selected_ids": selected_ids},
+                report=result["report"],
+                extras={"hint": hint, "selected_ids": selected_ids},
             )
 
         return common.run_episode(
             row, play,
             arm="info",
-            max_resets=obj["max_resets"],
             controller_variant=obj["controller_variant"],
             executor_name=executor_class.__name__,
             model=model_save_name,

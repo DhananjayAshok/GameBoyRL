@@ -12,8 +12,6 @@ ARGS["executor"]="simple"
 ARGS["executor_vlm_model"]="Qwen/Qwen3-VL-8B-Instruct"   # use "none" for absent optionals, never ""
 ARGS["executor_vlm_kind"]="huggingface"   # use "none" for absent optionals, never ""
 ARGS["max_steps"]="50"
-ARGS["max_resets"]="1"
-ARGS["random_sample"]="1"
 ARGS["regenerate"]="false"
 
 REQUIRED_ARGS=("game")
@@ -64,13 +62,8 @@ done
 regenerate_flag=""
 if [[ "${ARGS["regenerate"]}" == "true" ]]; then regenerate_flag="--regenerate"; fi
 
-common="python run_benchmark.py --game ${ARGS["game"]} --executor ${ARGS["executor"]} --save_video True --max_resets ${ARGS["max_resets"]} --max_steps ${ARGS["max_steps"]} --executor_vlm_model ${ARGS["executor_vlm_model"]} --executor_vlm_kind ${ARGS["executor_vlm_kind"]} $regenerate_flag"
-
-model_save_name="${ARGS["executor_vlm_model"]##*/}"
-mkdir -p "results/benchmark/${ARGS["game"]}/"
-
-sample_log_file="${ARGS["executor"]}_${model_save_name}_sample_${ARGS["random_sample"]}.out"
-
-#$common --random_sample ${ARGS["random_sample"]} --verbose #&> "results/benchmark/${ARGS["game"]}/${sample_log_file}"
+# Group options precede the subcommand word: run_benchmark.py is a click group and
+# `baseline` is the no-knowledge arm.
+common="python run_benchmark.py --game ${ARGS["game"]} --executor ${ARGS["executor"]} --save_video True --max_steps ${ARGS["max_steps"]} --executor_vlm_model ${ARGS["executor_vlm_model"]} --executor_vlm_kind ${ARGS["executor_vlm_kind"]} $regenerate_flag baseline"
 
 $common

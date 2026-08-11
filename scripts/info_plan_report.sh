@@ -225,38 +225,27 @@ if len(attempts):
 # ------------------------------------------------------------- 6. the plans
 emit("## 5b. The supervisor's own calls")
 emit()
-if plan is not None and "supervisor_calls" in plan.columns:
-    per_stage, rows = Counter(), []
-    for episode, row in plan.iterrows():
-        try:
-            calls = json.loads(row["supervisor_calls"]) if isinstance(
-                row["supervisor_calls"], str) else []
-        except (json.JSONDecodeError, TypeError):
-            calls = []
-        for call in calls:
-            per_stage[call.get("stage", "?")] += 1
-            rows.append({"episode": episode, **call})
-    sup_calls = pd.DataFrame(rows)
-    emit("| stage | calls |")
-    emit("|---|---:|")
-    for stage, n in per_stage.most_common():
-        emit(f"| {stage} | {n} |")
+sup_calls = pd.DataFrame()
+# The per-stage breakdown used to be built from a `supervisor_calls` JSON column. That column
+# is gone: the calls now live on the archived SupervisorReport's event_log, interleaved with
+# the executor legs they drove, where they keep the images each call saw. `n_supervisor_calls`
+# survives as a scalar column because it is a number worth sorting and plotting on.
+if plan is not None and "n_supervisor_calls" in plan.columns:
+    emit(f"Total supervisor calls across {len(plan)} episode(s): "
+         f"**{int(plan['n_supervisor_calls'].sum())}**. The prompts and replies behind them "
+         f"are in `report.pkl.gz` under each episode's `session_dirs` path, in call order.")
     emit()
-    if plan is not None and "n_insights_candidate" in plan.columns:
-        emit("**Insight funnel per episode** — retrieved, kept by the filter, after "
-             "distillation. A big drop at either stage is the first thing to suspect when "
-             "plans get worse.")
-        emit()
-        emit("| # | task | retrieved | kept | distilled |")
-        emit("|---:|---|---:|---:|---:|")
-        for i in range(len(plan)):
-            r = plan.iloc[i]
-            emit(f"| {i} | {str(r['task'])[:40]} | {r['n_insights_candidate']} | "
-                 f"{r['n_insights_kept']} | {r['n_insights_distilled']} |")
-        emit()
-else:
-    sup_calls = pd.DataFrame()
-    emit("_no `supervisor_calls` column — this CSV predates supervisor-call logging_")
+if plan is not None and "n_insights_candidate" in plan.columns:
+    emit("**Insight funnel per episode** — retrieved, kept by the filter, after "
+         "distillation. A big drop at either stage is the first thing to suspect when "
+         "plans get worse.")
+    emit()
+    emit("| # | task | retrieved | kept | distilled |")
+    emit("|---:|---|---:|---:|---:|")
+    for i in range(len(plan)):
+        r = plan.iloc[i]
+        emit(f"| {i} | {str(r['task'])[:40]} | {r['n_insights_candidate']} | "
+             f"{r['n_insights_kept']} | {r['n_insights_distilled']} |")
     emit()
 
 emit("## 6. Plans, in full")
@@ -278,9 +267,9 @@ if plan is not None:
 # ------------------------------------------------------------ 7. every episode
 emit("## 7. Attempt-by-attempt, every episode")
 emit()
-emit("Each episode links to its frame-by-frame replay: every VLM call beside the screen it "
-     "was looking at, rebuilt by replaying the recorded actions into a fresh emulator "
-     "(`python -m debug_scripts.plan_replay`).")
+emit("Every VLM call and the screen it was looking at are in the archived supervisor report "
+     "beside each episode's video, at the `session_dirs` path on its CSV row "
+     "(`report.pkl.gz`).")
 emit()
 if len(steps):
     for ep in sorted(steps.episode.unique()):
@@ -343,17 +332,8 @@ print()
 print(f"Wrote {path}")
 PY
 
-echo
-echo "##### frame-by-frame replay (starts an emulator per episode) #####"
-# Loud on failure: the report written above links to these files, so a replay that dies
-# leaves a fresh report pointing at episodes from an older CSV — which reads as the two
-# disagreeing about whether an episode succeeded, rather than as a missing step.
-if ! python -m debug_scripts.plan_replay \
-        --game "$GAME" \
-        --csv "results/benchmark/$GAME/info_plan_retrieval_history_${STEM}${SUFFIX}.csv" \
-        --episodes all; then
-    echo
-    echo "!!! REPLAY FAILED — the episode links in report${SUFFIX}.md are NOT regenerated."
-    echo "!!! Do not read them beside this report; they describe a different run."
-    exit 1
-fi
+# The frame-by-frame replay step is gone. It re-executed each episode on a fresh emulator to
+# reconstruct the frames, because nothing on disk carried them. Every arm now archives its
+# SupervisorReport to <session_dir>/report.pkl.gz, and those records hold the images each
+# call actually saw — so the frames are read rather than rebuilt, and a divergent replay can
+# no longer misrepresent a run.

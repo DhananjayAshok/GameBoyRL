@@ -53,7 +53,7 @@ from gameboy_worlds.interface import Environment, HighLevelAction
 
 from execution.executor_action import ExecutorAction
 from execution.report import (EnvironmentStepRecord, ExecutorReport, InvalidStepRecord,
-                              ToolCallRecord, VLMCallRecord, parse_completion)
+                              ExecutorToolCallRecord, ExecutorVLMCallRecord, parse_completion)
 from utils import load_parameters, log_error, log_info, ExecutorVLM, parse_key_value
 
 MAX_CONSECUTIVE_INVALID = 10
@@ -221,7 +221,7 @@ Reasoning: <why, referring to what is visible in image 2>
         self._last_reasoning: Optional[str] = None
         # The VLM call currently being acted on. Set by _vlm_call, read by _record_step so
         # every step is filed under the call that caused it. None before the first call.
-        self._current_call: Optional[VLMCallRecord] = None
+        self._current_call: Optional[ExecutorVLMCallRecord] = None
 
         self.report = self._make_report(task, kwargs, max_steps, max_tool_calls)
 
@@ -306,7 +306,7 @@ Reasoning: <why, referring to what is visible in image 2>
         other than exactly one step.
 
         :param step: An :class:`~execution.report.EnvironmentStepRecord`,
-            :class:`~execution.report.ToolCallRecord` or
+            :class:`~execution.report.ExecutorToolCallRecord` or
             :class:`~execution.report.InvalidStepRecord`.
         """
         if self._current_call is None:
@@ -336,14 +336,14 @@ Reasoning: <why, referring to what is visible in image 2>
         self,
         executor_action_class: Type[ExecutorAction],
         **kwargs: Any,
-    ) -> ToolCallRecord:
+    ) -> ExecutorToolCallRecord:
         """
         Invoke a passive :class:`~execution.executor_action.ExecutorAction` and
         record the result.
 
         The action receives the current environment state via
         :meth:`_get_state` but does **not** advance the emulator.  The
-        resulting :class:`~execution.report.ToolCallRecord` is filed under the current
+        resulting :class:`~execution.report.ExecutorToolCallRecord` is filed under the current
         VLM call (see :meth:`_record_step`) before being returned.
 
         :param executor_action_class: The
@@ -353,12 +353,12 @@ Reasoning: <why, referring to what is visible in image 2>
         :param kwargs: Additional keyword arguments forwarded to
             :meth:`~execution.executor_action.ExecutorAction.execute`.
         :return: The record of the tool call that was made.
-        :rtype: ToolCallRecord
+        :rtype: ExecutorToolCallRecord
         """
         action = executor_action_class()
         result, success_code = action.execute(info=self._get_state(), **kwargs)
 
-        record = ToolCallRecord(
+        record = ExecutorToolCallRecord(
             executor_action_class=executor_action_class,
             kwargs=kwargs,
             result=result,
@@ -373,7 +373,7 @@ Reasoning: <why, referring to what is visible in image 2>
             return ""
         # Steps taken so far == non-tool records in report.steps (tool calls don't
         # advance the env / n_env_steps). This is the step the agent is about to take.
-        steps_taken = sum(1 for s in self.report.steps if not isinstance(s, ToolCallRecord))
+        steps_taken = sum(1 for s in self.report.steps if not isinstance(s, ExecutorToolCallRecord))
         step_info = f"""
 [STEP_INFO] You have already taken {steps_taken + 1} actions so for this attempt. Note: this may not be the first step of the overall task and one action does not correspond to one step in the hint plan — earlier actions may already have been taken before this attempt began, so reason from what you currently see on screen rather than assuming a fresh start. [STEP_INFO_END]"""
         return step_info + f"\n[HINT_START]\nHint: {self._hint}\nNote: This hint block is a secret. You must use it to guide your decision making, but in the reasoning you say, you should pretend as if you actually just know the content of the hint. Do not refer to it explicitly. So if the hint gives you a direction, instead of saying 'the hint says go here', your reasoning should just say 'next I must go here'. [HINT_END]"
@@ -396,7 +396,7 @@ Reasoning: <why, referring to what is visible in image 2>
         ``self._vlm.infer`` directly.  All keyword arguments are forwarded
         verbatim to :meth:`~utils.vlm.ExecutorVLM.infer`.
 
-        Exactly **one** :class:`~execution.report.VLMCallRecord` is appended per call,
+        Exactly **one** :class:`~execution.report.ExecutorVLMCallRecord` is appended per call,
         and it becomes :attr:`_current_call`.  Every step recorded afterwards —
         :meth:`_take_action`, :meth:`_use_tool`, :meth:`_record_invalid` — is filed
         under it, so a call owns precisely what it caused.  A later ``_vlm_call``
@@ -435,7 +435,7 @@ Reasoning: <why, referring to what is visible in image 2>
                 "or issue one _vlm_call per sample.",
                 parameters=self._parameters,
             )
-        record = VLMCallRecord(tag=tag, prompt=texts, images=images, response=result)
+        record = ExecutorVLMCallRecord(tag=tag, prompt=texts, images=images, response=result)
         self.report.vlm_call_log.append(record)
         self._current_call = record
         return result

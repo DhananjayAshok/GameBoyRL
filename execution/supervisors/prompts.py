@@ -48,7 +48,7 @@ Hint: <one or two sentence hint for a better approach>
 #
 # It now lives in utils.parsing alongside parse_steps, the only code that splits on it, and
 # is re-exported here so `from execution.supervisors import PLAN_SEPARATOR` — which
-# run_benchmark_info_plan.py does — keeps working.
+# benchmark_scripts/plan.py does — keeps working.
 
 
 # The planner writes for an executor that will be handed each step in isolation, with no

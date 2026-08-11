@@ -210,14 +210,15 @@ def parse_action_line(text) -> Optional[str]:
     """The action on the first ``Action:`` line, or ``None`` if there is no usable one.
 
     The single reader of the ``Action:`` format, which is a cross-module contract: the
-    executor chooses an action by it at run time, the frame tooling labels screenshots
-    with it, and ``plan_replay`` reconstructs an episode from it.
+    executor chooses an action by it at run time, and the frame tooling labels screenshots
+    with it.
 
     **The first match wins**, matching the executor — the code whose reading actually
-    determined what happened. ``plan_replay`` previously took the *last* match, so on a
-    reply containing more than one ``Action:`` line (a model that narrates a rejected
-    action before committing) a replay silently diverged from the run it existed to
-    reproduce.
+    determined what happened. A now-deleted replay tool took the *last* match, so on a reply
+    containing more than one ``Action:`` line (a model that narrates a rejected action before
+    committing) it silently diverged from the run it existed to reproduce. Unifying on the
+    executor's reading is what fixed that, and is why this rule is stated rather than left to
+    each caller.
 
     Non-string input gives ``None`` rather than raising, since callers map this over
     dataframe columns that may hold NaN.

@@ -159,8 +159,13 @@ def _attempt_task(
                 hint=hint or None,
             )
             result = supervisor.evaluate()
+            # evaluate() returns {"report": SupervisorReport, ...the checker's verdict}. The
+            # steps live on the report's single executor leg rather than being copied into
+            # the verdict dict.
+            executor_reports = result["report"].executor_reports
             env_steps = [
-                s for s in result["steps"] if isinstance(s, EnvironmentStepRecord)
+                s for report in executor_reports for s in report.steps
+                if isinstance(s, EnvironmentStepRecord)
             ]
             trajectory = _reconstruct_trajectory(env_steps, init_state)
 

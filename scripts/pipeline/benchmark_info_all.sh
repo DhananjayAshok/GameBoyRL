@@ -148,7 +148,6 @@ for run_hint_mode in $hint_modes; do
         --executor_vlm_model "$model_name" \
         --executor_vlm_kind "${ARGS["vlm_kind"]}" \
         --max_steps "${ARGS["max_steps"]}" \
-        --max_resets "${ARGS["max_resets"]}" \
         --max_concurrency "${ARGS["max_concurrency"]}" \
         --regenerate "${ARGS["regenerate"]}" \
         $hint_model_arg $hint_kind_arg || exit 1
@@ -167,7 +166,6 @@ if [[ "${ARGS["baseline"]}" == "true" ]]; then
         --executor_vlm_model "$model_name" \
         --executor_vlm_kind "${ARGS["vlm_kind"]}" \
         --max_steps "${ARGS["max_steps"]}" \
-        --max_resets "${ARGS["max_resets"]}" \
         --regenerate "${ARGS["regenerate"]}" || exit 1
     echo "  -> $results_dir/benchmark/$game/${executor}_${model_save_name}.csv"
 fi

@@ -16,6 +16,7 @@ import click
 from gameboy_worlds import get_benchmark_tasks
 
 from execution.registry import AVAILABLE_EXECUTORS
+from execution.supervisors import DummySupervisor
 
 from benchmark_scripts import common
 
@@ -45,33 +46,29 @@ def baseline_cmd(obj):
                                                   columns, parameters)
 
     def run_one(row):
-        def play(environment, reset_idx):
-            # Constructing an Executor runs the episode; `report` is populated by the time
-            # the constructor returns.
-            executor_instance = executor_class(
-                env=environment,
+        def play(environment):
+            # Through DummySupervisor rather than straight to the executor: every arm
+            # produces a SupervisorReport, so the archive and every reader have one shape.
+            # This supervisor adds no reasoning, which is what makes it the control.
+            supervisor = DummySupervisor(
                 task=row["task"],
+                executor_class=executor_class,
+                env=environment,
                 game=row["game"],
                 max_steps=obj["max_steps"],
                 max_tool_calls=obj["max_tool_calls"],
                 vlm_model=obj["executor_vlm_model"],
                 vlm_kind=obj["executor_vlm_kind"],
             )
-            report = executor_instance.report
+            result = supervisor.evaluate()
             if obj["verbose"]:
-                print(f"\n  Reset {reset_idx} trajectory:")
-                report.show()
-            return common.PlayResult(
-                report=report,
-                report_str=str(report),
-                n_invalid=len(report.invalid_steps),
-                legs=[{"label": "episode", "call_log": report.vlm_call_log}],
-            )
+                for leg in result["report"].executor_reports:
+                    leg.show()
+            return common.PlayResult(report=result["report"])
 
         return common.run_episode(
             row, play,
             arm="baseline",
-            max_resets=obj["max_resets"],
             controller_variant=obj["controller_variant"],
             executor_name=executor_class.__name__,
             model=model_save_name,

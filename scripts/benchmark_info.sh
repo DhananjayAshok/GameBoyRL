@@ -28,8 +28,6 @@ ARGS["hint_vlm_model"]=none
 ARGS["hint_vlm_kind"]=none
 ARGS["max_concurrency"]="8"
 ARGS["max_steps"]="50"
-ARGS["max_resets"]="1"
-ARGS["random_sample"]="1"
 ARGS["regenerate"]="false"
 
 REQUIRED_ARGS=("game")
@@ -101,11 +99,14 @@ if [[ "${ARGS["hint_vlm_model"]}" != "none" ]]; then hint_model_arg="--hint_vlm_
 hint_kind_arg=""
 if [[ "${ARGS["hint_vlm_kind"]}" != "none" ]]; then hint_kind_arg="--hint_vlm_kind ${ARGS["hint_vlm_kind"]}"; fi
 
-# run_benchmark_info.py keeps the python-level flag as --mode; only the shell vocabulary is
-# disambiguated, so the CSV/log naming below still matches the runner's own.
-common="python run_benchmark_info.py --game ${ARGS["game"]} --executor ${ARGS["executor"]} --mode ${ARGS["hint_mode"]} --save_video True --max_resets ${ARGS["max_resets"]} --max_steps ${ARGS["max_steps"]} --max_concurrency ${ARGS["max_concurrency"]} --executor_vlm_model ${ARGS["executor_vlm_model"]} --executor_vlm_kind ${ARGS["executor_vlm_kind"]} $docs_arg $insights_arg $hint_model_arg $hint_kind_arg $regenerate_flag"
-
-model_save_name="${ARGS["executor_vlm_model"]##*/}"
-mkdir -p "results/benchmark/${ARGS["game"]}/"
+# run_benchmark.py is a click group: options shared by every arm must precede the subcommand
+# word, and the arm's own options must follow it. Splitting the two here rather than building
+# one flag string is what keeps that ordering correct.
+#
+# The python-level flag is --mode; only the shell vocabulary is disambiguated to hint_mode,
+# so the CSV/log naming below still matches the runner's own.
+group_flags="--game ${ARGS["game"]} --executor ${ARGS["executor"]} --save_video True --max_steps ${ARGS["max_steps"]} --executor_vlm_model ${ARGS["executor_vlm_model"]} --executor_vlm_kind ${ARGS["executor_vlm_kind"]} $regenerate_flag"
+arm_flags="--mode ${ARGS["hint_mode"]} --max_concurrency ${ARGS["max_concurrency"]} $docs_arg $insights_arg $hint_model_arg $hint_kind_arg"
+common="python run_benchmark.py $group_flags info $arm_flags"
 
 $common

@@ -13,7 +13,7 @@ pattern, and ``derive_critique_hint`` is imported alongside the class by
 
 from __future__ import annotations
 
-from typing import Any, List, Optional, Type
+from typing import Any, Callable, List, Optional, Type
 
 from gameboy_worlds.interface import Environment
 
@@ -72,18 +72,18 @@ class SimpleCheckerSupervisor(Supervisor):
         parameters: Optional[dict] = None,
         **executor_kwargs: Any,
     ) -> None:
-        self._task = task
         self._evaluation_lookback = evaluation_lookback
         self._hint = hint
         if hint is not None:
             executor_kwargs["hint"] = hint
         executor_kwargs["allow_self_termination"] = allow_self_termination
-        super().__init__(executor_class, env, game, max_steps, max_tool_calls, parameters, **executor_kwargs)
+        super().__init__(task, executor_class, env, game, max_steps, max_tool_calls,
+                         parameters, **executor_kwargs)
         self._checker_vlm = VLM(checker_vlm_model, checker_vlm_kind)
         self._checker_max_new_tokens = checker_max_new_tokens
 
-    def evaluate(self) -> dict:
-        """Run the executor on the stored task and return the checker result."""
+    def _evaluate(self) -> dict:
+        """Run the executor on the stored task and return the checker's verdict."""
         return self.call_executor(self._task)
 
     _DESCRIBE_SLICE_SIZE = 10
@@ -98,7 +98,9 @@ class SimpleCheckerSupervisor(Supervisor):
         # Kept here rather than pushed into window_trajectory because skipping the
         # consolidate step is this caller's judgement, not a property of the windowing.
         if total <= slice_size:
-            output = self._checker_vlm.infer(
+            output = self._vlm_call(
+                "describe_slice",
+                self._checker_vlm,
                 texts=DESCRIBE_SLICE_PROMPT
                     .replace("[GAME]", self._game)
                     .replace("[START_IDX]", "1")
@@ -110,7 +112,8 @@ class SimpleCheckerSupervisor(Supervisor):
             return parse_key_value(output, "Description") or output.strip()
 
         windows = window_trajectory(
-            env_steps, DESCRIBE_SLICE_PROMPT, game=self._game, vlm=self._checker_vlm,
+            env_steps, DESCRIBE_SLICE_PROMPT, game=self._game,
+            call=self._vlm_caller("describe_slice", self._checker_vlm),
             max_new_tokens=self._checker_max_new_tokens, slice_size=slice_size,
         )
 
@@ -124,7 +127,9 @@ class SimpleCheckerSupervisor(Supervisor):
             .replace("[GAME]", self._game)
             .replace("[SEGMENT_DESCRIPTIONS]", "\n".join(segment_descriptions))
         )
-        output = self._checker_vlm.infer(
+        output = self._vlm_call(
+            "describe_consolidate",
+            self._checker_vlm,
             texts=consolidate_prompt,
             max_new_tokens=self._checker_max_new_tokens,
         )
@@ -168,7 +173,9 @@ class SimpleCheckerSupervisor(Supervisor):
             .replace("[TASK]", self._task)
             .replace("[DESCRIPTION]", description)
         )
-        judge_output = self._checker_vlm.infer(
+        judge_output = self._vlm_call(
+            "judge",
+            self._checker_vlm,
             texts=judge_prompt,
             images=final_frames,
             max_new_tokens=self._checker_max_new_tokens,
@@ -181,12 +188,13 @@ class SimpleCheckerSupervisor(Supervisor):
         # can slice the saved call log directly.
         safe_frame = parse_int(judge_output, "Safe success point")
         safe_success_point = _frame_to_call_cutoff(report.vlm_call_log, safe_frame)
-        # "steps" is the flattened view over the same call log, kept in the result dict
-        # for callers that want every step without walking the calls themselves.
-        executor_meta = {"vlm_call_log": report.vlm_call_log, "steps": report.steps, **run_meta}
 
+        # The judgement only. The call log and the flattened steps used to be copied in here
+        # too; they are reachable through the SupervisorReport that Supervisor.evaluate
+        # attaches, so returning them as well would be the same data under two names.
         success = parse_yes_no(judge_output, "Success") is True
-        return {"success": success, "safe_success_point": safe_success_point, "description": description, "reasoning": reasoning, **executor_meta}
+        return {"success": success, "safe_success_point": safe_success_point,
+                "description": description, "reasoning": reasoning, **run_meta}
 
 
 def _frame_to_call_cutoff(
@@ -225,7 +233,7 @@ def window_trajectory(
     slice_prompt: str,
     *,
     game: str,
-    vlm: VLM,
+    call: Callable[..., Any],
     max_new_tokens: int,
     task: str = "",
     slice_size: int = 8,
@@ -247,6 +255,11 @@ def window_trajectory(
     Parsing is deliberately **not** done here. The three callers read their replies with
     different keys and different fallbacks, and unifying that would change what each of
     them extracts; only the windowing is shared.
+
+    *call* is a callable, not a VLM: this function batches every window into one
+    ``infer`` call, and a supervisor must record that call. Passing
+    ``Supervisor._vlm_caller(stage, vlm)`` keeps it on the report; passing a bare VLM would
+    silently lose the whole batch.
 
     :return: ``[((start, end), raw_output), ...]``, one per window, in order. Empty when
         there are no steps.
@@ -281,8 +294,8 @@ def window_trajectory(
         segment_prompts.append(prompt)
         segment_images.append(frames[start:end])
 
-    outputs = vlm.infer(texts=segment_prompts, images=segment_images,
-                        max_new_tokens=max_new_tokens)
+    outputs = call(texts=segment_prompts, images=segment_images,
+                   max_new_tokens=max_new_tokens)
     return list(zip(segment_ranges, outputs))
 
 
@@ -291,7 +304,7 @@ def summarise_trajectory_segments(
     slice_prompt: str,
     game: str,
     task: str,
-    vlm: VLM,
+    call: Callable[..., Any],
     max_new_tokens: int,
     max_frames_per_slice: int = 8,
 ) -> List[str]:
@@ -304,7 +317,7 @@ def summarise_trajectory_segments(
         steps to summarise.
     """
     windows = window_trajectory(
-        env_steps, slice_prompt, game=game, task=task, vlm=vlm,
+        env_steps, slice_prompt, game=game, task=task, call=call,
         max_new_tokens=max_new_tokens, slice_size=max_frames_per_slice,
     )
 
@@ -338,12 +351,18 @@ def derive_critique_hint(
     Lives here rather than in vlm_scripts so every pipeline that derives a hint
     (currently vlm_scripts/attempt_tasks.py) uses the identical prompts — a difference in
     wording between two callers would make their numbers incomparable.
+
+    Not a supervisor method, so its calls go to the VLM unrecorded: the caller is a plain
+    script, not something holding a
+    :class:`~execution.report.SupervisorReport`. It takes a ``vlm`` and adapts it to the
+    ``call`` the windowing helper wants.
     """
     if not env_steps:
         return previous_hint
 
     segment_summaries = summarise_trajectory_segments(
-        env_steps, CRITIQUE_SLICE_PROMPT, game, task, vlm, max_new_tokens, max_frames_per_slice
+        env_steps, CRITIQUE_SLICE_PROMPT, game, task,
+        lambda **kwargs: vlm.infer(**kwargs), max_new_tokens, max_frames_per_slice
     )
     if not segment_summaries:
         return previous_hint

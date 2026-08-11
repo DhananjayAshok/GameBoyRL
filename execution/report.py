@@ -1,14 +1,14 @@
 """
-Data structures for recording a complete executor run.
+Data structures for recording a complete executor run, and the supervisor run around it.
 
 A run is **one list**: :attr:`ExecutorReport.vlm_call_log`, holding one
-:class:`VLMCallRecord` per inference call, in order. Each call owns the steps it
-produced, in :attr:`VLMCallRecord.steps`:
+:class:`ExecutorVLMCallRecord` per inference call, in order. Each call owns the steps it
+produced, in :attr:`ExecutorVLMCallRecord.steps`:
 
 - **0 steps** — an auxiliary call (``reflection``, ``map_update``, ``done_check``, …)
   that reasoned about the run without acting on it.
 - **1 step** — the ordinary case: an action-tagged call that took an
-  :class:`EnvironmentStepRecord`, ran a passive tool (:class:`ToolCallRecord`), or
+  :class:`EnvironmentStepRecord`, ran a passive tool (:class:`ExecutorToolCallRecord`), or
   produced nothing usable (:class:`InvalidStepRecord`).
 - **N steps** — a call that committed to several actions at once, as
   :class:`~execution.executors.planning.SequencePlannerExecutor` does.
@@ -26,6 +26,12 @@ call log, so anything that just wants "every step in order" is unchanged.
 The module functions cover the completion-check contract shared with the executors and
 the plan supervisor: :func:`parse_completion` (three-valued) and :func:`says_complete`
 (two-valued, anything-but-yes is no).
+
+The supervisor mirror lives at the bottom: :class:`SupervisorVLMCallRecord`,
+:class:`SupervisorToolCallRecord` and :class:`SupervisorReport`, whose
+:attr:`~SupervisorReport.event_log` interleaves the supervisor's own calls with the
+:class:`ExecutorReport` of every executor it ran. That is the artifact the benchmark saves;
+the executor records are reached through it.
 """
 
 from __future__ import annotations
@@ -46,7 +52,7 @@ from utils import load_parameters, log_error, parse_yes_no
 
 
 @dataclass
-class ToolCallRecord:
+class ExecutorToolCallRecord:
     """
     Record of a single passive tool call made by an executor.
 
@@ -116,8 +122,8 @@ class InvalidStepRecord:
     """
     Record of an action-tagged VLM call that did **not** advance the emulator.
 
-    Held in the producing call's :attr:`VLMCallRecord.steps` alongside
-    :class:`EnvironmentStepRecord` and :class:`ToolCallRecord`, so that a call which
+    Held in the producing call's :attr:`ExecutorVLMCallRecord.steps` alongside
+    :class:`EnvironmentStepRecord` and :class:`ExecutorToolCallRecord`, so that a call which
     reached the environment and one whose reply was unusable are both recorded as
     outcomes of that call rather than one of them leaving a hole.
 
@@ -133,11 +139,11 @@ class InvalidStepRecord:
 
 
 #: Anything an executor can produce from one VLM call.
-StepRecord = Union[EnvironmentStepRecord, ToolCallRecord, InvalidStepRecord]
+StepRecord = Union[EnvironmentStepRecord, ExecutorToolCallRecord, InvalidStepRecord]
 
 
 @dataclass
-class VLMCallRecord:
+class ExecutorVLMCallRecord:
     """
     Record of a single VLM inference call, and whatever the executor did as a result.
 
@@ -225,10 +231,10 @@ class ExecutorReport:
     max_steps: int
     max_tool_calls: int
     initial_state: Dict[str, Any]
-    vlm_call_log: List[VLMCallRecord] = field(default_factory=list)
+    vlm_call_log: List[ExecutorVLMCallRecord] = field(default_factory=list)
     """
-    The run. One :class:`VLMCallRecord` per inference call, in order, each owning the
-    steps it produced (:attr:`VLMCallRecord.steps`). This is the only stored log —
+    The run. One :class:`ExecutorVLMCallRecord` per inference call, in order, each owning the
+    steps it produced (:attr:`ExecutorVLMCallRecord.steps`). This is the only stored log —
     everything else on this class is a view over it.
     """
     final_state: Optional[Dict[str, Any]] = None
@@ -402,7 +408,7 @@ def _step_summary(step: StepRecord) -> str:
 
 #: Tags of the calls that ask the model for an action, and so are the ones expected to
 #: own steps. This is a **label, not a mechanism** — step ownership is recorded directly
-#: in :attr:`VLMCallRecord.steps` and nothing derives it from the tag. Consumers that
+#: in :attr:`ExecutorVLMCallRecord.steps` and nothing derives it from the tag. Consumers that
 #: reconstruct an action sequence from a call log alone filter on this to skip calls that
 #: were never asked for an action.
 ACTION_TAGS = {"action", "score", "decide"}
@@ -467,7 +473,7 @@ class SimpleReport(ExecutorReport):
     @property
     def n_tool_calls(self) -> int:
         """Number of tool calls made."""
-        return sum(1 for s in self.steps if isinstance(s, ToolCallRecord))
+        return sum(1 for s in self.steps if isinstance(s, ExecutorToolCallRecord))
 
     @property
     def env_step_records(self) -> List[EnvironmentStepRecord]:
@@ -475,6 +481,148 @@ class SimpleReport(ExecutorReport):
         return [s for s in self.steps if isinstance(s, EnvironmentStepRecord)]
 
     @property
-    def tool_call_records(self) -> List[ToolCallRecord]:
+    def tool_call_records(self) -> List[ExecutorToolCallRecord]:
         """Ordered list of tool call records."""
-        return [s for s in self.steps if isinstance(s, ToolCallRecord)]
+        return [s for s in self.steps if isinstance(s, ExecutorToolCallRecord)]
+
+
+# ---------------------------------------------------------------------------
+# Supervisor side
+# ---------------------------------------------------------------------------
+# The executor records above answer "what did the agent do". These answer "what did the
+# thing driving the agent do", in the same shape and for the same reason: before this, a
+# supervisor's own VLM calls went straight to the VLM and touched no report, so a run left
+# no trace of *why* the supervisor did what it did.
+
+
+@dataclass
+class SupervisorToolCallRecord:
+    """Record of a passive tool call made by a *supervisor*.
+
+    The supervisor-side counterpart of :class:`ExecutorToolCallRecord`. **Nothing produces
+    one yet** — supervisors have no tools — so :attr:`SupervisorVLMCallRecord.steps` is
+    always empty in practice. It exists so the shape matches the executor side and a
+    supervisor tool can be added without changing the record types or the readers.
+
+    :param tool_name: Identifier of the tool invoked.
+    :param kwargs: Keyword arguments it was invoked with.
+    :param result: Whatever the tool returned, or None.
+    :param success_code: Tool-defined status, or None.
+    """
+
+    tool_name: str
+    kwargs: Dict[str, Any]
+    result: Optional[Dict[str, Any]] = None
+    success_code: Optional[int] = None
+
+
+#: What a supervisor VLM call can own. Only one member today; a Union so adding a second
+#: (an invalid-reply record, say) does not change every annotation that mentions it.
+SupervisorStepRecord = Union[SupervisorToolCallRecord]
+
+
+@dataclass
+class SupervisorVLMCallRecord:
+    """Record of a single VLM call made by a supervisor, and whatever it did as a result.
+
+    Mirrors :class:`ExecutorVLMCallRecord`, with two differences: :attr:`steps` is
+    restricted to supervisor tool calls, and the label is :attr:`stage` rather than a tag,
+    because what varies on the supervisor side is which phase of its own reasoning the call
+    served — ``plan``, ``filter``, ``distil``, ``judge``, ``hint``, ``revise``.
+
+    :param stage: Which phase of the supervisor's reasoning this call served.
+    :param images: Images given to the VLM for this call.
+    :param prompt: The prompt sent.
+    :param response: The raw text returned.
+    :param steps: What this call produced. Always empty today — see
+        :class:`SupervisorToolCallRecord`.
+
+    .. note:: An unparseable reply leaves no marker: it is recorded in :attr:`response`
+        like any other, and the caller's failure to parse it is not represented. The
+        executor side has :class:`InvalidStepRecord` for exactly this, and a
+        ``SupervisorInvalidStepRecord`` is the obvious future addition — a truncated judge
+        verdict is currently indistinguishable from a judgement that genuinely said no.
+    """
+
+    stage: str
+    images: List[np.ndarray]
+    prompt: str
+    response: str
+    steps: List[SupervisorStepRecord] = field(default_factory=list)
+
+
+@dataclass
+class SupervisorReport:
+    """Complete record of one supervisor run.
+
+    The supervisor analogue of :class:`ExecutorReport`, and the artifact the benchmark
+    saves. Where an executor run is one list of VLM calls, a supervisor run is one list of
+    **events** — :attr:`event_log` — because a supervisor alternates between thinking and
+    handing control to an executor, and the order of those two is the thing worth keeping.
+
+    Each entry is either a :class:`SupervisorVLMCallRecord` (the supervisor thought) or an
+    :class:`ExecutorReport` (the supervisor ran an executor, and here is everything that
+    executor did). Nested :class:`SupervisorReport` entries are deliberately not allowed:
+    no supervisor currently drives another one, and a layer that does — a strategist over
+    several supervisors — would own its own list of these rather than nest.
+
+    Each :class:`ExecutorReport` is self-identifying, so no per-entry labelling is needed:
+    ``task`` says what that leg was asked to do (the plan arm passes each plan step as the
+    executor's task) and ``init_kwargs`` carries the hint it ran under.
+
+    :param task: The task the supervisor was given.
+    :param supervisor_name: ``__class__.__name__`` of the supervisor.
+    :param game: Name of the game the run took place in.
+    :param init_kwargs: Supervisor-specific constructor arguments, for reproducing the run.
+    :param event_log: Supervisor calls and executor runs, interleaved, in order.
+    """
+
+    task: str
+    supervisor_name: str
+    game: str
+    init_kwargs: Dict[str, Any] = field(default_factory=dict)
+    event_log: List[Union[SupervisorVLMCallRecord, ExecutorReport]] = field(default_factory=list)
+
+    @property
+    def supervisor_calls(self) -> List[SupervisorVLMCallRecord]:
+        """Just the supervisor's own calls, in order. A view, not stored state."""
+        return [e for e in self.event_log if isinstance(e, SupervisorVLMCallRecord)]
+
+    @property
+    def executor_reports(self) -> List[ExecutorReport]:
+        """Just the executor runs, in order. A view, not stored state."""
+        return [e for e in self.event_log if isinstance(e, ExecutorReport)]
+
+    @property
+    def n_invalid(self) -> int:
+        """Unparseable executor responses across every leg.
+
+        Summed here rather than at each call site: the plan arm has many legs and every
+        consumer that wanted this total was reimplementing the same sum.
+        """
+        return sum(len(report.invalid_steps) for report in self.executor_reports)
+
+    def __str__(self) -> str:
+        """The interleaved event log as text, for the benchmark CSV's ``report`` column.
+
+        Executor runs delegate to :meth:`ExecutorReport.__str__`, so an executor leg reads
+        exactly as it does on its own; supervisor calls are rendered around them.
+        """
+        if not self.event_log:
+            return "  (no supervisor events recorded)"
+        lines: List[str] = []
+        leg = 0
+        for event in self.event_log:
+            if isinstance(event, SupervisorVLMCallRecord):
+                lines.append(f"===== SUPERVISOR [{event.stage}] =====")
+                lines.append(_indent(f"Prompt:\n{event.prompt}"))
+                lines.append(_indent(f"Response:\n{event.response}"))
+            else:
+                leg += 1
+                hint = event.init_kwargs.get("hint") if event.init_kwargs else None
+                header = f"===== EXECUTOR LEG {leg}: {event.task!r} ====="
+                lines.append(header)
+                if hint:
+                    lines.append(_indent(f"hint: {hint}"))
+                lines.append(str(event))
+        return "\n".join(lines)

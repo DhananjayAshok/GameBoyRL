@@ -4,7 +4,8 @@ Benchmark diagnostics: per-episode trajectories, and a paired base-vs-fine-tuned
 Input (produced by scripts/benchmark.sh / scripts/pipeline/serve_and_benchmark.sh)
 ----------------------------------------------------------------------------------
 <results_dir>/benchmark/<game>/<executor>_<model>.csv
-    game, task, success, n_resets, n_steps, n_invalid, subgoals_reached, all_subgoals, report
+    game, task, success, n_steps, n_invalid, subgoals_reached, all_subgoals, report,
+    session_dirs
 `success` is the environment's own verdict (termination_reason == "terminated"), not a
 VLM judge — this is the only ground-truth success signal in the pipeline.
 
@@ -41,10 +42,13 @@ from debug_scripts.stats import mcnemar_exact, wilson, wilson_str
 
 # TODO: this parses ExecutorReport.__str__ output and assumes ONE "│ → " outcome line
 # per call. That is no longer guaranteed: a VLM call now owns a list of steps
-# (VLMCallRecord.steps), and SequencePlannerExecutor emits several outcome lines under a
-# single call header. Reports from the "sequence" executor will therefore lose all but
-# one outcome here, and episode_actions() in compare.py inherits that. Fix by collecting
-# a list of outcomes per call rather than a single "outcome" field.
+# (ExecutorVLMCallRecord.steps), and SequencePlannerExecutor emits several outcome lines under
+# a single call header, so reports from the "sequence" executor lose all but one outcome here.
+#
+# The real fix is to stop parsing rendered text at all: every arm now archives its
+# SupervisorReport to <session_dir>/report.pkl.gz, so this command can read the records
+# directly — images, prompts, responses and every step per call — instead of reconstructing a
+# lossy subset from the CSV's `report` string.
 CALL_HEADER = re.compile(r"^\s*┌─ \[([A-Z_]+)\] \(call (\d+)\)")
 CALL_FOOTER = re.compile(r"^\s*└─+")
 PROMPT_MARK = "| Prompt:"
@@ -143,8 +147,7 @@ def _episode_section(row, calls, paths, bench_game, model, report_dir, max_calls
         md.h2(f"{row['task']}"),
         md.bullets([
             f"success: **{row['success']}**",
-            f"steps: **{row['n_steps']}** · invalid: **{row['n_invalid']}** · "
-            f"resets: **{row['n_resets']}**",
+            f"steps: **{row['n_steps']}** · invalid: **{row['n_invalid']}**",
             f"subgoals: **{len(subgoals)}/{len(all_subgoals)}** "
             f"({', '.join(subgoals) if subgoals else 'none reached'})",
             f"VLM calls recorded: **{len(calls)}**",

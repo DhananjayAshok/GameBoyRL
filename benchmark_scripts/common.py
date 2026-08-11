@@ -39,7 +39,6 @@ COMMON_COLUMNS = [
     "game",
     "task",
     "success",
-    "n_resets",
     "n_steps",
     "n_invalid",
     "subgoals_reached",
@@ -47,11 +46,12 @@ COMMON_COLUMNS = [
     "report",
 ]
 
-# Points at the emulator session directory for each reset, which is where both the recorded
-# video and the archived VLM call log live. Always the last column.
+# Points at the emulator session directory for this episode, which is where both the
+# recorded video and the archived executor report live. Always the last column.
 SESSION_COLUMN = "session_dirs"
 
-CALL_LOG_FILENAME = "vlm_call_log.pkl.gz"
+#: Pickled per-episode executor report(s), written into the session dir beside videos/0.mp4.
+REPORT_FILENAME = "report.pkl.gz"
 
 
 # ---------------------------------------------------------------------------
@@ -181,23 +181,30 @@ def load_insight_rows(insights_paths: str, parameters: dict) -> list:
 class PlayResult:
     """What an arm hands back after driving one attempt at a task.
 
-    :param report: The executor report, used only for its ``termination_reason``. May be
-        None when an arm's supervisor produced nothing.
-    :param report_str: The rendered trajectory for the CSV ``report`` column.
-    :param n_invalid: Invalid steps this attempt, counted however the arm needs to — the
-        plan arm has to sum across its legs rather than read one report.
-    :param legs: ``[{"label": str, "call_log": list}]``, one entry per executor call the
-        attempt made. Single-element for the baseline and hint arms; one per leg for the
-        plan arm, where the attempt boundaries are the interesting part and flattening
-        them would lose which hint produced which actions.
+    :param report: This episode's :class:`~execution.report.SupervisorReport` — every
+        supervisor call and every executor leg, interleaved. The archived artifact, and the
+        only place the frames exist.
     :param extras: Arm-specific values, keyed by name, for that arm's extra columns.
+
+    ``report_str``, ``n_invalid`` and ``legs`` used to be separate fields here. All three are
+    now properties of the report (``str(report)``, ``report.n_invalid``,
+    ``report.executor_reports``), and carrying them alongside meant the same fact could be
+    recorded twice and disagree.
     """
 
     report: Any
-    report_str: Optional[str]
-    n_invalid: int
-    legs: list = field(default_factory=list)
     extras: dict = field(default_factory=dict)
+
+    @property
+    def success(self) -> bool:
+        """Whether the environment signalled the task complete on the last executor leg.
+
+        The environment's own verdict, never a supervisor's judgement — it is the pipeline's
+        only ground-truth success signal. An episode with no executor leg (a supervisor that
+        produced nothing) is a failure.
+        """
+        legs = self.report.executor_reports if self.report is not None else []
+        return bool(legs) and legs[-1].termination_reason == "terminated"
 
 
 @dataclass
@@ -205,7 +212,6 @@ class EpisodeOutcome:
     """The per-task result every arm produces, whatever drove the episode."""
 
     success: bool = False
-    n_resets: int = 0
     n_steps: int = 0
     n_invalid: int = 0
     subgoals_reached: list = field(default_factory=list)
@@ -220,7 +226,7 @@ def session_path_of(environment) -> Optional[str]:
     """The emulator instance directory this environment records into.
 
     ``<storage>/sessions/<game>/<session_name>/<task>/<n>_<hash>/``, holding ``videos/0.mp4``
-    and — once :func:`save_call_log` has run — the archived call log. Read from the emulator
+    and — once :func:`save_report` has run — the archived report. Read from the emulator
     rather than reconstructed from the naming convention, because the trailing ``<n>_<hash>``
     is chosen at construction time and a convention-based guess has to fall back to "the most
     recently modified directory", which is wrong as soon as a task has been run twice.
@@ -232,15 +238,22 @@ def session_path_of(environment) -> Optional[str]:
     return getattr(emulator, "session_path", None) if emulator is not None else None
 
 
-def save_call_log(session_path: str, *, arm: str, row, executor_name: str, model: str,
-                  reset: int, legs: list) -> Optional[str]:
-    """Archive one attempt's VLM calls beside the video it produced.
+def save_report(session_path: str, *, arm: str, row, executor_name: str, model: str,
+                report) -> Optional[str]:
+    """Archive this episode's :class:`~execution.report.SupervisorReport` beside its video.
 
-    Written gzipped: the records are dominated by prompt text, not frames, so gzip is worth
-    roughly 40x on a real log (810KB -> 22KB measured) for well under a tenth of a second.
-    Uncompressed, always-on archiving across a full sweep would be gigabytes for no reason.
+    The report is what makes an episode reconstructable after the fact. Its ``event_log``
+    interleaves the supervisor's own calls with the full report of every executor leg, and
+    each call record — either kind — carries the images it saw, its prompt and the raw
+    response. Nothing else on disk has the frames: the CSV's ``report`` column is a rendered
+    string, and the executor's own PNGs are written only under ``--verbose`` into a directory
+    keyed on the executor class, which one run overwrites for the next.
 
-    Self-describing rather than a bare list, so a reader does not need to know which arm or
+    Written gzipped, since always-on archiving across a full sweep is otherwise gigabytes.
+    Compression is worth far more on the prompt text than on the frames, so the ratio
+    depends on how image-heavy the run is.
+
+    Self-describing rather than a bare report, so a reader does not need to know which arm or
     which run wrote it — the benchmark CSV and this file are otherwise linked only by a
     directory path.
 
@@ -254,32 +267,36 @@ def save_call_log(session_path: str, *, arm: str, row, executor_name: str, model
         "init_state": row.get("init_state"),
         "executor": executor_name,
         "model": model,
-        "reset": reset,
-        "legs": legs,
+        "report": report,
     }
-    path = os.path.join(session_path, CALL_LOG_FILENAME)
+    path = os.path.join(session_path, REPORT_FILENAME)
     try:
         with gzip.open(path, "wb", compresslevel=6) as handle:
             pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
         return path
     except Exception as error:  # noqa: BLE001 - archiving must never fail a run
-        print(f"WARNING: could not write call log to {path}: {error}")
+        print(f"WARNING: could not write report to {path}: {error}")
         return None
 
 
-def run_episode(row, play: Callable[[Any, int], PlayResult], *, arm: str, max_resets: int,
+def run_episode(row, play: Callable[[Any], PlayResult], *, arm: str,
                 controller_variant: str, executor_name: str, model: str,
                 **emulator_kwargs) -> EpisodeOutcome:
-    """Run one benchmark task to success or exhaustion.
+    """Run one benchmark task, once.
 
-    Owns everything that is the same for every arm: the reset loop, subgoal accumulation,
-    step totals, archiving, environment teardown and error trapping. ``play(environment,
-    reset_idx)`` is the only part an arm supplies — it drives one attempt and reports what
-    happened, including its own verbose output, since what is worth printing differs by arm.
+    Owns everything that is the same for every arm: subgoal accumulation, step totals,
+    archiving, environment teardown and error trapping. ``play(environment)`` is the only
+    part an arm supplies — it drives the episode and reports what happened, including its
+    own verbose output, since what is worth printing differs by arm.
+
+    One attempt per task, deliberately. A whole-task retry built a second emulator session
+    — hence a second video and a second report — under one CSV row, so the row described a
+    single attempt while the session directory held several and nothing said which was
+    which. Arms that retry *internally* (the plan arm's --max_attempts_per_step and
+    --max_replans) are unaffected: those stay inside one session.
 
     An exception anywhere leaves ``error=True`` and whatever was accumulated up to that
-    point, matching the previous behaviour: the sweep records the failure and moves on
-    rather than losing the rest of the run.
+    point: the sweep records the failure and moves on rather than losing the rest of the run.
     """
     outcome = EpisodeOutcome()
     mission = row["task"]
@@ -288,48 +305,41 @@ def run_episode(row, play: Callable[[Any, int], PlayResult], *, arm: str, max_re
     emulator_kwargs["session_name"] += f"/{task_str}/"
     emulator_kwargs["wait_ticks"] = 20
 
-    n_resets = 1
     try:
-        while n_resets < max_resets + 1:
-            environment = get_test_environment(
-                row=row, controller_variant=controller_variant, **emulator_kwargs
-            )
-            # Captured before close(): the emulator removes its session directory on close
-            # when nothing was written into it.
-            session_path = session_path_of(environment)
+        environment = get_test_environment(
+            row=row, controller_variant=controller_variant, **emulator_kwargs
+        )
+        # Captured before close(): the emulator removes its session directory on close
+        # when nothing was written into it.
+        session_path = session_path_of(environment)
 
-            result = play(environment, n_resets)
+        result = play(environment)
 
-            last_state = environment.get_info()
-            if outcome.subgoals_all is None:
-                outcome.subgoals_all = last_state["subgoals"]["all"]
-            for subgoal in last_state["subgoals"]["completed"]:
-                if subgoal not in outcome.subgoals_reached:
-                    outcome.subgoals_reached.append(subgoal)
+        last_state = environment.get_info()
+        outcome.subgoals_all = last_state["subgoals"]["all"]
+        for subgoal in last_state["subgoals"]["completed"]:
+            if subgoal not in outcome.subgoals_reached:
+                outcome.subgoals_reached.append(subgoal)
 
-            outcome.n_steps += last_state["core"]["steps"]
-            outcome.n_invalid += result.n_invalid
-            outcome.report_str = result.report_str
-            outcome.extras = result.extras
+        outcome.n_steps += last_state["core"]["steps"]
+        outcome.n_invalid += result.report.n_invalid if result.report is not None else 0
+        outcome.report_str = str(result.report) if result.report is not None else None
+        outcome.extras = result.extras
 
-            if session_path is not None:
-                save_call_log(session_path, arm=arm, row=row, executor_name=executor_name,
-                              model=model, reset=n_resets - 1, legs=result.legs)
-                outcome.session_dirs.append(session_path)
+        if session_path is not None:
+            save_report(session_path, arm=arm, row=row, executor_name=executor_name,
+                        model=model, report=result.report)
+            outcome.session_dirs.append(session_path)
 
-            environment.close()
-            outcome.error = False
-            if result.report is not None and result.report.termination_reason == "terminated":
-                outcome.success = True
-                break
-            n_resets += 1
+        environment.close()
+        outcome.error = False
+        outcome.success = result.success
 
     except Exception as error:  # noqa: BLE001 - one bad task must not end the sweep
         outcome.error = True
         print(f"Error during execution of task '{mission}': {error}")
         traceback.print_exc()
 
-    outcome.n_resets = n_resets - 1
     return outcome
 
 
@@ -344,7 +354,6 @@ def common_row(row, outcome: EpisodeOutcome) -> list:
         row["game"],
         row["task"],
         outcome.success,
-        outcome.n_resets,
         outcome.n_steps,
         outcome.n_invalid,
         outcome.subgoals_reached,

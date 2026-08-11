@@ -5,8 +5,9 @@ Turning past attempts into a hint for the next one.
 task at hand and writes a hint from what survives.  :class:`InfoPlanSupervisor`
 subclasses it, so anything added here is inherited by the plan arm.
 
-:class:`RecordingVLM` is a thin wrapper that captures every call made through it so
-the calls can be attributed to the supervisor rather than the executor.
+Both route every VLM call through :meth:`~execution.supervisors.base.Supervisor._vlm_call`,
+so the supervisor's own reasoning lands on its
+:class:`~execution.report.SupervisorReport` beside the executor runs it drove.
 """
 
 from __future__ import annotations
@@ -89,15 +90,14 @@ class InfoHintSupervisor(Supervisor):
         parameters: Optional[dict] = None,
         **executor_kwargs: Any,
     ) -> None:
-        self._task = task
         self._documents = documents or []
         self._insight_rows = insight_rows or []
         self._mode = mode
         self._init_state = init_state
         self._max_concurrency = max_concurrency
         self._hint_max_new_tokens = hint_max_new_tokens
-        super().__init__(executor_class, env, game, max_steps, max_tool_calls, parameters,
-                         **executor_kwargs)
+        super().__init__(task, executor_class, env, game, max_steps, max_tool_calls,
+                         parameters, **executor_kwargs)
         self._hint_vlm = VLM(hint_vlm_model, hint_vlm_kind)
         # Populated by write_hint() so the caller (and debug.py info_hint) can inspect why a
         # hint came out the way it did without re-running the pipeline. ``selected_ids`` is
@@ -151,8 +151,8 @@ class InfoHintSupervisor(Supervisor):
         if entry_frame is not None:
             images.append(entry_frame)
 
-        output = self._hint_vlm.infer(texts=prompt, images=images,
-                                      max_new_tokens=self._hint_max_new_tokens)
+        output = self._vlm_call("filter", self._hint_vlm, texts=prompt, images=images,
+                                max_new_tokens=self._hint_max_new_tokens)
         verdict = parse_yes_no(output, "Relevant")
         reason = (parse_key_value(output, "Reasoning") or "").strip()
         return verdict is True, reason
@@ -255,8 +255,8 @@ class InfoHintSupervisor(Supervisor):
             .replace("[TASK]", self._task)
             .replace("[INSIGHTS]", "\n\n".join(blocks))
         )
-        output = self._hint_vlm.infer(texts=prompt, images=[screen],
-                                      max_new_tokens=self._hint_max_new_tokens)
+        output = self._vlm_call("hint", self._hint_vlm, texts=prompt, images=[screen],
+                                max_new_tokens=self._hint_max_new_tokens)
         hint = (parse_key_value(output, "Hint") or "").strip()
 
         if not hint or hint.upper().startswith("NO HINT"):
@@ -267,60 +267,18 @@ class InfoHintSupervisor(Supervisor):
 
     # -- Supervisor API --------------------------------------------------------
 
-    def evaluate(self) -> Any:
+    def _evaluate(self) -> dict:
         """Write a hint from the current screen, then run the executor with it."""
         hint = self.write_hint()
         if hint is not None:
             self._executor_kwargs["hint"] = hint
         else:
             self._executor_kwargs.pop("hint", None)
-        return self.call_executor(self._task)
+        self.call_executor(self._task)
+        return {"hint": self.hint, "selected_ids": list(self.selected_ids)}
 
     def process_executor_return(self, report: ExecutorReport) -> Any:
-        """Hand the report back unchanged — the benchmark runner reads it directly."""
+        """Hand the report back unchanged — ``call_executor`` has already filed it."""
         return report
-
-
-class RecordingVLM:
-    """Wraps a VLM so every call the supervisor makes is kept, tagged with its stage.
-
-    The supervisor's own calls — filter, distil, plan, judge, hint, revise — go straight to
-    a VLM and never touch an :class:`~execution.report.ExecutorReport`, so unlike the
-    executor's calls nothing records them and a run leaves no trace of *why* the supervisor
-    did what it did. Wrapping rather than logging at each call site also catches the batched
-    ones inside :func:`summarise_trajectory_segments`, which is shared with the critique
-    pipeline and should not grow a supervisor-specific parameter.
-
-    :param vlm: The real VLM to delegate to.
-    :param sink: List the records are appended to; owned by the supervisor.
-    """
-
-    def __init__(self, vlm, sink: List[dict]) -> None:
-        self._vlm = vlm
-        self._sink = sink
-        self.stage = "unknown"
-        # Which leg the supervisor is currently working on, carried into every record so a
-        # reader can put these calls back in place between the executor's legs. Without it
-        # the log is a flat list and the order has to be guessed from the stage names,
-        # which breaks on any attempt that skips a stage.
-        self.context: dict = {"phase": "planning"}
-
-    def infer(self, **kwargs: Any):
-        result = self._vlm.infer(**kwargs)
-        texts = kwargs.get("texts")
-        # A batched call passes a list of prompts and gets a list back; record them paired
-        # so one windowed judgement does not collapse into a single unreadable entry.
-        if isinstance(texts, list):
-            responses = result if isinstance(result, list) else [result] * len(texts)
-            for prompt, response in zip(texts, responses):
-                self._sink.append({"stage": self.stage, "prompt": prompt,
-                                   "response": response, **self.context})
-        else:
-            self._sink.append({"stage": self.stage, "prompt": texts, "response": result,
-                               **self.context})
-        return result
-
-    def __getattr__(self, name):
-        return getattr(self._vlm, name)
 
 
