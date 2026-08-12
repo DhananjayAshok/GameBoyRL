@@ -1,22 +1,21 @@
 """
 Machinery shared by every benchmark arm.
 
-The three arms — baseline, info, plan — are the same experiment run three ways, and the
-whole point of the comparison is that they differ *only* in what drives the episode. This
-module holds everything that must therefore be identical between them: which tasks get run,
-where results land, how a run resumes, the reset loop, and how each episode's VLM calls are
+The two arms — baseline and plan — are the same experiment run two ways, and the whole
+point of the comparison is that they differ *only* in what drives the episode. This module
+holds everything that must therefore be identical between them: which tasks get run, where
+results land, how a run resumes, the reset loop, and how each episode's VLM calls are
 archived. An arm supplies one callback and its own extra columns; it does not get to have
 its own opinion about task selection or CSV naming.
 
-Before this existed the three lived as forked copies of one file and had already drifted:
-the hint arm had no ``--n_tasks`` at all, so it could not be pointed at the same task prefix
-as the other two, and the bounds checks they did share ran in a different order.
+Before this existed the arms lived as forked copies of one file and had already drifted:
+the retired hint arm had no ``--n_tasks`` at all, so it could not be pointed at the same
+task prefix as the others, and the bounds checks they did share ran in a different order.
 """
 
 from __future__ import annotations
 
 import gzip
-import json
 import os
 import pickle
 import traceback
@@ -28,7 +27,7 @@ from tqdm import tqdm
 
 from gameboy_worlds import get_test_environment
 
-from execution.info_doc import Provenance, load_document
+from execution.info_doc import load_document
 from utils import log_error, log_info
 
 
@@ -132,44 +131,6 @@ def load_documents(info_docs: str, parameters: dict) -> list:
     if not documents:
         log_error("No usable --info_docs given.", parameters)
     return documents
-
-
-def load_insight_rows(insights_paths: str, parameters: dict) -> list:
-    """
-    Read and union the stage-A insights.jsonl files used by --mode init_state.
-
-    Every row is tagged with the provenance label its own leaf document records — the same
-    labelling the retrieval mode applies to document entries. This matters as soon as more
-    than one source is unioned: the hint writer is told which insights came from verified
-    solutions (zeroshot/attempt) and which from exploration labels (curiosity), and
-    ``group_idx`` alone cannot express that — the two verticals number their groups
-    independently, so their keys overlap and mean different things.
-    """
-    rows = []
-    for path in [p.strip() for p in insights_paths.split(",") if p.strip()]:
-        if not os.path.exists(path):
-            log_error(f"insights.jsonl not found at {path}. Produced by: "
-                      "scripts/vlm/build_info.sh --stage a", parameters)
-        label = ""
-        n_before = len(rows)
-        with open(path, "r") as handle:
-            for line in handle:
-                if line.strip():
-                    row = json.loads(line)
-                    # Recorded by build_info on every leaf, so it is read rather than
-                    # reconstructed from the directory this file happens to sit in.
-                    label = Provenance.from_dict(
-                        (row.get("document") or {}).get("provenance")).label
-                    row["source"] = label
-                    rows.append(row)
-        states = sorted({r.get("init_state") for r in rows[n_before:] if r.get("init_state")})
-        log_info(f"Loaded {len(rows) - n_before} insight rows from '{label}' "
-                 f"covering {len(states)} init_states ({path})")
-    if not rows:
-        log_error("No usable --insights_paths given.", parameters)
-    all_states = sorted({r.get("init_state") for r in rows if r.get("init_state")})
-    log_info(f"Total {len(rows)} stage-A insight rows covering init_states: {all_states}")
-    return rows
 
 
 # ---------------------------------------------------------------------------

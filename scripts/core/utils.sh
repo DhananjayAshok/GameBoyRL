@@ -276,7 +276,7 @@ BUILD_INFO_ARG_KEYS=("${BUILD_INFO_ESSENTIALS[@]}" "${!BUILD_INFO_DEFAULTS[@]}")
 # The source verticals a --mode selects. Shares its vocabulary with full.sh's --mode so the
 # context-engineering arm and the fine-tuning arm mean the same thing by the same word.
 # Order matters: zeroshot first, because it is the verified-solution source and reads first
-# in a comma-joined --insights_paths / --info_docs list.
+# in a comma-joined --info_docs list.
 function info_mode_sources() {
     case "$1" in
         curiosity_only) echo "curiosity" ;;
@@ -368,24 +368,24 @@ BUILD_INFO_ALL_DEFAULTS["do_debug"]=true
 
 BUILD_INFO_ALL_ARG_KEYS=("${BUILD_INFO_ALL_ESSENTIALS[@]}" "${!BUILD_INFO_ALL_DEFAULTS[@]}")
 
-# benchmark_info_all: hinted benchmarks over the documents build_info_all produced, plus the
-# no-hint baseline the results are only interpretable against.
+# benchmark_info_all: plan-arm benchmarks over the documents build_info_all produced, plus
+# the no-knowledge baseline the results are only interpretable against.
 BENCHMARK_INFO_ALL_ESSENTIALS=()
 populate_array VLM_ESSENTIALS BENCHMARK_INFO_ALL_ESSENTIALS
 BENCHMARK_INFO_ALL_ESSENTIALS+=("run_name")
 declare -A BENCHMARK_INFO_ALL_DEFAULTS=(
     # One knob for both halves: which attempts/curiosity dirs the documents were built from,
     # AND the executor run at test time. These were separate (build=history, bench=simple)
-    # and must not be — the no-hint baseline has to be the same executor as the hinted run,
-    # or the delta mixes the hint effect with a scaffold change.
+    # and must not be — the baseline has to be the same executor as the plan run, or the
+    # delta mixes the plan effect with a scaffold change.
     ["executor"]="history"
     ["mode"]="both"
-    ["hint_mode"]="both"
+    ["knowledge_mode"]="both"
     ["baseline"]=true
     ["max_steps"]=50
     ["max_concurrency"]=8
-    ["hint_vlm_model"]=none
-    ["hint_vlm_kind"]=none
+    ["supervisor_vlm_model"]=none
+    ["supervisor_vlm_kind"]=none
     ["regenerate"]=false
 )
 
@@ -401,8 +401,8 @@ populate_dict BUILD_INFO_ALL_DEFAULTS INFO_FULL_DEFAULTS
 populate_dict BENCHMARK_INFO_ALL_DEFAULTS INFO_FULL_DEFAULTS
 INFO_FULL_DEFAULTS["do_build"]=true
 INFO_FULL_DEFAULTS["do_benchmark"]=true
-# Longer episodes than a bare benchmark_info_all run: a hint the executor never gets far
-# enough to use scores like the baseline for reasons unrelated to hint quality.
+# Longer episodes than a bare benchmark_info_all run: a plan the executor never gets far
+# enough to work through scores like the baseline for reasons unrelated to plan quality.
 INFO_FULL_DEFAULTS["max_steps"]=150
 # The two stages want different concurrency (build 16, benchmark 8) and the flat union above
 # holds one value per key — the second populate_dict would win and silently halve the build.

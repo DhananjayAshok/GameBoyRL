@@ -326,7 +326,7 @@ def run_stage_a(task_map, traj_map, out_dir, vlm, game, max_new_tokens, n_frames
                     "task": task,
                     "insights": parsed["insights"],
                     # A nested object, not rendered text: the row is already JSON, and the
-                    # readers (stage B, debug.py info, InfoHintSupervisor) all want the
+                    # readers (stage B, debug.py info, InfoPlanSupervisor) all want the
                     # document back rather than a string to re-parse.
                     "document": doc.to_dict(),
                 }

@@ -408,9 +408,8 @@ Reasoning: <why, referring to what is visible in image 2>
         sample its own ``_vlm_call``.
 
         :param tag: Short label for the call's role, e.g. ``"action"``,
-            ``"reflection"``, ``"map_update"``, ``"belief_update"``,
-            ``"decompose"``, ``"score"``, ``"propose"``, ``"challenge"``,
-            ``"decide"``, ``"done_check"``.
+            ``"reflection"``, ``"map_update"``, ``"decompose"``, ``"score"``,
+            ``"done_check"``.
 
             .. important:: If this call is the one that decides the action, its tag must
                 be in :data:`~execution.report.ACTION_TAGS`. Ownership of the step that

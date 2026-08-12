@@ -1,14 +1,16 @@
 """
-Info-document diagnostics: is the built document any good, and does it produce good hints?
+Info-document diagnostics: is the built document any good?
 
 This vertical is almost entirely un-unit-testable — every stage is a model judgement, so
 there is no assertion that catches a bad document, only a human reading the right rendering
-of it. These two commands are the instrument.
+of it. This command is the instrument.
 
 `debug.py info` — offline, no VLM, no emulator
     Reads insights.jsonl and the whole merge/ tree.
       - the yield funnel (pairs in -> NONE rate -> leaves -> final entries)
-      - benchmark init_state coverage, which gates --mode init_state entirely
+      - benchmark init_state coverage: which of the benchmark's starting states the
+        collection actually visited, and so which episodes the document knows nothing
+        first-hand about
       - the entry-count-per-round curve, the single most diagnostic plot: tracking the
         "never matched" reference line means the matcher never fires, a flat line means it
         fires on everything
@@ -17,11 +19,10 @@ of it. These two commands are the instrument.
       - the match audit, replayed from every matches.json
       - the final document itself
 
-`debug.py info_hint` — needs a VLM and frames, never an emulator step
-    Runs the InfoHintSupervisor's hint pipeline on sampled benchmark screens without playing
-    the game, and reports the hint next to the full yes/no verdict list that produced it —
-    so a bad hint can be attributed to relevance (wrong entries) or synthesis (right entries,
-    bad hint), which are different prompt fixes and indistinguishable from the hint alone.
+There used to be a companion `debug.py info_hint` that ran the retired hint pipeline on
+sampled benchmark screens and reported each hint beside the relevance verdicts behind it.
+It went with `InfoHintSupervisor`. The equivalent instrument for the plan arm is
+`debug.py compare` over the plan CSVs.
 
 Input (all produced by scripts/vlm/build_info.sh)
 ------------------------------------------------
@@ -31,7 +32,7 @@ Input (all produced by scripts/vlm/build_info.sh)
 
 Output
 ------
-<results_dir>/debug/<game>/info/report.md (and info_hint/report.md), plus figures beside them.
+<results_dir>/debug/<game>/info/report.md, plus figures beside it.
 """
 
 import glob
@@ -65,7 +66,6 @@ CONCRETE_ANCHORS = [
     r"\bup\b", r"\bdown\b", r"\bleft\b", r"\bright\b", r"\bnorth\b", r"\bsouth\b",
     r"\beast\b", r"\bwest\b", r"\bmenu\b", r"\bdoor\b", r"\bchest\b", r"\bNPC\b",
 ]
-CONDITIONAL_MARKERS = [r"\bif\b", r"\bwhen\b", r"\bprovided\b", r"\bunless\b", r"\bonce\b"]
 
 
 def _count_hits(text: str, patterns, regex: bool) -> int:
@@ -219,9 +219,15 @@ def debug_info(obj, model_name, source, max_entries):
                   f"**{leaf_stats['image_entries']}** image")
     funnel.append(f"leaf insights: **{leaf_stats['n_insights']}**")
 
-    # --- Benchmark init_state coverage (gates --mode init_state) ----------
+    # --- Benchmark init_state coverage ------------------------------------
     # Reading the benchmark task file here is fine: this is a read-only diagnostic and no
     # benchmark text ever enters the document.
+    #
+    # This used to be presented as the gate on the retired `--mode init_state`, which keyed
+    # entries off the episode's init state directly. It is kept because it still measures
+    # something real for `--mode retrieval`: an init state the data collection never visited
+    # contributes no entries, so every episode starting there retrieves whatever generic
+    # entries happen to fire and plans from knowledge of somewhere else.
     coverage_block = []
     try:
         from gameboy_worlds import get_benchmark_tasks
@@ -238,16 +244,17 @@ def debug_info(obj, model_name, source, max_entries):
         n_zero = int((coverage["stage_a_records"] == 0).sum())
         coverage_block = [
             md.para(
-                f"**{len(coverage) - n_zero}/{len(coverage)}** benchmark init states have at "
-                f"least one stage-A record. Zero-coverage states are exactly the episodes "
-                f"`--mode init_state` will run hintless on."
+                f"**{len(coverage) - n_zero}/{len(coverage)}** benchmark init states are "
+                f"represented in stage A. Zero-coverage states are the episodes this "
+                f"document has nothing first-hand to say about."
             ),
             md.table(coverage),
         ]
         if n_zero:
             coverage_block.append(md.warn(
-                f"{n_zero} benchmark init state(s) have no records — `--mode init_state` "
-                f"cannot hint on them, and its score will be diluted accordingly."
+                f"{n_zero} benchmark init state(s) have no records. Retrieval will still "
+                f"fire on them — on entries learned elsewhere — so their episodes are the "
+                f"ones to read first when a plan looks confidently wrong."
             ))
     except Exception as error:
         coverage_block = [md.warn(f"Could not compute benchmark coverage: {error}")]
@@ -304,8 +311,9 @@ def debug_info(obj, model_name, source, max_entries):
             ]
     else:
         merge_blocks = [md.h2("Merge tree"),
-                        md.warn("No `merge/` tree yet — stage B has not been run. "
-                                "`--mode init_state` works from the leaves alone.")]
+                        md.warn("No `merge/` tree yet — stage B has not been run, so there "
+                                "is no `info.json` and `--knowledge_mode retrieval` has "
+                                "nothing to read. Re-run build_info with `--stage all`.")]
 
     # --- The document itself ---------------------------------------------
     doc_blocks = []
@@ -357,182 +365,3 @@ def debug_info(obj, model_name, source, max_entries):
     ]
     out = md.write_report(os.path.join(report_dir, "report.md"), blocks)
     log_info(f"[info] wrote {out}")
-
-
-@click.command()
-@click.option("--model_name", required=True, help="VLM that built the document.")
-@click.option("--source", default="attempt", show_default=True,
-              type=click.Choice(["attempt", "curiosity"]))
-@click.option("--hint_mode", default="retrieval", show_default=True,
-              type=click.Choice(["retrieval", "init_state", "both"]),
-              help="Which selection path to exercise. 'both' writes both hints for the same "
-                   "screen, so any difference is purely which insights were selected.")
-@click.option("--hint_vlm_model", default=None, help="Defaults to --model_name.")
-@click.option("--hint_vlm_kind", default="openai", show_default=True)
-@click.option("--n_tasks", default=5, show_default=True,
-              help="Benchmark tasks to spot-check (0 = all).")
-@click.option("--max_concurrency", default=8, show_default=True)
-@click.pass_obj
-def debug_info_hint(obj, model_name, source, hint_mode, hint_vlm_model, hint_vlm_kind,
-                    n_tasks, max_concurrency):
-    """Hint spot-check: run the hint pipeline on benchmark screens without playing the game."""
-    import time
-
-    from gameboy_worlds import get_benchmark_tasks, get_test_environment
-
-    from debug_scripts.frames import to_pil
-    from execution.info_doc import load_document
-    from execution.registry import AVAILABLE_EXECUTORS
-    from execution.supervisors import InfoHintSupervisor
-
-    paths = Paths(
-        parameters=obj["parameters"], game=obj["game"], run_name=obj["run_name"],
-        executor=obj["executor"], model_name=model_name, output_dir=obj["output_dir"],
-        mode=obj["mode"],
-    )
-    report_dir = paths.debug_dir("info_hint")
-    images_dir = paths.debug_dir("info_hint", "images")
-    info_dir = paths.source_info_dir(source)
-
-    modes = ["retrieval", "init_state"] if hint_mode == "both" else [hint_mode]
-    documents, insight_rows = None, None
-    if "retrieval" in modes:
-        doc_path = paths.require(os.path.join(info_dir, INFO_DOC_FILENAME), "info")
-        # No source= argument: the document records its own provenance, and load_document
-        # copies the label onto every entry.
-        documents = [load_document(doc_path, parameters=obj["parameters"])]
-    if "init_state" in modes:
-        insights_path = paths.require(os.path.join(info_dir, "insights.jsonl"), "insights")
-        insight_rows = _load_insights(insights_path)
-
-    bench = get_benchmark_tasks(game=paths.game)
-    if n_tasks:
-        bench = bench.head(n_tasks)
-
-    records = []
-    for i, row in bench.iterrows():
-        environment = get_test_environment(row=row, controller_variant="low_level",
-                                           headless=True, save_video=False,
-                                           session_name=f"debug_info_hint/{i}", max_steps=1)
-        try:
-            frame = environment.get_info()["core"]["current_frame"]
-            screen_path = os.path.join(images_dir, f"screen_{i}.png")
-            to_pil(frame).save(screen_path)
-
-            for mode in modes:
-                supervisor = InfoHintSupervisor(
-                    task=row["task"],
-                    executor_class=AVAILABLE_EXECUTORS["simple"],
-                    env=environment,
-                    game=row["game"],
-                    max_steps=1,
-                    max_tool_calls=0,
-                    documents=documents,
-                    insight_rows=insight_rows,
-                    mode=mode,
-                    init_state=row["init_state"],
-                    hint_vlm_model=hint_vlm_model or model_name,
-                    hint_vlm_kind=hint_vlm_kind,
-                    max_concurrency=max_concurrency,
-                    parameters=obj["parameters"],
-                )
-                started = time.time()
-                hint = supervisor.write_hint()
-                records.append({
-                    "index": i,
-                    "task": row["task"],
-                    "init_state": row["init_state"],
-                    "mode": mode,
-                    "hint": hint,
-                    "screen": screen_path,
-                    "selection": list(supervisor.selection_log),
-                    # Same ids the benchmark CSV stores, so a hint seen here and a hint seen
-                    # in a results file are traceable to evidence the same way.
-                    "selected_ids": list(supervisor.selected_ids),
-                    "seconds": time.time() - started,
-                    "n_calls": len(supervisor.selection_log) + 1,
-                })
-                log_info(f"[info_hint] {mode} / task {i}: "
-                         f"{'NO HINT' if hint is None else hint[:80]}")
-        except Exception as error:
-            log_warn(f"[info_hint] task {i} failed: {error}")
-        finally:
-            environment.close()
-
-    if not records:
-        log_warn("[info_hint] no records produced; nothing to report.")
-        return
-
-    frame = pd.DataFrame([{k: v for k, v in r.items() if k not in ("selection", "selected_ids")}
-                          for r in records])
-    per_mode = []
-    for mode, group in frame.groupby("mode"):
-        n = len(group)
-        n_hint = int(group["hint"].notna().sum())
-        conditional = sum(
-            1 for h in group["hint"].dropna()
-            if _count_hits(h, CONDITIONAL_MARKERS, regex=True) > 0
-        )
-        per_mode.append({
-            "mode": mode,
-            "screens": n,
-            "hinted": n_hint,
-            "NO HINT %": round(100.0 * (n - n_hint) / max(n, 1), 1),
-            # The executor treats every hint as reliable, so hedging in the hint text is the
-            # only brake on a confidently wrong one. A low number here is the failure signature.
-            "conditional %": round(100.0 * conditional / max(n_hint, 1), 1),
-            "mean calls": round(group["n_calls"].mean(), 1),
-            "mean seconds": round(group["seconds"].mean(), 1),
-        })
-
-    fire_counts = {}
-    for record in records:
-        for verdict in record["selection"]:
-            key = (verdict["kind"], verdict["category"])
-            stats = fire_counts.setdefault(key, {"seen": 0, "fired": 0})
-            stats["seen"] += 1
-            stats["fired"] += int(verdict["relevant"])
-    fire_frame = pd.DataFrame([
-        {"kind": kind, "category": category, "judged": s["seen"], "fired": s["fired"],
-         "fire rate %": round(100.0 * s["fired"] / max(s["seen"], 1), 1)}
-        for (kind, category), s in fire_counts.items()
-    ]).sort_values("fire rate %", ascending=False) if fire_counts else pd.DataFrame()
-
-    blocks = [
-        md.h1(f"Hint spot-check — {paths.game} / {paths.model_save_name} / source={source}"),
-        md.para(f"Source: `{info_dir}` — no emulator steps were taken; each screen is the "
-                "opening frame of a benchmark task."),
-        md.h2("Summary"),
-        md.table(pd.DataFrame(per_mode)),
-        md.note("A hint that is not conditional cannot fail safely: the executor's hint block "
-                "presents every hint as reliable, so `if/when` scoping in the hint text is the "
-                "only guard against a confidently wrong one."),
-    ]
-    if len(fire_frame):
-        blocks += [
-            md.h2("Fire rate per entry"),
-            md.para("Entries that fire on every screen are too generic; entries that never "
-                    "fire are dead weight paying a relevance call every episode."),
-            md.table(fire_frame),
-        ]
-
-    blocks.append(md.h2("Hints"))
-    for record in records:
-        blocks.append(md.h3(f"[{record['mode']}] {record['task']}"))
-        blocks.append(md.para(f"init_state: `{record['init_state']}`"))
-        blocks.append(md.img(f"screen {record['index']}", record["screen"], report_dir))
-        blocks.append(md.para(f"**Hint:** {record['hint'] or '_NO HINT_'}"))
-        if record["selected_ids"]:
-            blocks.append(md.para("**Synthesised from:** "
-                                  + ", ".join(f"`{i}`" for i in record["selected_ids"])))
-        if record["selection"]:
-            verdicts = pd.DataFrame(record["selection"])[
-                ["kind", "category", "relevant", "reason"]
-            ]
-            blocks.append(md.details(
-                f"relevance verdicts ({int(verdicts['relevant'].sum())}/{len(verdicts)} fired)",
-                md.table(verdicts),
-            ))
-
-    out = md.write_report(os.path.join(report_dir, "report.md"), blocks)
-    log_info(f"[info_hint] wrote {out}")

@@ -2,18 +2,31 @@
 The plan arm: plan from the info document, then supervise the executor through the plan
 step by step.
 
-A sibling of the hint arm reading the same documents with the same relevance pass; the two
-differ in what they do with what they found. The hint arm spends it on one hint written at
-the opening frame and then lets the executor run unattended. This spends it on a plan and
-stays in the loop — running each step under its own executor call, judging from the frames
-whether the step landed, hinting when it did not, and rewriting the step when hinting keeps
-failing.
+The episode runs each plan step under its own executor call, judges from the frames whether
+the step landed, hints when it did not, and rewrites the plan when hinting keeps failing.
+
+``--mode`` decides only where the planner's knowledge comes from. Everything after that —
+the relevance pass, the insight filter, the planner, the step loop — is identical, which is
+what makes the two modes comparable:
+
+``retrieval``
+    Documents distilled from real trajectories by ``vlm_scripts/build_info.py``, named with
+    ``--info_docs``.
+
+``parametric``
+    One document written by the model from its own knowledge of the game, given nothing but
+    the game's name. Generated on first use and cached at ``Paths.parametric_doc()``.
+
+The pair is the control the arm was missing. "Planning from a distilled document beats the
+baseline" does not distinguish *distillation worked* from *any game-specific text worked*;
+retrieval-vs-parametric does, and where they score alike the build pipeline has not earned
+its cost.
 
 Budgets: ``--max_leg_steps`` caps a single executor call and is internal to the supervisor;
 ``--max_steps`` caps emulator steps across the whole episode, retries included, so this arm
-and the hint arm play with the same allowance and their CSVs stay comparable.
+and the baseline play with the same allowance and their CSVs stay comparable.
 
-This costs materially more VLM calls per episode than the hint arm — a relevance pass, a
+This costs materially more VLM calls per episode than the baseline — a relevance pass, a
 plan, then per attempt a windowed judgement plus a hint, plus a revision every few failures.
 Budget accordingly before sweeping a whole game.
 """
@@ -26,9 +39,11 @@ import click
 
 from gameboy_worlds import get_benchmark_tasks
 
+from execution.parametric_doc import load_or_generate_parametric_document
 from execution.registry import AVAILABLE_EXECUTORS
 from execution.supervisors import PLAN_SEPARATOR, InfoPlanSupervisor
-from utils import log_error, log_info
+from utils import VLM, log_error, log_info
+from utils.paths import Paths
 
 from benchmark_scripts import common
 
@@ -74,15 +89,18 @@ SUMMARY_COLUMNS = [
 @click.command(name="plan")
 @click.option("--info_docs", default=None, type=str,
               help="Comma-separated info.json path(s). Required for --mode retrieval.")
-@click.option("--insights_paths", default=None, type=str,
-              help="Comma-separated insights.jsonl path(s). Required for --mode init_state.")
-@click.option("--mode", default="retrieval", type=click.Choice(["retrieval", "init_state"]),
-              help="How the planner's candidate knowledge is selected. Identical to the "
-                   "info arm's --mode; the selection code is shared.")
-@click.option("--plan_vlm_model", default=None, type=str,
-              help="Model for the selection, planning, judging, hinting and revision calls. "
-                   "Defaults to the executor's.")
-@click.option("--plan_vlm_kind", default=None, type=str)
+@click.option("--mode", default="retrieval", type=click.Choice(["retrieval", "parametric"]),
+              help="Where the planner's knowledge comes from: documents distilled from real "
+                   "trajectories (retrieval), or one the model writes from its own priors "
+                   "given only the game's name (parametric). Everything downstream is "
+                   "identical, so the pair isolates what distillation actually bought.")
+@click.option("--parametric_categories", default=12, show_default=True, type=int,
+              help="Upper bound on task categories requested when generating a parametric "
+                   "document. Ignored under --mode retrieval.")
+@click.option("--parametric_max_new_tokens", default=4000, show_default=True, type=int,
+              help="Token budget for the single parametric generation call. The whole "
+                   "document comes back in one reply, so a low value truncates the JSON and "
+                   "yields an empty document.")
 @click.option("--max_concurrency", default=8, show_default=True, type=int,
               help="Parallel relevance calls during selection; they are independent.")
 @click.option("--max_leg_steps", default=5, show_default=True, type=int,
@@ -96,24 +114,13 @@ SUMMARY_COLUMNS = [
                    "the risk of thrashing between two readings of the same screen.")
 @click.option("--max_frames_per_slice", default=8, show_default=True, type=int,
               help="Trajectory frames per judging call.")
-@click.option("--plan_max_new_tokens", default=5000, show_default=True, type=int,
-              help="Token budget for the planning, revision and segment-summary calls. A "
-                   "plan is several sentences per step, so this is the one that truncates "
-                   "first — and a truncated plan loses its trailing steps silently.")
-@click.option("--hint_max_new_tokens", default=2400, show_default=True, type=int,
-              help="Token budget for the relevance, judging and hint calls.")
-@click.option("--judge_max_new_tokens", default=4800, show_default=True, type=int,
-              help="Token budget for the completion check. Largest of the three: the "
-                   "Complete: verdict is the last line of the reply, so a truncated "
-                   "response loses the answer and reads as not complete.")
 @click.option("--executor_max_new_tokens", default=8000, show_default=True, type=int,
               help="Token budget per executor action call. Overrides the project-wide "
                    "executor_vlm_max_new_tokens for this process only.")
 @click.pass_obj
-def plan_cmd(obj, info_docs, insights_paths, mode, plan_vlm_model, plan_vlm_kind,
+def plan_cmd(obj, info_docs, mode, parametric_categories, parametric_max_new_tokens,
              max_concurrency, max_leg_steps, max_attempts_per_step, max_replans,
-             max_frames_per_slice, plan_max_new_tokens, hint_max_new_tokens,
-             judge_max_new_tokens, executor_max_new_tokens):
+             max_frames_per_slice, executor_max_new_tokens):
     """Benchmark with a plan written from the document and supervised step by step."""
     parameters = obj["parameters"]
     game = obj["game"]
@@ -126,18 +133,35 @@ def plan_cmd(obj, info_docs, insights_paths, mode, plan_vlm_model, plan_vlm_kind
     previous = parameters.get("executor_vlm_max_new_tokens")
     parameters["executor_vlm_max_new_tokens"] = executor_max_new_tokens
     log_info(f"Executor token budget: {previous} -> {executor_max_new_tokens} "
-             f"(this run only). Plan calls: {plan_max_new_tokens}, "
-             f"judge: {judge_max_new_tokens}, hint: {hint_max_new_tokens}.")
+             f"(this run only). Supervisor calls: {obj['supervisor_max_new_tokens']}.")
 
-    documents, insight_rows = None, None
+    # Resolved on the group (falling back to the executor's), because both the parametric
+    # document's cache path and the supervisor's own VLM are keyed on it and must not
+    # disagree.
+    knowledge_model = obj["supervisor_vlm_model"]
+    knowledge_kind = obj["supervisor_vlm_kind"]
+
     if mode == "retrieval":
         if not info_docs:
             log_error("--mode retrieval requires --info_docs.", parameters)
         documents = common.load_documents(info_docs, parameters)
     else:
-        if not insights_paths:
-            log_error("--mode init_state requires --insights_paths.", parameters)
-        insight_rows = common.load_insight_rows(insights_paths, parameters)
+        # Generated once and cached, so a rerun of the same command plans from the same
+        # document. Written by the supervisor's own model — there is deliberately no
+        # separate generator flag — and keyed on it rather than on the executor's: a
+        # different model has different priors, and reusing one's document under another's
+        # name would attribute knowledge to a model that never wrote it.
+        doc_path = Paths(parameters=parameters, game=game,
+                         model_name=knowledge_model).parametric_doc()
+        documents = [load_or_generate_parametric_document(
+            game=game,
+            path=doc_path,
+            vlm=VLM(knowledge_model, knowledge_kind),
+            n_categories=parametric_categories,
+            max_new_tokens=parametric_max_new_tokens,
+            regenerate=obj["regenerate"],
+            parameters=parameters,
+        )]
 
     emulator_kwargs = {
         "headless": True,
@@ -175,19 +199,14 @@ def plan_cmd(obj, info_docs, insights_paths, mode, plan_vlm_model, plan_vlm_kind
                 max_steps=obj["max_steps"],
                 max_tool_calls=obj["max_tool_calls"],
                 documents=documents,
-                insight_rows=insight_rows,
-                mode=mode,
-                init_state=row["init_state"],
-                hint_vlm_model=plan_vlm_model or obj["executor_vlm_model"],
-                hint_vlm_kind=plan_vlm_kind or obj["executor_vlm_kind"],
+                supervisor_vlm_model=knowledge_model,
+                supervisor_vlm_kind=knowledge_kind,
+                max_new_tokens=obj["supervisor_max_new_tokens"],
                 max_concurrency=max_concurrency,
                 max_leg_steps=max_leg_steps,
                 max_attempts_per_step=max_attempts_per_step,
                 max_replans=max_replans,
                 max_frames_per_slice=max_frames_per_slice,
-                plan_max_new_tokens=plan_max_new_tokens,
-                hint_max_new_tokens=hint_max_new_tokens,
-                judge_max_new_tokens=judge_max_new_tokens,
                 verbose=obj["verbose"],
                 parameters=parameters,
                 vlm_model=obj["executor_vlm_model"],

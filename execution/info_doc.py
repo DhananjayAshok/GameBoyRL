@@ -1,10 +1,11 @@
 """
 The info document: a game's distilled knowledge, as JSON.
 
-The document is the shared artifact of the context-engineering vertical. It is written by
-vlm_scripts/build_info.py, read by execution.supervisors.InfoHintSupervisor at test time, and
-rendered by debug_scripts/info.py. This module owns its *shape* so those three never disagree
-about it.
+The document is the shared artifact of the context-engineering vertical. It has two
+producers — vlm_scripts/build_info.py, which distils one from real trajectories, and
+execution/parametric_doc.py, which has the model write one from its own priors — is read by
+execution.supervisors.InfoPlanSupervisor at test time, and is rendered by
+debug_scripts/info.py. This module owns its *shape* so none of them disagree about it.
 
 Exactly two sections of entries, no task-agnostic "general knowledge" section — every insight
 hangs off either a task category or an image category::
@@ -69,12 +70,16 @@ class Provenance:
     Every field is written by ``build_info`` at the moment the document is built. Nothing
     here is ever re-derived from a path: that is the whole point of the block existing.
 
-    :param source: The vertical — ``"curiosity"`` or ``"zeroshot"``. This alone is the
-        provenance label.
-    :param executor: Executor whose trajectories were distilled.
-    :param model: Model that did the distilling (the save name, not the full path).
+    :param source: The vertical — ``"curiosity"`` or ``"zeroshot"`` for a document distilled
+        from trajectories, or ``"parametric"`` for one written from the model's own priors by
+        ``execution/parametric_doc.py``. This alone is the provenance label.
+    :param executor: Executor whose trajectories were distilled. ``None`` for a parametric
+        document, which distilled nothing.
+    :param model: Model that did the distilling, or the writing (the save name, not the
+        full path).
     :param trajectory_stem: The input stem, relative to ``storage_dir``. The curiosity
-        run name is a component of this, so it is not recorded a second time.
+        run name is a component of this, so it is not recorded a second time. ``None`` for
+        a parametric document, which has no input.
     :param built_at: ISO-8601 UTC timestamp.
     """
 

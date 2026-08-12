@@ -36,8 +36,7 @@ class AttemptCheckerSupervisor(Supervisor):
     judge whether the task was completed.
 
     **Not a benchmark supervisor.** The benchmark arms are
-    :class:`~execution.supervisors.dummy.DummySupervisor`,
-    :class:`~execution.supervisors.info_hint.InfoHintSupervisor` and
+    :class:`~execution.supervisors.dummy.DummySupervisor` and
     :class:`~execution.supervisors.info_plan.InfoPlanSupervisor`; this class is used only by
     ``vlm_scripts.attempt_tasks``, to label attempted tasks during data generation. Its
     ``success`` is a VLM judgement, not the environment's ground-truth verdict, so it must
@@ -56,9 +55,10 @@ class AttemptCheckerSupervisor(Supervisor):
     :param max_steps: Env-step budget forwarded to the executor.
     :param max_tool_calls: Tool-call budget forwarded to the executor.
     :param evaluation_lookback: Number of final env-step frames passed to the checker VLM.
-    :param checker_vlm_model: Model name for the checker VLM.
-    :param checker_vlm_kind: VLM kind for the checker (``"openai"``, ``"anthropic"``, …).
-    :param checker_max_new_tokens: Token budget for each checker VLM call (default 2000).
+    :param supervisor_vlm_model: The one model this supervisor reasons with — both the
+        describe and the judge stage use it.
+    :param supervisor_vlm_kind: VLM kind for that model (``"openai"``, ``"anthropic"``, …).
+    :param max_new_tokens: Token budget for every one of its calls.
     :param parameters: Optional parameter overrides.
     :param executor_kwargs: Extra keyword arguments forwarded to the executor constructor.
     """
@@ -74,9 +74,9 @@ class AttemptCheckerSupervisor(Supervisor):
         evaluation_lookback: int = 8,
         hint: Optional[str] = None,
         allow_self_termination: bool = False,
-        checker_vlm_model: str = None,
-        checker_vlm_kind: str = None,
-        checker_max_new_tokens: int = 2000,
+        supervisor_vlm_model: Optional[str] = None,
+        supervisor_vlm_kind: Optional[str] = None,
+        max_new_tokens: int = 4800,
         parameters: Optional[dict] = None,
         **executor_kwargs: Any,
     ) -> None:
@@ -86,9 +86,8 @@ class AttemptCheckerSupervisor(Supervisor):
             executor_kwargs["hint"] = hint
         executor_kwargs["allow_self_termination"] = allow_self_termination
         super().__init__(task, executor_class, env, game, max_steps, max_tool_calls,
+                         supervisor_vlm_model, supervisor_vlm_kind, max_new_tokens,
                          parameters, **executor_kwargs)
-        self._checker_vlm = VLM(checker_vlm_model, checker_vlm_kind)
-        self._checker_max_new_tokens = checker_max_new_tokens
 
     def _evaluate(self) -> dict:
         """Run the executor on the stored task and return the checker's verdict."""
@@ -108,21 +107,19 @@ class AttemptCheckerSupervisor(Supervisor):
         if total <= slice_size:
             output = self._vlm_call(
                 "describe_slice",
-                self._checker_vlm,
                 texts=DESCRIBE_SLICE_PROMPT
                     .replace("[GAME]", self._game)
                     .replace("[START_IDX]", "1")
                     .replace("[END_IDX]", str(total))
                     .replace("[TOTAL]", str(total)),
                 images=all_frames,
-                max_new_tokens=self._checker_max_new_tokens,
             )
             return parse_key_value(output, "Description") or output.strip()
 
         windows = window_trajectory(
             env_steps, DESCRIBE_SLICE_PROMPT, game=self._game,
-            call=self._vlm_caller("describe_slice", self._checker_vlm),
-            max_new_tokens=self._checker_max_new_tokens, slice_size=slice_size,
+            call=self._vlm_caller("describe_slice"),
+            max_new_tokens=self._max_new_tokens, slice_size=slice_size,
         )
 
         segment_descriptions = []
@@ -137,9 +134,7 @@ class AttemptCheckerSupervisor(Supervisor):
         )
         output = self._vlm_call(
             "describe_consolidate",
-            self._checker_vlm,
             texts=consolidate_prompt,
-            max_new_tokens=self._checker_max_new_tokens,
         )
         return parse_key_value(output, "Description") or output.strip()
 
@@ -183,10 +178,8 @@ class AttemptCheckerSupervisor(Supervisor):
         )
         judge_output = self._vlm_call(
             "judge",
-            self._checker_vlm,
             texts=judge_prompt,
             images=final_frames,
-            max_new_tokens=self._checker_max_new_tokens,
         )
 
         reasoning = parse_key_value(judge_output, "Reasoning") or ""
@@ -266,7 +259,7 @@ def window_trajectory(
 
     *call* is a callable, not a VLM: this function batches every window into one
     ``infer`` call, and a supervisor must record that call. Passing
-    ``Supervisor._vlm_caller(stage, vlm)`` keeps it on the report; passing a bare VLM would
+    ``Supervisor._vlm_caller(stage)`` keeps it on the report; passing a bare VLM would
     silently lose the whole batch.
 
     :return: ``[((start, end), raw_output), ...]``, one per window, in order. Empty when

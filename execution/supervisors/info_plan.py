@@ -15,9 +15,13 @@ earns its VLM calls would be sculpting the wrong shape.
 The knowledge-selection half used to live on a separate ``InfoHintSupervisor``, which this
 class subclassed. That class was the test-time arm that spent its retrieved knowledge on a
 single hint written once at the opening frame; it has been retired along with its benchmark
-arm, and its selection machinery — :meth:`~InfoPlanSupervisor._retrieval_candidates`,
-:meth:`~InfoPlanSupervisor._init_state_candidates`,
-:meth:`~InfoPlanSupervisor._select_entries` — was folded in here unchanged.
+arm, and its selection machinery — :meth:`~InfoPlanSupervisor._candidates` and
+:meth:`~InfoPlanSupervisor._select_entries` — was folded in here.
+
+The selection also used to offer a second path, ``init_state``, which skipped the document
+and read stage-A rows matching the episode's starting state. It has been removed: the arm
+now always judges document entries, and *which* document is the benchmark's choice rather
+than the supervisor's.
 """
 
 from __future__ import annotations
@@ -45,29 +49,24 @@ from execution.supervisors.prompts import (
     RELEVANCE_PROMPT,
     RESUME_HINT_PROMPT,
 )
-from utils import (
-    log_warn, parse_key_value, parse_list, parse_steps, parse_yes_no, VLM,
-)
+from utils import log_warn, parse_key_value, parse_list, parse_steps, parse_yes_no
 
 
 class InfoPlanSupervisor(Supervisor):
     """
     Plans from the info document, then supervises the executor through the plan step by step.
 
-    Knowledge reaches the planner through a relevance pass, in one of two modes:
+    Knowledge reaches the planner through a relevance pass over the documents it was given:
+    every entry of every document is judged, one call each, on whether it fits this task and
+    this screen. Entries are judged on ``Description`` + ``Examples`` + their representative
+    frame — never on their ``Insights``, so relevance is decided on whether the context fits
+    rather than on whether the advice sounds appealing.
 
-    ``retrieval``
-        Iterate over every entry of every loaded document and ask, one call each, whether it
-        fits this task and this screen. Entries are judged on ``Description`` + ``Examples`` +
-        their representative frame — never on their ``Insights``, so relevance is decided on
-        whether the context fits rather than on whether the advice sounds appealing.
-
-    ``init_state``
-        Skip the document entirely and read the stage-A ``insights.jsonl``, keeping rows whose
-        ``init_state`` matches the episode's. The init state is *given* by the benchmark row
-        rather than inferred, which makes this the retrieval-free upper bound. Rows are still
-        task-filtered by the same relevance call — one init state can carry many unrelated
-        tasks, so the init state narrows the candidate pool and the task filter picks from it.
+    This class does not care where the documents came from. The benchmark arm's ``--mode``
+    decides that — a document distilled from real trajectories (``retrieval``) or one written
+    from the model's own priors (``parametric``) — and both arrive here as
+    :class:`~execution.info_doc.InfoDocument` objects and are treated identically. That is
+    what makes the two modes comparable: they differ only in the document.
 
     The loop, per episode:
 
@@ -97,7 +96,7 @@ class InfoPlanSupervisor(Supervisor):
     Two budgets bound all of this. ``max_leg_steps`` (5) caps a single executor call, and
     is purely internal — it decides how often the supervisor gets to look. ``max_steps``
     (75, the benchmark's) caps the emulator steps across the supervisor's entire lifetime,
-    every attempt and retry included, so this arm and the info arm play the same game with
+    every attempt and retry included, so this arm and the baseline play the same game with
     the same allowance and their CSVs stay comparable.
 
     No executor is modified or subclassed: a step's hint travels through
@@ -110,18 +109,16 @@ class InfoPlanSupervisor(Supervisor):
     :param game: Game name string.
     :param max_steps: Env-step budget for the supervisor's whole lifetime.
     :param max_tool_calls: Tool-call budget forwarded to the executor.
-    :param documents: Parsed :class:`~execution.info_doc.InfoDocument` objects (retrieval mode).
-    :param insight_rows: Stage-A rows from ``insights.jsonl`` (init_state mode).
-    :param mode: ``"retrieval"`` or ``"init_state"``.
-    :param init_state: The episode's init state; required for ``init_state`` mode.
-    :param hint_vlm_model: Model name for the relevance and hint-writing calls.
-    :param hint_vlm_kind: VLM kind for those calls.
-    :param hint_max_new_tokens: Token budget per relevance/hint VLM call.
+    :param documents: Parsed :class:`~execution.info_doc.InfoDocument` objects, however the
+        arm obtained them.
+    :param supervisor_vlm_model: The one model this arm reasons with — selection, planning,
+        insight filtering, judging, hinting and replanning all use it. Under
+        ``--mode parametric`` it also writes the document, which is why the document's
+        provenance records it and no separate generator model is passed in.
+    :param supervisor_vlm_kind: VLM kind for that model.
+    :param max_new_tokens: Token budget for every one of those calls.
     :param max_concurrency: Parallel relevance calls (they are independent).
     :param parameters: Optional parameter overrides.
-    :param plan_vlm_model: Model for the planning, judging, hinting and revision calls.
-        Defaults to ``hint_vlm_model``.
-    :param plan_vlm_kind: VLM kind for those calls.
     :param max_leg_steps: Env-step cap for one executor attempt.
     :param max_attempts_per_step: Failed attempts at one step before the supervisor gives up
         on it and moves to the next. With per-step rewriting gone this is the only exit from
@@ -130,12 +127,6 @@ class InfoPlanSupervisor(Supervisor):
     :param max_replans: How many times the plan may be rewritten in one episode. Bounds both
         cost and the risk of thrashing between two readings of the same screen.
     :param max_frames_per_slice: Trajectory frames per judging call.
-    :param plan_max_new_tokens: Token budget for the planning, replanning and
-        segment-summary calls, which are longer than a hint.
-    :param judge_max_new_tokens: Token budget for the completion check. Largest of the
-        three: its ``Complete:`` verdict is the last line of the reply, so truncation
-        costs the answer while keeping the reasoning, and an unparsed verdict reads as
-        not complete — every step then fails regardless of the screen.
     :param verbose: Print the per-attempt narration — the step, the hint, the executor's
         stop reason, the judge's verdict, any revision. Off by default.
 
@@ -154,34 +145,23 @@ class InfoPlanSupervisor(Supervisor):
         max_steps: int,
         max_tool_calls: int,
         documents: Optional[List[Any]] = None,
-        insight_rows: Optional[List[dict]] = None,
-        mode: str = "retrieval",
-        init_state: Optional[str] = None,
-        hint_vlm_model: str = None,
-        hint_vlm_kind: str = None,
-        hint_max_new_tokens: int = 1000,
+        supervisor_vlm_model: Optional[str] = None,
+        supervisor_vlm_kind: Optional[str] = None,
+        max_new_tokens: int = 4800,
         max_concurrency: int = 8,
         parameters: Optional[dict] = None,
-        plan_vlm_model: str = None,
-        plan_vlm_kind: str = None,
         max_leg_steps: int = 5,
         max_attempts_per_step: int = 3,
         max_replans: int = 2,
         max_frames_per_slice: int = 8,
-        plan_max_new_tokens: int = 2400,
-        judge_max_new_tokens: int = 4800,
         verbose: bool = False,
         **executor_kwargs: Any,
     ) -> None:
         self._documents = documents or []
-        self._insight_rows = insight_rows or []
-        self._mode = mode
-        self._init_state = init_state
         self._max_concurrency = max_concurrency
-        self._hint_max_new_tokens = hint_max_new_tokens
         super().__init__(task, executor_class, env, game, max_steps, max_tool_calls,
+                         supervisor_vlm_model, supervisor_vlm_kind, max_new_tokens,
                          parameters, **executor_kwargs)
-        self._hint_vlm = VLM(hint_vlm_model, hint_vlm_kind)
         # Populated by the relevance pass so the caller can inspect why a plan came out the
         # way it did without re-running the pipeline. ``selected_ids`` is the durable part:
         # the benchmark CSV stores it per episode, so a plan can be traced back to the exact
@@ -195,16 +175,6 @@ class InfoPlanSupervisor(Supervisor):
         self.n_replans = 0
         self.last_diagnosis: Optional[str] = None
         self._max_frames_per_slice = max_frames_per_slice
-        self._plan_max_new_tokens = plan_max_new_tokens
-        # The completion check gets the largest budget of the three. Its verdict line comes
-        # last, after the reasoning, so it is the call that loses its answer first when a
-        # reply is cut short — and losing it silently means nothing ever clears.
-        self._judge_max_new_tokens = judge_max_new_tokens
-        # A plain VLM. Every call goes through _call -> Supervisor._vlm_call, which records
-        # it on self.report; nothing wraps the VLM itself any more.
-        self._plan_vlm = (
-            self._hint_vlm if plan_vlm_model is None else VLM(plan_vlm_model, plan_vlm_kind)
-        )
         self.plan: List[str] = []
         self.step_log: List[dict] = []
         # Steps already cleared, each with the frame that proved it, so a later step can be
@@ -225,14 +195,6 @@ class InfoPlanSupervisor(Supervisor):
         if self.verbose:
             print(message)
 
-    def _call(self, stage: str, **kwargs):
-        """This arm's shorthand for a recorded supervisor call on its own VLM.
-
-        Every one of this class's VLM calls goes through here, so all of them land on
-        ``self.report.event_log`` in order, interleaved with the executor legs they drove.
-        """
-        return self._vlm_call(stage, self._plan_vlm, **kwargs)
-
     # -- Knowledge selection ---------------------------------------------------
 
     @staticmethod
@@ -240,10 +202,9 @@ class InfoPlanSupervisor(Supervisor):
         """
         Stable identifier for one selected entry, for the benchmark CSV and debug reports.
 
-        ``source`` is the provenance label the loader attached: the document's vertical in
-        retrieval mode (``zeroshot``), or vertical/group_idx in init_state mode
-        (``zeroshot/12_0``) — which pins the exact stage-A row in insights.jsonl. The
-        category disambiguates entries within a source.
+        ``source`` is the provenance label the loader attached — the document's vertical
+        (``zeroshot``, ``curiosity``) for a built document, or ``parametric`` for one written
+        from the model's priors. The category disambiguates entries within a source.
         """
         return f"{entry.source}#{entry.category}" if entry.source else entry.category
 
@@ -255,9 +216,8 @@ class InfoPlanSupervisor(Supervisor):
         from PIL import Image
 
         # Stored frame paths are relative to their document's frames_root, so they are not
-        # openable on their own. Whoever produced the entry — load_document, or
-        # _init_state_candidates for rows read straight off insights.jsonl — has already
-        # resolved it.
+        # openable on their own. load_document has already resolved it. A parametric entry
+        # has no frame at all, which lands on the None branch below.
         path = entry.resolved_frame
         if not path or not os.path.exists(path):
             return None
@@ -265,20 +225,39 @@ class InfoPlanSupervisor(Supervisor):
 
     def _judge_relevance(self, entry, kind: str, screen) -> tuple:
         """One yes/no call for a single entry. Returns (is_relevant, reason)."""
+        images = [screen]
+        entry_frame = self._entry_frame(entry)
+        if entry_frame is not None:
+            images.append(entry_frame)
+
+        # The prompt must describe the images it actually receives. A parametric entry has
+        # no frame, so both slots drop the second-image language rather than referring to a
+        # picture that was never attached.
+        if entry_frame is not None:
+            frame_note = ("The images are: first the CURRENT screen the player is looking "
+                          "at, then the representative frame recorded with this entry.")
+            evidence_note = ("The frames are your primary evidence: compare what is "
+                             "actually visible in them.")
+        else:
+            frame_note = ("The image is the CURRENT screen the player is looking at. This "
+                          "entry has no recorded frame of its own — it was written from "
+                          "general knowledge of the game rather than from a playthrough, so "
+                          "judge it against its description and the current screen alone, "
+                          "and be correspondingly more willing to answer no.")
+            evidence_note = ("The current screen is your primary evidence: the entry's "
+                             "description must fit what is actually visible in it.")
+
         prompt = (
             RELEVANCE_PROMPT
             .replace("[GAME]", self._game)
             .replace("[TASK]", self._task)
             .replace("[KIND]", kind)
             .replace("[ENTRY]", entry.evidence_block())
+            .replace("[FRAME_NOTE]", frame_note)
+            .replace("[EVIDENCE_NOTE]", evidence_note)
         )
-        images = [screen]
-        entry_frame = self._entry_frame(entry)
-        if entry_frame is not None:
-            images.append(entry_frame)
 
-        output = self._vlm_call("filter", self._hint_vlm, texts=prompt, images=images,
-                                max_new_tokens=self._hint_max_new_tokens)
+        output = self._vlm_call("filter", texts=prompt, images=images)
         verdict = parse_yes_no(output, "Relevant")
         reason = (parse_key_value(output, "Reasoning") or "").strip()
         return verdict is True, reason
@@ -312,47 +291,19 @@ class InfoPlanSupervisor(Supervisor):
                     selected.append(entry)
         return selected
 
-    def _retrieval_candidates(self):
+    def _candidates(self):
+        """Every entry of every document, tagged with the kind of thing it describes.
+
+        A parametric document contributes only task entries — the model has seen no screens,
+        so it has no image categories to offer — but that needs no special case here: the
+        image section is simply empty and the loop yields nothing for it.
+        """
         from execution.info_doc import IMAGE_SECTION, TASK_SECTION
 
         candidates = []
         for document in self._documents:
             candidates += [(e, "task") for e in document.entries(TASK_SECTION)]
             candidates += [(e, "kind of screen") for e in document.entries(IMAGE_SECTION)]
-        return candidates
-
-    def _init_state_candidates(self):
-        """Stage-A rows for this episode's init state, as entries for the same relevance pass."""
-        from execution.info_doc import TASK_SECTION, InfoDocument, resolve_frame
-
-        available = sorted({row.get("init_state") for row in self._insight_rows
-                            if row.get("init_state")})
-        matching = [row for row in self._insight_rows
-                    if row.get("init_state") == self._init_state]
-
-        if not matching:
-            log_warn(
-                f"init_state '{self._init_state}' has no records in the loaded insights — "
-                f"running unplanned. Available init_states: {available}",
-                self._parameters,
-            )
-            return []
-
-        candidates = []
-        for row in matching:
-            document = InfoDocument.from_dict(row["document"])
-            for entry in document.entries(TASK_SECTION):
-                # These rows come straight off insights.jsonl rather than through
-                # load_document, so the two load-time fields have to be filled in here.
-                #
-                # Prefer the document's own recorded provenance; the row's "source" (set by
-                # the loader that read the file) is the fallback, and group_idx alone is the
-                # last resort — it is not comparable across verticals, since each numbers
-                # its groups independently.
-                label = document.provenance.label or row.get("source")
-                entry.source = f"{label}/{row.get('group_idx')}" if label else row.get("group_idx")
-                entry.resolved_frame = resolve_frame(document, entry.frame, self._parameters)
-                candidates.append((entry, "task"))
         return candidates
 
     # -- Planning --------------------------------------------------------------
@@ -368,9 +319,7 @@ class InfoPlanSupervisor(Supervisor):
         self.selected_ids = []
         screen = self._current_frame()
 
-        candidates = (self._init_state_candidates() if self._mode == "init_state"
-                      else self._retrieval_candidates())
-        selected = self._select_entries(candidates, screen)
+        selected = self._select_entries(self._candidates(), screen)
         self.selected_ids = [self.entry_id(entry) for entry in selected]
         if not selected:
             self.plan = []
@@ -383,8 +332,7 @@ class InfoPlanSupervisor(Supervisor):
             .replace("[TASK]", self._task)
             .replace("[INSIGHTS]", self.insights_block)
         )
-        output = self._call("plan", texts=prompt, images=[screen],
-                                      max_new_tokens=self._plan_max_new_tokens)
+        output = self._vlm_call("plan", texts=prompt, images=[screen])
         raw = (parse_key_value(output, "Plan") or "").strip()
         self.plan = parse_steps(raw)
         return self.plan
@@ -429,8 +377,7 @@ class InfoPlanSupervisor(Supervisor):
             .replace("[TASK]", self._task)
             .replace("[CANDIDATES]", numbered)
         )
-        output = self._call("filter_insights", texts=prompt, images=[screen],
-                                      max_new_tokens=self._hint_max_new_tokens)
+        output = self._vlm_call("filter_insights", texts=prompt, images=[screen])
         answer = (parse_key_value(output, "Keep") or "").strip()
 
         if not answer or answer.upper().startswith("ALL"):
@@ -493,8 +440,7 @@ class InfoPlanSupervisor(Supervisor):
             .replace("[TASK]", self._task)
             .replace("[CANDIDATES]", grouped_block)
         )
-        output = self._call("distil_insights", texts=prompt, images=[screen],
-                                      max_new_tokens=self._plan_max_new_tokens)
+        output = self._vlm_call("distil_insights", texts=prompt, images=[screen])
 
         lines = parse_list(output, "Insights")
 
@@ -518,8 +464,8 @@ class InfoPlanSupervisor(Supervisor):
         # site that could not use _call and had to set a stage on a wrapper object first.
         return summarise_trajectory_segments(
             env_steps, JUDGE_SLICE_PROMPT, self._game, step,
-            self._vlm_caller("judge_slice", self._plan_vlm),
-            self._plan_max_new_tokens, self._max_frames_per_slice,
+            self._vlm_caller("judge_slice"),
+            self._max_new_tokens, self._max_frames_per_slice,
         )
 
     def judge_step(self, env_steps: list, step: str, stop_reason: str) -> tuple:
@@ -546,8 +492,7 @@ class InfoPlanSupervisor(Supervisor):
             .replace("[SEGMENT_SUMMARIES]", "\n".join(summaries))
             .replace("[STOP_REASON]", stop_reason or "unknown")
         )
-        output = self._call("judge", texts=prompt, images=[self._current_frame()],
-                                      max_new_tokens=self._judge_max_new_tokens)
+        output = self._vlm_call("judge", texts=prompt, images=[self._current_frame()])
         verdict = parse_completion(output)
         reasoning = (parse_key_value(output, "Reasoning") or "").strip()
         if verdict is None:
@@ -557,8 +502,8 @@ class InfoPlanSupervisor(Supervisor):
             # fails its judgement no matter what the screen shows. Loud, because the symptom
             # — nothing ever clears — looks exactly like a bad plan.
             log_warn(f"[plan] completion check returned no 'Complete:' line within "
-                     f"{self._judge_max_new_tokens} tokens; treating as not complete. "
-                     f"Raise --judge_max_new_tokens if this repeats.", self._parameters)
+                     f"{self._max_new_tokens} tokens; treating as not complete. "
+                     f"Raise --supervisor_max_new_tokens if this repeats.", self._parameters)
         return verdict is True, reasoning, summaries
 
     def check_regression(self, summaries: List[str]) -> Optional[str]:
@@ -596,9 +541,9 @@ class InfoPlanSupervisor(Supervisor):
             .replace("[EARLIER_STEPS_BLOCK]", earlier_block)
             .replace("[SEGMENT_SUMMARIES]", "\n".join(summaries) or "  (no actions taken)")
         )
-        output = self._call("regression_check", 
+        output = self._vlm_call(
+            "regression_check",
             texts=prompt, images=[last["frame"], self._current_frame()],
-            max_new_tokens=self._hint_max_new_tokens,
         )
         if parse_yes_no(output, "Undone") is not True:
             return None
@@ -650,8 +595,7 @@ class InfoPlanSupervisor(Supervisor):
             .replace("[INSIGHTS]", self.insights_block or "(nothing recorded)")
             .replace("[PRIOR_HINT_BLOCK]", prior_block)
         )
-        output = self._call("hint", texts=prompt, images=[self._current_frame()],
-                                      max_new_tokens=self._hint_max_new_tokens)
+        output = self._vlm_call("hint", texts=prompt, images=[self._current_frame()])
         # The diagnosis is not passed to the executor — it is the hint writer's working, and
         # the executor gets instructions, not analysis. It is kept for the debug panel,
         # where a correct diagnosis followed by a useless instruction is a different failure
@@ -711,8 +655,7 @@ class InfoPlanSupervisor(Supervisor):
             .replace("[REGRESSION_LINE]", f"\n{regression}\n" if regression else "")
             .replace("[INSIGHTS]", self.insights_block or "(nothing recorded)")
         )
-        output = self._call("plan_flaw", texts=prompt, images=[self._current_frame()],
-                                      max_new_tokens=self._plan_max_new_tokens)
+        output = self._vlm_call("plan_flaw", texts=prompt, images=[self._current_frame()])
         if parse_yes_no(output, "Flawed") is not True:
             return None
 

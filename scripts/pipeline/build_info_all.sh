@@ -11,9 +11,11 @@
 # Assumes a VLM server is already serving --model_name (does NOT start one), matching full.sh.
 #
 # Output per source, under <dirname(stem)>/info_<model_save_name>/:
-#   insights.jsonl   stage A leaves — all that benchmark_info_all.sh --hint_mode init_state needs
+#   insights.jsonl   stage A leaves — the merge tree's input, and what debug.py info reports
+#                    on. No benchmark mode reads it directly any more.
 #   frames/          representative frames, for visual matching
-#   merge/, info.json  stage B — needed for --hint_mode retrieval
+#   merge/, info.json  stage B — required by benchmark_info_all.sh --knowledge_mode retrieval,
+#                    so --stage all is mandatory if you intend to benchmark
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 

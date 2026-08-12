@@ -148,10 +148,9 @@ class ExecutorVLMCallRecord:
     Record of a single VLM inference call, and whatever the executor did as a result.
 
     :param tag: Short label identifying the role of this call within the executor's
-        logic. The full set in use: ``"action"``, ``"score"``, ``"decide"`` (the three
-        in :data:`ACTION_TAGS`), ``"done_check"`` (:data:`DONE_CHECK_TAG`), and the
-        auxiliary ``"reflection"``, ``"map_update"``, ``"belief_update"``,
-        ``"decompose"``, ``"propose"``, ``"challenge"``. The tag says what
+        logic. The full set in use: ``"action"`` and ``"score"`` (both in
+        :data:`ACTION_TAGS`), ``"done_check"`` (:data:`DONE_CHECK_TAG`), and the
+        auxiliary ``"reflection"``, ``"map_update"``, ``"decompose"``. The tag says what
         the call was *for*; :attr:`steps` says what it *did*. Only action-tagged calls
         are expected to own steps, but the tag is a label, not the mechanism — nothing
         infers step ownership from it.
@@ -411,7 +410,7 @@ def _step_summary(step: StepRecord) -> str:
 #: in :attr:`ExecutorVLMCallRecord.steps` and nothing derives it from the tag. Consumers that
 #: reconstruct an action sequence from a call log alone filter on this to skip calls that
 #: were never asked for an action.
-ACTION_TAGS = {"action", "score", "decide"}
+ACTION_TAGS = {"action", "score"}
 
 #: Tag of the post-step completion check (``Executor._check_task_complete``).
 #: Deliberately **not** in :data:`ACTION_TAGS`: the check reasons about the run without

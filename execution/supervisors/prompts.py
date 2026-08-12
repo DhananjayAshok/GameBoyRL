@@ -2,11 +2,9 @@
 Every prompt used by a supervisor.
 
 Supervisor prompts live here rather than on the classes that send them because none
-of them is ever overridden: each belongs to exactly one supervisor, and
-:class:`~execution.supervisors.info_plan.InfoPlanSupervisor` inherits the two it
-shares with its base class without redefining either.  Keeping them in one module
-means finding the prompt behind a call does not require knowing which convention its
-author happened to use.
+of them is ever overridden: each belongs to exactly one supervisor.  Keeping them in
+one module means finding the prompt behind a call does not require knowing which
+convention its author happened to use.
 
 Executor prompts are the opposite case — they *are* overridden, by seven subclasses —
 and so stay as class attributes on the executors that own them.
@@ -287,7 +285,12 @@ Safe success point: <frame number, or N/A if never completed or unknown>
 [STOP]"""
 
 
-# --- Hint arm (InfoHintSupervisor, inherited by InfoPlanSupervisor) -------------------
+# --- Knowledge selection (InfoPlanSupervisor) ------------------------------------------
+# [FRAME_NOTE] and [EVIDENCE_NOTE] vary with whether the entry carries a representative
+# frame. A document distilled from trajectories has one per entry; a parametric document
+# (written from the model's priors, never having seen a screen) has none. The two slots are
+# filled by _judge_relevance so the prompt never claims an image that was not sent — a
+# mismatch there is invisible in the reply and silently degrades every verdict.
 
 RELEVANCE_PROMPT = """You are deciding whether a piece of recorded knowledge about [GAME] is relevant to the situation a player is in right now.
 
@@ -296,38 +299,13 @@ The player's current task is: "[TASK]"
 Here is the recorded entry:
 [ENTRY]
 
-The images are: first the CURRENT screen the player is looking at, then the representative frame recorded with this entry.
+[FRAME_NOTE]
 
-Could this entry's knowledge be relevant to the player's current task on this current screen? Answer yes only if the entry genuinely fits the situation — the same or a very similar [KIND]. The frames are your primary evidence: compare what is actually visible in them.
+Could this entry's knowledge be relevant to the player's current task on this current screen? Answer yes only if the entry genuinely fits the situation — the same or a very similar [KIND]. [EVIDENCE_NOTE]
 
 Answering yes to something that does not fit produces a misleading hint, which is worse than no hint at all. Answering no to something that does fit wastes knowledge that was already paid for. Judge honestly in both directions.
 
 Respond in exactly this format:
 Reasoning: <one or two sentences, referring to the frames>
 Relevant: <yes or no>
-[STOP]"""
-
-WRITE_HINT_PROMPT = """You are advising a player of [GAME] who is about to attempt this task:
-
-Task: "[TASK]"
-
-The image is the screen they are looking at right now.
-
-Here is what has been learned from past playthroughs of this game that may be relevant:
-[INSIGHTS]
-
-Write ONE short hint telling the player what to do from THIS screen. Requirements:
-
-- Be concrete and actionable: name the actual button, the actual direction, the actual object.
-- Ground it in what is ACTUALLY VISIBLE on the current screen. Do not describe things that are not there.
-- Make it SELF-LIMITING ON SOMETHING VISIBLE. Every condition must be a fact the player can check on the screen and find FALSE — a visible object, icon, cursor position, menu state or character position. Write "if a hand icon is visible in the toolbar, press LEFT or RIGHT to highlight it" rather than "press LEFT or RIGHT to highlight the hand icon".
-- NEVER condition on intent, desire, or the task itself. "If you intend to take the gun", "if you want to open the door", "if you wish to examine the coat" are FORBIDDEN. The player always intends to do the task, so such a condition is always true, the advice can never be declined, and a wrong hint is then followed until the step limit. Ask yourself: is there a screen on which this condition would be FALSE? If not, the condition is worthless — rewrite it or reply NO HINT.
-- Do not prescribe a fixed opening sequence of button presses. The player may already be past that point, or on a different screen than the one your evidence came from. Anchor the advice to what is on screen NOW, not to a plan begun from some earlier state.
-- Never assert something the evidence above does not support. Scope every claim to what was actually observed.
-- Prefer two sentences at most.
-
-If none of the knowledge above genuinely applies to this screen and this task, reply with exactly NO HINT. A missing hint costs nothing; a confident wrong hint actively misleads the player.
-
-Respond in exactly this format:
-Hint: <the hint, or NO HINT>
 [STOP]"""

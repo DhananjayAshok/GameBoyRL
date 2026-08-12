@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Reports the benchmark stage. Writes two markdowns under
 # <results_dir>/debug/<game>/benchmark/:
-#   episodes_<model>.md  every episode step by step, reconstructed from the CSV's `report`
-#                        column (per model, unlike the per-call PNGs which are keyed on the
-#                        executor class and overwritten by whichever run finished last)
-#   comparison.md        paired base vs fine-tuned: Wilson CIs, McNemar, subgoal fractions,
-#                        and every task solved by one model but not the other
+#   episodes_<model>.md  every episode step by step, read from the archived supervisor
+#                        report beside that episode's video (per model, unlike the per-call
+#                        PNGs which are keyed on the executor class and overwritten by
+#                        whichever run finished last)
+#   comparison.md        paired base vs fine-tuned: success rates, subgoal fractions, and
+#                        every task solved by one model but not the other
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 

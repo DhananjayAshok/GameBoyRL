@@ -88,10 +88,10 @@ else
     echo "Skipping build (--do_build false); expecting documents to exist already."
 fi
 
-# Stage 2: benchmark with hints, plus the no-hint baseline the numbers are read against.
+# Stage 2: benchmark the plan arm, plus the no-knowledge baseline the numbers are read against.
 if [[ "${ARGS["do_benchmark"]}" == "true" ]]; then
     echo ""
-    echo "########## Stage 2: benchmark (hint_mode=${ARGS["hint_mode"]}) ##########"
+    echo "########## Stage 2: benchmark plan arm (knowledge_mode=${ARGS["knowledge_mode"]}) ##########"
     ARGS["max_concurrency"]="${ARGS["bench_max_concurrency"]}"
     bench_flags=$(args_to_flags_subset ARGS BENCHMARK_INFO_ALL_ARG_KEYS)
     bash scripts/pipeline/benchmark_info_all.sh $bench_flags || exit 1
@@ -106,4 +106,4 @@ echo "Results:     $results_dir/benchmark/$game/"
 echo ""
 echo "Read the diagnostics first: a document whose stage-A yield was near-zero, or whose"
 echo "benchmark init_state coverage is thin, scores like the baseline for reasons that have"
-echo "nothing to do with hint quality."
+echo "nothing to do with plan quality."

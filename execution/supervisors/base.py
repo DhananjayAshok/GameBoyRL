@@ -5,8 +5,19 @@ A supervisor wraps one or more executor runs: it constructs the executor, lets i
 play, and then does something with the report it produces — judge it, critique it,
 turn it into a hint, or drive the next step of a plan.
 
-:class:`Supervisor` fixes only that shape.  The four concrete supervisors share the
+:class:`Supervisor` fixes only that shape.  The three concrete supervisors share the
 base class and almost nothing else; each lives in its own module.
+
+**One model per supervisor.**  A supervisor makes every one of its calls against a single
+VLM, held here and reached through :meth:`Supervisor._vlm_call`.  Subclasses used to each
+declare their own — ``checker_vlm_model``, ``hint_vlm_model``, ``plan_vlm_model`` — which
+meant a caller wiring up an arm had to know which stage names which model, and the split
+was never actually used: the only caller passed the same name to all of them.  There are
+now exactly two models in play anywhere: the executor's, and the supervisor's.
+
+The model that *built* the knowledge a supervisor reads is deliberately not a third: it is
+a property of the artifact, recorded in :class:`~execution.info_doc.Provenance` by whoever
+produced it, and no supervisor or benchmark arm takes it as a parameter.
 """
 
 from __future__ import annotations
@@ -18,7 +29,7 @@ from gameboy_worlds.interface import Environment
 
 from execution.executors import Executor
 from execution.report import ExecutorReport, SupervisorReport, SupervisorVLMCallRecord
-from utils import load_parameters, log_error
+from utils import VLM, load_parameters, log_error
 
 
 class Supervisor(ABC):
@@ -36,6 +47,16 @@ class Supervisor(ABC):
     :param game: Game name string, forwarded to the executor.
     :param max_steps: Step budget forwarded to each executor.
     :param max_tool_calls: Tool-call budget forwarded to each executor.
+    :param supervisor_vlm_model: The one model this supervisor reasons with. ``None`` for a
+        supervisor that never calls one (the baseline); constructing the VLM is deferred, so
+        a supervisor that does not reason does not need a model to exist.
+    :param supervisor_vlm_kind: VLM kind for that model.
+    :param max_new_tokens: Token budget for every supervisor call. One number rather than one
+        per stage: the stages used to differ (1000 / 2400 / 4800), and the only thing that
+        difference ever bought was a silent truncation when a reply outgrew its stage's
+        allowance — the completion check in particular puts its verdict on the last line, so
+        losing the tail reads as "not complete" and every step fails. Set to the largest of
+        the old stage budgets, so no call is tighter than it was.
     :param parameters: Optional parameter overrides.
     :param executor_kwargs: Additional keyword arguments forwarded verbatim to
         the executor constructor (e.g. ``vlm_model``, ``allow_self_termination``).
@@ -49,6 +70,9 @@ class Supervisor(ABC):
         game: str,
         max_steps: int,
         max_tool_calls: int,
+        supervisor_vlm_model: Optional[str] = None,
+        supervisor_vlm_kind: Optional[str] = None,
+        max_new_tokens: int = 4800,
         parameters: Optional[dict] = None,
         **executor_kwargs: Any,
     ) -> None:
@@ -58,6 +82,10 @@ class Supervisor(ABC):
         self._game = game
         self._max_steps = max_steps
         self._max_tool_calls = max_tool_calls
+        self._supervisor_vlm_model = supervisor_vlm_model
+        self._supervisor_vlm_kind = supervisor_vlm_kind
+        self._max_new_tokens = max_new_tokens
+        self._vlm_instance: Optional[VLM] = None
         self._parameters = load_parameters(parameters)
         self._executor_kwargs = executor_kwargs
         #: This run's record. Built here and appended to as the run proceeds, so it exists
@@ -75,12 +103,40 @@ class Supervisor(ABC):
     # Recording
     # ------------------------------------------------------------------
 
-    def _vlm_call(self, stage: str, vlm, **kwargs: Any) -> Any:
+    @property
+    def _vlm(self) -> VLM:
+        """This supervisor's one model, built on first use.
+
+        Deferred rather than constructed in ``__init__`` because
+        :class:`~execution.supervisors.dummy.DummySupervisor` makes no calls at all and must
+        keep working with no model configured — it is the control arm, and requiring it to
+        name a model it never uses would be a way to accidentally give it one.
+
+        Raises through :func:`log_error` rather than returning ``None``, so a supervisor that
+        *does* reason fails at the point the model is missing instead of somewhere later
+        inside an inference call with a less obvious message.
+        """
+        if self._vlm_instance is None:
+            if not self._supervisor_vlm_model:
+                log_error(
+                    f"{self.__class__.__name__} tried to make a VLM call but no "
+                    f"supervisor_vlm_model was given. Pass one, or use DummySupervisor if "
+                    f"the arm is meant to do no reasoning.",
+                    self._parameters,
+                )
+            self._vlm_instance = VLM(self._supervisor_vlm_model, self._supervisor_vlm_kind)
+        return self._vlm_instance
+
+    def _vlm_call(self, stage: str, **kwargs: Any) -> Any:
         """Make a supervisor VLM call and record it on :attr:`report`.
 
         The supervisor-side counterpart of ``Executor._vlm_call``. Every supervisor call
         must go through here — that is the whole point, since a call made directly on a VLM
         leaves no trace of why the supervisor did what it did.
+
+        The model is :attr:`_vlm` and the token budget defaults to
+        :attr:`_max_new_tokens`, so neither is repeated at the call sites. A caller may still
+        pass ``max_new_tokens`` explicitly to override it for one call.
 
         ``stage`` is an argument rather than mutable state on a wrapper object. The previous
         design set a ``stage`` attribute on a recording proxy and then called it, so a site
@@ -93,10 +149,10 @@ class Supervisor(ABC):
         single unreadable record.
 
         :param stage: Which phase of the supervisor's reasoning this call serves.
-        :param vlm: The VLM to call.
         :return: Exactly what the VLM returned, unchanged.
         """
-        result = vlm.infer(**kwargs)
+        kwargs.setdefault("max_new_tokens", self._max_new_tokens)
+        result = self._vlm.infer(**kwargs)
         texts = kwargs.get("texts")
         images = kwargs.get("images") or []
         if isinstance(texts, list):
@@ -113,7 +169,7 @@ class Supervisor(ABC):
             ))
         return result
 
-    def _vlm_caller(self, stage: str, vlm):
+    def _vlm_caller(self, stage: str):
         """A recording ``call(**kwargs)`` for helpers that do their own batching.
 
         :func:`~execution.supervisors.checker.window_trajectory` and friends build the
@@ -122,7 +178,7 @@ class Supervisor(ABC):
         a raw VLM is what used to lose those calls entirely.
         """
         def call(**kwargs: Any) -> Any:
-            return self._vlm_call(stage, vlm, **kwargs)
+            return self._vlm_call(stage, **kwargs)
         return call
 
     # ------------------------------------------------------------------

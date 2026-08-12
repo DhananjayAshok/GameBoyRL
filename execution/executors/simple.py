@@ -64,7 +64,7 @@ class SimpleExecutor(Executor):
     """
 
     #: ``[CONTEXT_SECTION]`` is where a variant splices whatever state it carries between
-    #: steps — a spatial map, a belief state, a plan, an action history. It renders empty
+    #: steps — a spatial map, a plan, an action history. It renders empty
     #: unless :meth:`_context_section` is overridden, so a variant that wants one adds three
     #: lines rather than copying this whole template to insert a placeholder.
     STEP_PROMPT = """Task: [TASK][HINT_BLOCK]

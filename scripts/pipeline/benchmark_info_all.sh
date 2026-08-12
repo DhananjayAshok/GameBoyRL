@@ -1,27 +1,30 @@
 #!/usr/bin/env bash
-# Benchmarks the context-engineering arm: runs the hinted benchmark for each --hint_mode
-# over the documents build_info_all.sh produced, plus the no-hint baseline the results are
-# only interpretable against.
+# Benchmarks the context-engineering arm: runs the plan benchmark for each --knowledge_mode
+# over the documents build_info_all.sh produced, plus the no-knowledge baseline the results
+# are only interpretable against.
 #
 # Paths are re-derived from the same utils.sh helpers build_info_all.sh used, never passed
 # between the two scripts (the info_source_stem pattern).
 #
 # --mode      which source verticals to draw knowledge from (curiosity_only/zeroshot_only/both).
 #             Several sources are unioned into one comma-separated list, and each entry keeps
-#             a provenance label so the hint writer knows verified solutions from exploration.
-# --hint_mode which test-time selection path to run:
-#               retrieval   ask per entry whether it fits this task and screen (needs info.json)
-#               init_state  key off the episode's init state (needs only insights.jsonl)
-#               both        run each in turn — the pair is what decomposes "do hints help?"
-#                           into "are the insights good?" and "is selection working?"
+#             a provenance label so the planner knows verified solutions from exploration.
+#             Only --knowledge_mode retrieval reads them.
+# --knowledge_mode  where the planner's knowledge comes from:
+#               retrieval   the documents build_info_all produced (needs info.json)
+#               parametric  a document the model writes from its own priors, from the game's
+#                           name alone — needs no built artifacts
+#               both        run each in turn. This is the comparison worth having: everything
+#                           after the document is identical, so a retrieval run that does not
+#                           beat parametric has not shown that distillation bought anything.
 #
 # Assumes a VLM server is already serving --model_name (does NOT start one), matching full.sh.
 #
 # --executor  ONE knob, used for both halves: the attempts/curiosity dirs the documents were
 #             built from, and the executor run at test time. The baseline below must be the
-#             same executor as the hinted runs or the delta is not attributable to hints.
+#             same executor as the plan runs or the delta is not attributable to the plan.
 #
-# Results: results/benchmark/<game>/info_<hint_mode>_<executor>_<model>.csv
+# Results: results/benchmark/<game>/info_plan_<knowledge_mode>_<executor>_<model>.csv
 #          results/benchmark/<game>/<executor>_<model>.csv               (baseline)
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
@@ -78,7 +81,7 @@ game="${ARGS["game"]}"
 run_name="${ARGS["run_name"]}"
 executor="${ARGS["executor"]}"
 mode="${ARGS["mode"]}"
-hint_mode="${ARGS["hint_mode"]}"
+knowledge_mode="${ARGS["knowledge_mode"]}"
 model_name="${ARGS["model_name"]}"
 model_save_name="${model_name##*/}"
 
@@ -88,61 +91,55 @@ if [[ -z "$sources" ]]; then
     exit 1
 fi
 
-case "$hint_mode" in
-    retrieval|init_state) hint_modes="$hint_mode" ;;
-    both)                 hint_modes="init_state retrieval" ;;
-    *) echo "Error: unknown --hint_mode '$hint_mode'. Choose one of: retrieval, init_state, both."
+case "$knowledge_mode" in
+    retrieval|parametric) knowledge_modes="$knowledge_mode" ;;
+    both)                 knowledge_modes="parametric retrieval" ;;
+    *) echo "Error: unknown --knowledge_mode '$knowledge_mode'. Choose one of: retrieval, parametric, both."
        exit 1 ;;
 esac
 echo "Mode '$mode' -> sources: $sources"
-echo "Hint mode '$hint_mode' -> runs: $hint_modes"
+echo "Knowledge mode '$knowledge_mode' -> runs: $knowledge_modes"
 
-# Collect the artifact paths for every selected source, comma-joined for --insights_paths /
-# --info_docs. Missing artifacts are named per source rather than reported as one opaque
-# failure, since with --mode both it is usually only one of the two that was never built.
-insights_paths=""
+# Collect the document path for every selected source, comma-joined for --info_docs. Missing
+# artifacts are named per source rather than reported as one opaque failure, since with
+# --mode both it is usually only one of the two that was never built.
+#
+# Skipped entirely under parametric-only: that mode reads no built artifacts, so requiring
+# them would make the control impossible to run on a game nothing has been built for — which
+# is exactly the case it is most useful in.
 info_docs=""
-for source in $sources; do
-    stem=$(info_source_stem "$game" "$model_save_name" "$run_name" "$executor" "$source")
-    info_dir=$(info_dir_for_stem "$stem" "$model_save_name" "$executor")
+if [[ "$knowledge_modes" == *retrieval* ]]; then
+    for source in $sources; do
+        stem=$(info_source_stem "$game" "$model_save_name" "$run_name" "$executor" "$source")
+        info_dir=$(info_dir_for_stem "$stem" "$model_save_name" "$executor")
+        doc="$info_dir/info.json"
 
-    insights="$info_dir/insights.jsonl"
-    doc="$info_dir/info.json"
-
-    if [[ ! -f "$insights" ]]; then
-        echo "Error: $source insights not found at $insights"
-        echo "  Produced by: scripts/pipeline/build_info_all.sh --mode $mode"
-        exit 1
-    fi
-    insights_paths+="${insights_paths:+,}$insights"
-
-    if [[ -f "$doc" ]]; then
+        if [[ ! -f "$doc" ]]; then
+            echo "Error: $source info.json not found at $doc, but --knowledge_mode includes retrieval."
+            echo "  Produced by: scripts/pipeline/build_info_all.sh --mode $mode --stage all"
+            echo "  (--stage a builds only insights.jsonl, which no benchmark mode reads any more.)"
+            exit 1
+        fi
         info_docs+="${info_docs:+,}$doc"
-    elif [[ "$hint_modes" == *retrieval* ]]; then
-        echo "Error: $source info.json not found at $doc, but --hint_mode includes retrieval."
-        echo "  Produced by: scripts/pipeline/build_info_all.sh --mode $mode --stage all"
-        echo "  (--stage a builds only insights.jsonl, which is enough for init_state.)"
-        exit 1
-    fi
-    echo "  $source -> $info_dir"
-done
-
-hint_model_arg=""
-if [[ "${ARGS["hint_vlm_model"]}" != "none" ]]; then
-    hint_model_arg="--hint_vlm_model ${ARGS["hint_vlm_model"]}"
-fi
-hint_kind_arg=""
-if [[ "${ARGS["hint_vlm_kind"]}" != "none" ]]; then
-    hint_kind_arg="--hint_vlm_kind ${ARGS["hint_vlm_kind"]}"
+        echo "  $source -> $info_dir"
+    done
 fi
 
-for run_hint_mode in $hint_modes; do
+supervisor_model_arg=""
+if [[ "${ARGS["supervisor_vlm_model"]}" != "none" ]]; then
+    supervisor_model_arg="--supervisor_vlm_model ${ARGS["supervisor_vlm_model"]}"
+fi
+supervisor_kind_arg=""
+if [[ "${ARGS["supervisor_vlm_kind"]}" != "none" ]]; then
+    supervisor_kind_arg="--supervisor_vlm_kind ${ARGS["supervisor_vlm_kind"]}"
+fi
+
+for run_knowledge_mode in $knowledge_modes; do
     echo ""
-    echo "=== Benchmark: --hint_mode $run_hint_mode ==="
-    bash scripts/benchmark_info.sh \
+    echo "=== Benchmark: plan arm, --knowledge_mode $run_knowledge_mode ==="
+    bash scripts/benchmark_plan.sh \
         --game "$game" \
-        --hint_mode "$run_hint_mode" \
-        --insights_paths "$insights_paths" \
+        --knowledge_mode "$run_knowledge_mode" \
         --info_docs "${info_docs:-none}" \
         --executor "$executor" \
         --executor_vlm_model "$model_name" \
@@ -150,16 +147,16 @@ for run_hint_mode in $hint_modes; do
         --max_steps "${ARGS["max_steps"]}" \
         --max_concurrency "${ARGS["max_concurrency"]}" \
         --regenerate "${ARGS["regenerate"]}" \
-        $hint_model_arg $hint_kind_arg || exit 1
-    echo "  -> $results_dir/benchmark/$game/info_${run_hint_mode}_${executor}_${model_save_name}.csv"
+        $supervisor_model_arg $supervisor_kind_arg || exit 1
+    echo "  -> $results_dir/benchmark/$game/info_plan_${run_knowledge_mode}_${executor}_${model_save_name}.csv"
 done
 
-# The no-hint run on the SAME executor and model. Without it the hinted numbers above are
+# The no-knowledge run on the SAME executor and model. Without it the plan numbers above are
 # just success counts with nothing to be better than, which is the whole question this arm
 # asks. Same CSV shape, different filename, so viz.py reads them side by side.
 if [[ "${ARGS["baseline"]}" == "true" ]]; then
     echo ""
-    echo "=== Benchmark: no-hint baseline ==="
+    echo "=== Benchmark: no-knowledge baseline ==="
     bash scripts/benchmark.sh \
         --game "$game" \
         --executor "$executor" \
@@ -171,4 +168,4 @@ if [[ "${ARGS["baseline"]}" == "true" ]]; then
 fi
 
 echo ""
-echo "Done. Compare the info_* CSVs against the baseline in $results_dir/benchmark/$game/"
+echo "Done. Compare the info_plan_* CSVs against the baseline in $results_dir/benchmark/$game/"

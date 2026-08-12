@@ -237,6 +237,18 @@ class Paths:
     def info_doc(self, source: str = "attempt") -> str:
         return os.path.join(self.source_info_dir(source), INFO_DOC_FILENAME)
 
+    def parametric_doc(self) -> str:
+        """The parametric document for this game and model.
+
+        Keyed on game + model only, and deliberately not on run_name or executor: nothing
+        about this document depends on a trajectory run or on which executor plays, because
+        it is written from the model's priors before any of that exists. Putting it under
+        the trajectory tree would imply a dependency it does not have, and would make the
+        same document be regenerated once per run name.
+        """
+        return os.path.join(self.storage_dir, "parametric_docs", self.game,
+                            self.model_save_name, INFO_DOC_FILENAME)
+
     def insights_jsonl(self, source: str = "attempt") -> str:
         return os.path.join(self.source_info_dir(source), INSIGHTS_FILENAME)
 

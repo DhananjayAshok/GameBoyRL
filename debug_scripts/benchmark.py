@@ -101,8 +101,8 @@ def _paired_index(a: pd.DataFrame, label_a: str, b: pd.DataFrame, label_b: str,
     The task strings are checked at every shared position and a mismatch is fatal rather than
     dropped. It means the two CSVs are not prefixes of one benchmark table — an edited table,
     two different games, or a ``--override_index`` run, which appends its single row at the
-    resume position rather than at its own — and pairing them anyway yields a McNemar p-value
-    over episodes that were never the same episode.
+    resume position rather than at its own — and pairing them anyway would put two different
+    episodes side by side and call the difference a result.
     """
     n = min(len(a), len(b))
     if n == 0:
