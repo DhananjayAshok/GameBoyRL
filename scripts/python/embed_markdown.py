@@ -10,12 +10,24 @@ directory. That renders locally, but the markdown is not portable: move the .md 
 every image is a dead link. This walks the same links, base64s the bytes into ``data:`` URIs,
 and emits a single file that renders anywhere with no filesystem and no network.
 
-Videos become ``<video controls preload="none">`` so a browser does not fetch every clip
-before showing the first heading; images get ``loading="lazy"`` for the same reason. A full
-50-episode report is ~13 MB, which is fine as a download and slow as a web page — pass
-``--tasks`` to cut it to the episodes worth looking at.
+Videos are transcoded to H.264 on the way in
+--------------------------------------------
+The emulator records with OpenCV's ``mp4v`` fourcc (see ``VideoWriter`` in
+``gameboy_worlds/emulation/emulator.py``), which is MPEG-4 Part 2. Desktop players open it
+fine; **no browser will decode it**, so an embedded ``<video>`` shows controls and refuses to
+play. Each clip is therefore re-encoded to H.264 / yuv420p before embedding — the pixel format
+matters as much as the codec, since browsers need 4:2:0 chroma.
 
-Targets that are not local files (http, mailto, anchors) are left exactly as they are.
+ffmpeg comes from ``imageio_ffmpeg``'s bundled binary, so nothing has to be on PATH. Without
+it the original bytes are embedded and a warning says the clip will not play, rather than the
+export failing outright.
+
+Frames are 160x144, so clips are upscaled with nearest-neighbour (``--video-scale``) to be
+watchable without blurring Game Boy pixels into mush.
+
+A full 50-episode report is ~13 MB: fine as a download, slow as a web page. Pass ``--tasks``
+to cut it to the episodes worth looking at. Targets that are not local files (http, mailto,
+anchors) are left exactly as they are.
 """
 
 import argparse
@@ -23,7 +35,10 @@ import base64
 import mimetypes
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 
 import markdown
 
@@ -31,6 +46,7 @@ IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
 LINK_RE = re.compile(r"(?<!!)\[([^\]]*)\]\(([^)\s]+)\)")
 #: "## <task>" starts an episode section; used only by --tasks.
 HEADING_RE = re.compile(r"^## (.+)$", re.MULTILINE)
+VIDEO_SUFFIXES = (".mp4", ".webm", ".gif")
 
 CSS = """
 :root { --bg:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e3e3e3; --code:#f6f6f6; }
@@ -48,7 +64,8 @@ h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--line)
 h3 { font-size: 1.05rem; margin-top: 1.8rem; color: var(--muted); }
 img { image-rendering: pixelated; max-width: 100%; border: 1px solid var(--line);
       border-radius: 3px; }
-video { max-width: 100%; border: 1px solid var(--line); border-radius: 3px; }
+video { image-rendering: pixelated; max-width: 100%; display: block; margin: .4rem 0;
+        border: 1px solid var(--line); border-radius: 3px; }
 pre { background: var(--code); padding: .8rem 1rem; border-radius: 4px; overflow-x: auto;
       font-size: 13px; }
 code { background: var(--code); padding: .1rem .3rem; border-radius: 3px; font-size: 13px; }
@@ -57,17 +74,61 @@ table { border-collapse: collapse; display: block; overflow-x: auto; max-width: 
 th, td { border: 1px solid var(--line); padding: .35rem .6rem; text-align: left; }
 details { margin: .5rem 0; }
 summary { cursor: pointer; color: var(--muted); }
-figcaption { color: var(--muted); font-size: 13px; }
 blockquote { border-left: 3px solid var(--line); margin-left: 0; padding-left: 1rem;
              color: var(--muted); }
 """
 
 
+def find_ffmpeg():
+    """The ffmpeg to transcode with, or None. Prefers imageio's bundled build over PATH."""
+    try:
+        import imageio_ffmpeg
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if exe and os.path.exists(exe):
+            return exe
+    except Exception:  # noqa: BLE001 - absence is a normal outcome, not an error
+        pass
+    return shutil.which("ffmpeg")
+
+
+def b64(raw: bytes, mime: str) -> str:
+    return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+
+
 def data_uri(path: str) -> str:
-    """``data:<mime>;base64,...`` for one local file."""
+    """``data:<mime>;base64,...`` for one local file, bytes unchanged."""
     mime = mimetypes.guess_type(path)[0] or "application/octet-stream"
     with open(path, "rb") as handle:
-        return f"data:{mime};base64,{base64.b64encode(handle.read()).decode('ascii')}"
+        return b64(handle.read(), mime)
+
+
+def transcoded_uri(path: str, ffmpeg: str, scale: int):
+    """H.264/yuv420p ``data:`` URI for a video, or None if the transcode failed.
+
+    ``-movflags +faststart`` puts the moov atom first, which matters for a data URI just as
+    much as for a network fetch: a browser will not start playback until it has the index.
+    The scale filter rounds to even dimensions because H.264 4:2:0 cannot encode odd ones.
+    """
+    handle = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    handle.close()
+    try:
+        chain = (f"scale=iw*{scale}:ih*{scale}:flags=neighbor,"
+                 "scale=trunc(iw/2)*2:trunc(ih/2)*2") if scale > 1 else \
+                "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+        result = subprocess.run(
+            [ffmpeg, "-y", "-loglevel", "error", "-i", path,
+             "-vf", chain, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+             "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", handle.name],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0 or os.path.getsize(handle.name) == 0:
+            print(f"  ffmpeg failed on {os.path.basename(path)}: "
+                  f"{result.stderr.strip()[:160]}", file=sys.stderr)
+            return None
+        with open(handle.name, "rb") as done:
+            return b64(done.read(), "video/mp4")
+    finally:
+        os.unlink(handle.name)
 
 
 def select_tasks(text: str, wanted: list) -> str:
@@ -91,6 +152,10 @@ def main() -> int:
                         help="Output HTML path. Defaults to the report with a .html suffix.")
     parser.add_argument("--tasks", default=None,
                         help="Comma-separated substrings; keep only matching '## ' sections.")
+    parser.add_argument("--video-scale", type=int, default=3,
+                        help="Nearest-neighbour upscale for embedded clips (1 = none).")
+    parser.add_argument("--no-transcode", action="store_true",
+                        help="Embed video bytes as recorded. They will not play in a browser.")
     args = parser.parse_args()
 
     if not os.path.exists(args.report):
@@ -99,16 +164,22 @@ def main() -> int:
     base_dir = os.path.dirname(os.path.abspath(args.report))
     out_path = args.out or os.path.splitext(args.report)[0] + ".html"
 
+    ffmpeg = None if args.no_transcode else find_ffmpeg()
+    if not args.no_transcode and ffmpeg is None:
+        print("  WARNING: no ffmpeg found. Videos are embedded as recorded (mp4v), which no "
+              "browser will play.", file=sys.stderr)
+
     text = open(args.report).read()
     if args.tasks:
         text = select_tasks(text, [t.strip() for t in args.tasks.split(",") if t.strip()])
 
-    # Cache keyed on the resolved path: the same frame is often linked twice, and base64ing a
-    # multi-megabyte corpus twice over is pure waste.
+    # Cache keyed on the resolved path: the same frame is often linked twice, and re-encoding
+    # or re-base64ing a multi-megabyte corpus twice over is pure waste.
     cache: dict = {}
-    stats = {"img": 0, "video": 0, "missing": 0, "skipped": 0}
+    stats = {"img": 0, "video": 0, "transcoded": 0, "raw_video": 0,
+             "missing": 0, "skipped": 0}
 
-    def resolve(target: str):
+    def resolve(target: str, is_video: bool):
         if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", target) or target.startswith("#"):
             stats["skipped"] += 1
             return None
@@ -117,27 +188,38 @@ def main() -> int:
             stats["missing"] += 1
             return None
         if full not in cache:
-            cache[full] = data_uri(full)
+            uri = None
+            if is_video and ffmpeg is not None:
+                uri = transcoded_uri(full, ffmpeg, args.video_scale)
+                if uri is not None:
+                    stats["transcoded"] += 1
+            if uri is None:
+                uri = data_uri(full)
+                if is_video:
+                    stats["raw_video"] += 1
+            cache[full] = uri
         return cache[full]
 
     def sub_image(match):
         alt, target = match.group(1), match.group(2)
-        uri = resolve(target)
+        uri = resolve(target, is_video=False)
         if uri is None:
             return match.group(0)
         stats["img"] += 1
         return f'<img loading="lazy" alt="{alt}" src="{uri}">'
 
     def sub_link(match):
-        label, target = match.group(1), match.group(2)
-        if not target.lower().endswith((".mp4", ".webm", ".gif")):
+        target = match.group(2)
+        if not target.lower().endswith(VIDEO_SUFFIXES):
             return match.group(0)
-        uri = resolve(target)
+        uri = resolve(target, is_video=True)
         if uri is None:
             return match.group(0)
         stats["video"] += 1
-        return (f'<figure><figcaption>{label}</figcaption>'
-                f'<video controls preload="none" src="{uri}"></video></figure>')
+        # A bare <video>, not wrapped in <figure>: these links sit mid-sentence ("video: [...]")
+        # and <figure> is not phrasing content, so inside the resulting <p> the parser would
+        # close the paragraph and reparent it. <video> on its own is valid there.
+        return f'<video controls preload="none" src="{uri}"></video>'
 
     text = IMAGE_RE.sub(sub_image, text)
     text = LINK_RE.sub(sub_link, text)
@@ -158,8 +240,9 @@ def main() -> int:
 
     size = os.path.getsize(out_path) / 1e6
     print(f"wrote {out_path}  ({size:.1f} MB)")
-    print(f"  embedded {stats['img']} image(s), {stats['video']} video(s); "
-          f"{stats['missing']} unresolved, {stats['skipped']} external left alone")
+    print(f"  embedded {stats['img']} image(s), {stats['video']} video(s) "
+          f"[{stats['transcoded']} transcoded to H.264, {stats['raw_video']} left as recorded]")
+    print(f"  {stats['missing']} unresolved, {stats['skipped']} external left alone")
     return 0
 
 

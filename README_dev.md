@@ -23,10 +23,9 @@ A guide to the scripts in `scripts/` and what each one does. Use `--help` on the
 | `propose_zeroshot.sh` | Calls the VLM to propose candidate tasks for a single game/init_state with no prior trajectory data. Results are saved to the task store. |
 | `propose_all_zeroshot.sh` | Batch version of `propose_zeroshot.sh`: runs across every registered init_state for a game. Regenerates the state dictionary before starting. |
 | `infer_tasks.sh` | Uses the VLM to infer task labels from grouped trajectories produced by `group_trajectories.sh`. Populates the task store for a given run. |
-| `infer_guidance.sh` | Uses the VLM to annotate a trajectory with step-by-step guidance. Output file is consumed by `practice_tasks.sh`. |
-| `practice_tasks.sh` | Runs the VLM agent through guided practice sessions using guidance from `infer_guidance.sh`. Supports a score mode that produces scored trajectories for VLM fine-tuning data collection. |
-| `attempt_tasks.sh` | Runs the VLM agent to attempt tasks loaded from a task file, scoring each attempt. Results are logged for evaluation and potential fine-tuning data collection. |
-| `train_vlm.sh` | Fine-tunes a VLM with LoRA via `train.py`. Saves the adapter to storage under the run name; optionally pushes to the HuggingFace Hub. |
+| `attempt_tasks.sh` | Runs the VLM agent to attempt tasks loaded from a task file, scoring each attempt. Terminal stage of the zeroshot vertical: writes `success_trajectories.{json,pkl}`. |
+| `build_info.sh` | Distils (task, trajectory) pairs into an info document beside its input stem — the context-engineering arm. |
+| `train_vlm.sh` | Fine-tunes a VLM with LoRA via `train.py`. Saves the adapter to storage under the run name; optionally pushes to the HuggingFace Hub. Takes `--train_file`/`--validation_file` directly; nothing in this repo builds them. |
 
 ---
 
@@ -40,11 +39,8 @@ These compose the RL and VLM scripts above into higher-level end-to-end workflow
 | `curiosity_all_tasks.sh` | Batch version of `curiosity_tasks.sh` over all registered init_states. |
 | `propose_and_attempt.sh` | Single init_state: zero-shot task proposal followed immediately by an attempt run. |
 | `propose_and_attempt_all.sh` | Batch version of `propose_and_attempt.sh`: proposes across all init_states then runs a single combined attempt. |
-| `propose_after_curiosity.sh` | Single init_state: zero-shot proposal augmented with a curiosity prior, then attempt. Requires `infer_tasks.sh` to have been run first. |
-| `propose_after_curiosity_all.sh` | Batch version of `propose_after_curiosity.sh`. |
-| `propose_zeroshot_with_curiosity.sh` | Two-stage proposal for a single init_state: first proposes with no prior, then again with the curiosity prior. Both stages are followed by attempt runs. |
-| `propose_zeroshot_with_curiosity_all.sh` | Batch version of `propose_zeroshot_with_curiosity.sh`. |
-| `guidance_and_practice.sh` | Annotates a trajectory with step-by-step guidance via `infer_guidance.sh`, then immediately runs `practice_tasks.sh` on the result. |
+| `curiosity_and_zeroshot.sh` | Single init_state: runs both data-collection verticals. |
+| `curiosity_and_zeroshot_all.sh` | Batch version of `curiosity_and_zeroshot.sh`. Called by `full.sh --mode both`. |
 
 ---
 

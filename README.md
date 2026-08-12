@@ -17,11 +17,11 @@ A VLM annotates clustered trajectories to infer what tasks the agent was implici
 **Zero-Shot Task Proposal:**
 VLMs can also propose candidate tasks for a game state directly, with optional augmentation from previously inferred curiosity tasks to improve proposal quality.
 
-**Guided Practice and Attempt:**
-Agents are given step-by-step guidance inferred by a VLM and run through structured practice sessions. Scored trajectories from practice and task-attempt runs are collected as fine-tuning data.
+**Task Attempt:**
+Agents attempt the proposed tasks under a two-stage VLM judge that describes what happened and then rules on completion, retrying failures with a derived hint. Successful trajectories are saved as a `<stem>.json` + `<stem>.pkl` pair.
 
 **VLM Fine-Tuning:**
-LoRA fine-tuning of VLMs on the collected scored trajectories, producing specialised game-playing agents.
+LoRA fine-tuning of VLMs on a collected trajectory dataset, producing specialised game-playing agents. `scripts/vlm/train_vlm.sh` takes the train/validation CSVs directly — the repo no longer builds them.
 
 **Benchmarking:**
 A unified benchmark suite evaluates any VLM agent across games, recording video and logging per-task results.
@@ -128,7 +128,7 @@ All workflows are driven by shell scripts in `scripts/`. The three main categori
 
 **RL** (`scripts/rl/`) — collect and cluster trajectories via curiosity-driven RL.
 
-**VLM** (`scripts/vlm/`) — infer tasks, propose tasks, run practice and attempt sessions, fine-tune.
+**VLM** (`scripts/vlm/`) — infer tasks, propose tasks, run attempt sessions, build info documents, fine-tune.
 
 **Pipeline** (`scripts/pipeline/`) — end-to-end compositions of the above (e.g. curiosity exploration → task inference → attempt in a single call).
 
@@ -138,8 +138,8 @@ A typical end-to-end run looks like:
 # 1. Collect and cluster trajectories for a game state
 bash scripts/pipeline/curiosity_tasks.sh --game pokemon_red --run_name my_run ...
 
-# 2. Propose and attempt tasks zero-shot (augmented with curiosity prior)
-bash scripts/pipeline/propose_after_curiosity.sh --game pokemon_red --model_name gpt-4o ...
+# 2. Propose and attempt tasks zero-shot
+bash scripts/pipeline/propose_and_attempt_all.sh --game pokemon_red --model_name gpt-4o ...
 
 # 3. Benchmark the resulting agent
 bash scripts/benchmark.sh --game pokemon_red ...
