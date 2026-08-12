@@ -391,7 +391,7 @@ declare -A BENCHMARK_INFO_ALL_DEFAULTS=(
 
 BENCHMARK_INFO_ALL_ARG_KEYS=("${BENCHMARK_INFO_ALL_ESSENTIALS[@]}" "${!BENCHMARK_INFO_ALL_DEFAULTS[@]}")
 
-# info_full: the top-level driver. Its key set is the union of the two stages it calls, so
+# info_full: the per-game driver. Its key set is the union of the two stages it calls, so
 # the all-games sweep can forward one dict down without knowing the split.
 INFO_FULL_ESSENTIALS=()
 populate_array VLM_ESSENTIALS INFO_FULL_ESSENTIALS
@@ -401,8 +401,42 @@ populate_dict BUILD_INFO_ALL_DEFAULTS INFO_FULL_DEFAULTS
 populate_dict BENCHMARK_INFO_ALL_DEFAULTS INFO_FULL_DEFAULTS
 INFO_FULL_DEFAULTS["do_build"]=true
 INFO_FULL_DEFAULTS["do_benchmark"]=true
+# Longer episodes than a bare benchmark_info_all run: a hint the executor never gets far
+# enough to use scores like the baseline for reasons unrelated to hint quality.
+INFO_FULL_DEFAULTS["max_steps"]=150
+# The two stages want different concurrency (build 16, benchmark 8) and the flat union above
+# holds one value per key — the second populate_dict would win and silently halve the build.
+# Split the key so both halves are reachable from here, and drop the merged one; info_full.sh
+# assigns the right half to max_concurrency before each forwarding call.
+INFO_FULL_DEFAULTS["build_max_concurrency"]="${BUILD_INFO_ALL_DEFAULTS["max_concurrency"]}"
+INFO_FULL_DEFAULTS["bench_max_concurrency"]="${BENCHMARK_INFO_ALL_DEFAULTS["max_concurrency"]}"
+unset INFO_FULL_DEFAULTS["max_concurrency"]
 
 INFO_FULL_ARG_KEYS=("${INFO_FULL_ESSENTIALS[@]}" "${!INFO_FULL_DEFAULTS[@]}")
+
+# info_full_all_games: the sweep around info_full. Inherits info_full's entire key set so a
+# default moves in one place instead of three, then adds its own game-selection flags. The
+# extras are deliberately absent from INFO_FULL_ARG_KEYS, which is what makes the
+# args_to_flags_subset forward drop them on the way down.
+#
+# game is NOT essential here (it is in VLM_ESSENTIALS, hence in INFO_FULL_ESSENTIALS): a
+# sweep discovers its own games, so requiring one would be requiring a value it ignores.
+INFO_FULL_ALL_GAMES_ESSENTIALS=("model_name" "vlm_kind" "run_name")   # VLM_ESSENTIALS - game
+declare -A INFO_FULL_ALL_GAMES_DEFAULTS
+populate_dict INFO_FULL_DEFAULTS INFO_FULL_ALL_GAMES_DEFAULTS
+# mode is discovered per game from what is on disk (info_available_sources ->
+# info_sources_to_mode), so it must not be user-settable here. Unsetting it removes it from
+# the sweep's ALLOWED_FLAGS; forwarding still emits it, because the loop assigns
+# ARGS["mode"] before the subset call and args_to_flags_subset keys on presence.
+unset INFO_FULL_ALL_GAMES_DEFAULTS["mode"]
+# Accepted and ignored, so the flag set stays uniform with the other pipeline scripts. The
+# loop overwrites it per game. Use --games to restrict the sweep.
+INFO_FULL_ALL_GAMES_DEFAULTS["game"]=none
+INFO_FULL_ALL_GAMES_DEFAULTS["games"]="auto"
+INFO_FULL_ALL_GAMES_DEFAULTS["skip_games"]=none
+INFO_FULL_ALL_GAMES_DEFAULTS["dry_run"]=false
+
+INFO_FULL_ALL_GAMES_ARG_KEYS=("${INFO_FULL_ALL_GAMES_ESSENTIALS[@]}" "${!INFO_FULL_ALL_GAMES_DEFAULTS[@]}")
 
 # curiosity_tasks + curiosity_all_tasks: create_traj → infer_tasks
 # run_name is required (no default) — removed from DEFAULTS after population

@@ -183,3 +183,4 @@ tmp*.sh
 tmp*
 scripts/core/all_train_states.sh
 vllm*.pid
+slurm/

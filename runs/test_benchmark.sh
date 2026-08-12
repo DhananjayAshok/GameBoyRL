@@ -1,12 +1,12 @@
 source scripts/core/utils.sh
-max_steps=2
+max_steps=20
 games=("survival_kids_1")
 
 models=(
     "gpt-4o-mini"
 )
 
-executors=("simple")
+executors=("history")
 
 for game in "${games[@]}"; do
     echo "Running benchmark for game: $game"

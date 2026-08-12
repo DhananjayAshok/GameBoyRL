@@ -1,7 +1,7 @@
 """
 Judging a finished trajectory.
 
-:class:`SimpleCheckerSupervisor` runs an executor once and decides whether it
+:class:`AttemptCheckerSupervisor` runs an executor once and decides whether it
 succeeded.  The two module-level functions implement the slice-then-consolidate
 pattern it uses to read a long trajectory: describe each segment separately, then
 consolidate those descriptions into one verdict or hint.
@@ -30,10 +30,18 @@ from execution.supervisors.prompts import (
 from utils import parse_int, parse_key_value, parse_yes_no, VLM
 
 
-class SimpleCheckerSupervisor(Supervisor):
+class AttemptCheckerSupervisor(Supervisor):
     """
     Runs the executor on a fixed task, then uses a two-stage VLM pipeline to
     judge whether the task was completed.
+
+    **Not a benchmark supervisor.** The benchmark arms are
+    :class:`~execution.supervisors.dummy.DummySupervisor`,
+    :class:`~execution.supervisors.info_hint.InfoHintSupervisor` and
+    :class:`~execution.supervisors.info_plan.InfoPlanSupervisor`; this class is used only by
+    ``vlm_scripts.attempt_tasks``, to label attempted tasks during data generation. Its
+    ``success`` is a VLM judgement, not the environment's ground-truth verdict, so it must
+    not be read as a benchmark result.
 
     Stage 1 — DESCRIBE: inspects the last ``evaluation_lookback`` env-step
     frames *without* task context and produces a description of what happened.

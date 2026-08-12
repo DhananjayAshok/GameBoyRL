@@ -18,7 +18,7 @@ import click
 
 from utils import load_parameters
 from debug_scripts import (
-    hello,
+    check_paths,
     debug_curiosity,
     debug_infer,
     debug_zeroshot,
@@ -57,7 +57,7 @@ def main(ctx, game, run_name, executor, output_dir, overwrite, mode):
     )
 
 
-main.add_command(hello, name="hello")
+main.add_command(check_paths, name="check_paths")
 main.add_command(debug_curiosity, name="curiosity")
 main.add_command(debug_infer, name="infer")
 main.add_command(debug_zeroshot, name="zeroshot")

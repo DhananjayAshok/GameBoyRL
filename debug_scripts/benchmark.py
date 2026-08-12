@@ -23,6 +23,14 @@ action but one), and no way to see the supervisor's own reasoning. Reading the a
 instead fixes all three. The `report` column is still written and is still useful for
 grepping; nothing here parses it.
 
+Episode identity
+----------------
+**A task string is not an episode key.** The benchmark anchors the same task to more than
+one init_state — `bomberman_quest`'s "Talk to the Guide" is one episode per guide, and
+`legend_of_zelda_links_awakening`'s "finish dialogue" one per room — so several rows of one
+CSV can carry the same `task`. Episodes are therefore keyed on **row position** (see
+:func:`_paired_index`) and their artifacts located through the row's own `session_dirs`.
+
 Output
 ------
 <results_dir>/debug/<game>/benchmark/episodes_<model>.md   (one per model)
@@ -47,7 +55,6 @@ from benchmark_scripts.common import REPORT_FILENAME
 from debug_scripts import markdown as md
 from debug_scripts.frames import to_pil
 from utils.paths import Paths
-from debug_scripts.stats import mcnemar_exact, wilson, wilson_str
 
 
 def _as_list(value):
@@ -64,7 +71,9 @@ def _as_list(value):
 
 
 def _load(path: str) -> pd.DataFrame:
-    frame = pd.read_csv(path)
+    # Row position is the episode's identity, so the index must stay the positional one
+    # read_csv assigns — see _paired_index.
+    frame = pd.read_csv(path).reset_index(drop=True)
     frame["success"] = frame["success"].astype(bool)
     frame["subgoals_reached_n"] = frame["subgoals_reached"].map(lambda v: len(_as_list(v)))
     frame["all_subgoals_n"] = frame["all_subgoals"].map(lambda v: len(_as_list(v)))
@@ -73,6 +82,45 @@ def _load(path: str) -> pd.DataFrame:
         axis=1,
     )
     return frame
+
+
+def _paired_index(a: pd.DataFrame, label_a: str, b: pd.DataFrame, label_b: str,
+                  parameters: dict) -> list[int]:
+    """Row positions pairing each episode in *a* with the same episode in *b*.
+
+    Paired on **position, not task string**. A task string is not unique within one CSV (the
+    benchmark anchors some tasks to two init_states), so ``set_index("task")`` builds a
+    non-unique index: ``.loc[task]`` then returns a *Series* per lookup rather than a scalar,
+    which either raises on ``bool()`` or silently double-counts in a ``.sum()``.
+
+    Position is a key, and the pipeline already runs on it. ``select_tasks`` takes a *prefix*
+    of the benchmark table, ``run_sweep`` appends rows in that order, and ``load_checkpoint``
+    resumes by counting rows — so CSV row *i* is benchmark row *i*, and a short CSV is a
+    prefix of a long one. That is what makes ``--n_tasks 5`` comparable to a full sweep.
+
+    The task strings are checked at every shared position and a mismatch is fatal rather than
+    dropped. It means the two CSVs are not prefixes of one benchmark table — an edited table,
+    two different games, or a ``--override_index`` run, which appends its single row at the
+    resume position rather than at its own — and pairing them anyway yields a McNemar p-value
+    over episodes that were never the same episode.
+    """
+    n = min(len(a), len(b))
+    if n == 0:
+        log_error(
+            f"{label_a} has {len(a)} row(s) and {label_b} has {len(b)} — nothing to compare.",
+            parameters,
+        )
+    mismatched = [i for i in range(n) if a.loc[i, "task"] != b.loc[i, "task"]]
+    if mismatched:
+        first = mismatched[0]
+        log_error(
+            f"{label_a} and {label_b} disagree at row {first}: "
+            f"{a.loc[first, 'task']!r} vs {b.loc[first, 'task']!r} "
+            f"({len(mismatched)} of {n} shared rows differ). A paired comparison needs two "
+            "runs over the same prefix of the same benchmark table.",
+            parameters,
+        )
+    return list(range(n))
 
 
 # ---------------------------------------------------------------------------
@@ -119,11 +167,13 @@ def _require_archives(frame: pd.DataFrame, csv_path: str, parameters: dict) -> d
             "was written before the report archive existed — re-run the benchmark to get one.",
             parameters,
         )
+    # Keyed on row position, not task: two rows can share a task string and would otherwise
+    # collapse onto one archive.
     reports = {}
-    for task, row in frame.set_index("task").iterrows():
+    for index, row in frame.iterrows():
         report = _load_report(row)
         if report is not None:
-            reports[task] = report
+            reports[index] = report
     if not reports:
         log_error(
             f"No report.pkl.gz found for any episode in {csv_path}. The session directories "
@@ -176,6 +226,39 @@ def _storage_link(report_dir: str, name: str, target: str, parameters: dict) -> 
 def _via_link(path: str, target_root: str, link_root: str) -> str:
     """Rewrite a storage path to go through the report's symlink instead."""
     return os.path.join(link_root, os.path.relpath(path, target_root))
+
+
+def _video_path(row) -> str | None:
+    """The video recorded for one episode, or None.
+
+    Read from the row's own ``session_dirs`` rather than rebuilt from the task name, because
+    the session dir is the only per-episode identity the CSV carries: two rows sharing a task
+    string share a task-named sessions directory too, and picking its most recent run would
+    hand both episodes the same video. ``save_report`` writes the archive into this same
+    directory, so one path derivation now locates both artifacts.
+    """
+    session = _session_dir(row)
+    if session is None:
+        return None
+    path = os.path.join(session, "videos", "0.mp4")
+    return path if os.path.exists(path) else None
+
+
+def _video_markdown(row, video_roots, report_dir: str) -> str | None:
+    """Markdown link to this episode's video, or None when it has none.
+
+    Links through the report's ``videos`` symlink when the session sits under it, and falls
+    back to a literal path when it does not — a CSV can name sessions for another game.
+    """
+    video = _video_path(row)
+    if video is None:
+        return None
+    if video_roots is not None:
+        target_root, link_root = video_roots
+        if os.path.realpath(video).startswith(os.path.realpath(target_root) + os.sep):
+            return md.link(os.path.basename(video),
+                           _via_link(video, target_root, link_root), report_dir)
+    return f"`{video}`"
 
 
 def _save_frame(frame, directory: str, name: str, overwrite: bool):
@@ -258,15 +341,17 @@ def _event_blocks(report, frames_dir: str, report_dir: str, overwrite: bool) -> 
     return lines
 
 
-def _episode_section(row, report, paths, bench_game, model, report_dir,
+def _episode_section(index: int, row, report, model, report_dir,
                      frames_root: str, video_roots, overwrite: bool) -> str:
-    """One task: its outcome, its video, then every call frame by frame."""
+    """One episode: its outcome, its video, then every call frame by frame."""
     subgoals = _as_list(row["subgoals_reached"])
     all_subgoals = _as_list(row["all_subgoals"])
     task = row["task"]
 
     blocks = [
-        md.h2(str(task)),
+        # The row number disambiguates the episodes that share a task string; it is also the
+        # benchmark table's own row, so it is what --override_index takes.
+        md.h2(f"[{index}] {task}"),
         md.bullets([
             f"success: **{row['success']}**",
             f"steps: **{row['n_steps']}** · invalid: **{row['n_invalid']}**",
@@ -275,14 +360,8 @@ def _episode_section(row, report, paths, bench_game, model, report_dir,
         ]),
     ]
 
-    video = paths.video_path(bench_game, model, task)
-    if video and video_roots is not None:
-        target = _via_link(video, *video_roots)
-        blocks.append(md.para(f"video: {md.link(os.path.basename(video), target, report_dir)}"))
-    elif video:
-        blocks.append(md.para(f"video: `{video}`"))
-    else:
-        blocks.append(md.para("_(no video recorded)_"))
+    video = _video_markdown(row, video_roots, report_dir)
+    blocks.append(md.para(f"video: {video}" if video else "_(no video recorded)_"))
 
     if report is None:
         blocks.append(md.warn("No archived report for this episode — nothing to walk."))
@@ -294,7 +373,10 @@ def _episode_section(row, report, paths, bench_game, model, report_dir,
         f"({len(report.supervisor_calls)} supervisor call(s), "
         f"{len(report.executor_reports)} executor leg(s))",
     ]))
-    frames_dir = os.path.join(frames_root, _slug(model), _slug(task))
+    # Prefixed with the row number: without it two episodes sharing a task string write into
+    # one directory, and the second silently reuses the first's PNGs whenever --overwrite is
+    # not set — a report showing the wrong screens, with nothing to indicate it.
+    frames_dir = os.path.join(frames_root, _slug(model), f"{index:03d}_{_slug(task)}")
     os.makedirs(frames_dir, exist_ok=True)
     blocks += _event_blocks(report, frames_dir, report_dir, overwrite)
     return "\n".join(blocks)
@@ -360,9 +442,9 @@ def debug_benchmark(obj, model_name, compare_model, bench_game, max_episodes):
             continue
         rows = frame.head(max_episodes) if max_episodes else frame
         sections = [
-            _episode_section(row, reports.get(row["task"]), paths, game, model, report_dir,
+            _episode_section(index, row, reports.get(index), model, report_dir,
                              frames_root, video_roots, overwrite)
-            for _, row in rows.iterrows()
+            for index, row in rows.iterrows()
         ]
         n_success = int(frame["success"].sum())
         blocks = [
@@ -370,7 +452,8 @@ def debug_benchmark(obj, model_name, compare_model, bench_game, max_episodes):
             md.para(f"Source: `{paths.benchmark_csv(game, model)}`"),
             md.bullets([
                 f"tasks: **{len(frame)}**",
-                f"success: {wilson_str(n_success, len(frame))}",
+                f"success: **{n_success}/{len(frame)}** "
+                f"({n_success / max(len(frame), 1) * 100:.1f}%)",
                 f"mean subgoal fraction: **{frame['subgoal_frac'].mean() * 100:.1f}%**",
                 f"mean invalid actions per episode: **{frame['n_invalid'].mean():.2f}**",
             ]),
@@ -387,30 +470,28 @@ def debug_benchmark(obj, model_name, compare_model, bench_game, max_episodes):
 
     # ---------------- (b) paired comparison ----------------
     if finetuned is not None:
-        shared = sorted(set(base["task"]) & set(finetuned["task"]))
-        dropped_base = sorted(set(base["task"]) - set(shared))
-        dropped_ft = sorted(set(finetuned["task"]) - set(shared))
-        b = base[base["task"].isin(shared)].set_index("task").loc[shared]
-        f = finetuned[finetuned["task"].isin(shared)].set_index("task").loc[shared]
+        paired = _paired_index(base, base_path, finetuned, ft_path, paths.parameters)
+        b, f = base.loc[paired], finetuned.loc[paired]
+        # Whatever the longer CSV has past the common prefix — a full sweep paired against a
+        # --n_tasks run, which results_path keeps in its own _first<n> file.
+        dropped_base = [i for i in base.index if i >= len(paired)]
+        dropped_ft = [i for i in finetuned.index if i >= len(paired)]
 
-        base_only = [t for t in shared if b.loc[t, "success"] and not f.loc[t, "success"]]
-        ft_only = [t for t in shared if f.loc[t, "success"] and not b.loc[t, "success"]]
-        both = [t for t in shared if b.loc[t, "success"] and f.loc[t, "success"]]
-        neither = [t for t in shared if not b.loc[t, "success"] and not f.loc[t, "success"]]
+        base_only = [i for i in paired if b.loc[i, "success"] and not f.loc[i, "success"]]
+        ft_only = [i for i in paired if f.loc[i, "success"] and not b.loc[i, "success"]]
+        both = [i for i in paired if b.loc[i, "success"] and f.loc[i, "success"]]
+        neither = [i for i in paired if not b.loc[i, "success"] and not f.loc[i, "success"]]
 
-        n = len(shared)
+        n = len(paired)
         base_hits, ft_hits = int(b["success"].sum()), int(f["success"].sum())
-        p_value = mcnemar_exact(len(base_only), len(ft_only))
-        base_lo, base_hi = wilson(base_hits, n)
-        ft_lo, ft_hi = wilson(ft_hits, n)
 
         summary = pd.DataFrame([
             {"model": base_model, "success": base_hits, "n": n,
-             "success_%": base_hits / n * 100, "ci_low_%": base_lo * 100, "ci_high_%": base_hi * 100,
+             "success_%": base_hits / n * 100,
              "subgoal_frac_%": b["subgoal_frac"].mean() * 100,
              "invalid_per_ep": b["n_invalid"].mean(), "steps_per_ep": b["n_steps"].mean()},
             {"model": ft_model, "success": ft_hits, "n": n,
-             "success_%": ft_hits / n * 100, "ci_low_%": ft_lo * 100, "ci_high_%": ft_hi * 100,
+             "success_%": ft_hits / n * 100,
              "subgoal_frac_%": f["subgoal_frac"].mean() * 100,
              "invalid_per_ep": f["n_invalid"].mean(), "steps_per_ep": f["n_steps"].mean()},
         ])
@@ -425,27 +506,25 @@ def debug_benchmark(obj, model_name, compare_model, bench_game, max_episodes):
                      for step in call.steps]
             return md.code("\n".join(f"{i + 1:>3}  {s}" for i, s in enumerate(steps)))
 
-        def _diff_sections(tasks, left_model, right_model):
+        def _diff_sections(indices, left_model, right_model):
             out = []
-            for task in tasks:
-                left_report, right_report = base_reports.get(task), ft_reports.get(task)
+            for i in indices:
                 lines = [
-                    md.h3(task),
+                    md.h3(f"[{i}] {b.loc[i, 'task']}"),
                     md.table(pd.DataFrame([
-                        {"model": left_model, "success": bool(b.loc[task, "success"]),
-                         "steps": b.loc[task, "n_steps"], "invalid": b.loc[task, "n_invalid"],
-                         "subgoals": f"{b.loc[task, 'subgoals_reached_n']}/{b.loc[task, 'all_subgoals_n']}"},
-                        {"model": right_model, "success": bool(f.loc[task, "success"]),
-                         "steps": f.loc[task, "n_steps"], "invalid": f.loc[task, "n_invalid"],
-                         "subgoals": f"{f.loc[task, 'subgoals_reached_n']}/{f.loc[task, 'all_subgoals_n']}"},
+                        {"model": left_model, "success": bool(b.loc[i, "success"]),
+                         "steps": b.loc[i, "n_steps"], "invalid": b.loc[i, "n_invalid"],
+                         "subgoals": f"{b.loc[i, 'subgoals_reached_n']}/{b.loc[i, 'all_subgoals_n']}"},
+                        {"model": right_model, "success": bool(f.loc[i, "success"]),
+                         "steps": f.loc[i, "n_steps"], "invalid": f.loc[i, "n_invalid"],
+                         "subgoals": f"{f.loc[i, 'subgoals_reached_n']}/{f.loc[i, 'all_subgoals_n']}"},
                     ])),
                 ]
-                for model, report in [(left_model, left_report), (right_model, right_report)]:
-                    video = paths.video_path(game, model, task)
-                    link = ""
-                    if video and video_roots is not None:
-                        target = _via_link(video, *video_roots)
-                        link = f" · video: {md.link('mp4', target, report_dir)}"
+                for model, side, reports in [(left_model, b, base_reports),
+                                             (right_model, f, ft_reports)]:
+                    report = reports.get(i)
+                    video = _video_markdown(side.loc[i], video_roots, report_dir)
+                    link = f" · video: {video}" if video else ""
                     lines.append(md.para(f"**{model}** steps{link}"))
                     lines.append(_step_lines(report))
                     calls = [c for leg in (report.executor_reports if report else [])
@@ -461,25 +540,31 @@ def debug_benchmark(obj, model_name, compare_model, bench_game, max_episodes):
             md.para(f"`{base_model}` (base) vs `{ft_model}` (fine-tuned)"),
             md.h2("Pairing"),
             md.bullets([
-                f"tasks compared: **{n}** (intersection of both CSVs)",
+                f"episodes compared: **{n}** (row for row over the common prefix)",
                 f"dropped, only in base: **{len(dropped_base)}** "
-                f"{'(' + ', '.join(dropped_base[:10]) + ')' if dropped_base else ''}",
+                + (f"({', '.join(base.loc[i, 'task'] for i in dropped_base[:10])})"
+                   if dropped_base else ""),
                 f"dropped, only in fine-tuned: **{len(dropped_ft)}** "
-                f"{'(' + ', '.join(dropped_ft[:10]) + ')' if dropped_ft else ''}",
+                + (f"({', '.join(finetuned.loc[i, 'task'] for i in dropped_ft[:10])})"
+                   if dropped_ft else ""),
             ]),
+            md.note(
+                "Episodes are paired on row position, not task string: the benchmark anchors "
+                "some tasks to two init_states, so a task string matches more than one episode "
+                "and cannot key the join. Row *i* of a results CSV is row *i* of the benchmark "
+                "table, and the two CSVs are checked to agree on every shared row before "
+                "anything below is computed."
+            ),
             md.h2("Summary"),
             md.table(summary),
             md.bullets([
                 f"solved by base only: **{len(base_only)}**",
                 f"solved by fine-tuned only: **{len(ft_only)}**",
                 f"solved by both: **{len(both)}** · by neither: **{len(neither)}**",
-                f"McNemar exact p on the {len(base_only)}/{len(ft_only)} discordant pairs: "
-                f"**{p_value:.3f}**",
             ]),
             md.para(
-                "Success is binary over a few dozen tasks, so the confidence intervals overlap "
-                "easily; `subgoal_frac_%` uses the partial progress already recorded in every row "
-                "and is the lower-variance signal to judge by. `invalid_per_ep` tests whether "
+                "`subgoal_frac_%` uses the partial progress already recorded in every row and is "
+                "the lower-variance signal to judge by. `invalid_per_ep` tests whether "
                 "unparseable or non-executable training targets leaked into behaviour."
             ),
             md.h2(f"Solved by base only ({len(base_only)})"),
@@ -490,7 +575,8 @@ def debug_benchmark(obj, model_name, compare_model, bench_game, max_episodes):
             md.h2("Both / neither"),
             md.table(pd.DataFrame({
                 "outcome": ["both solved"] * len(both) + ["neither solved"] * len(neither),
-                "task": both + neither,
+                "row": both + neither,
+                "task": [b.loc[i, "task"] for i in both + neither],
             })),
         ]
         path = md.write_report(os.path.join(report_dir, "comparison.md"), blocks)

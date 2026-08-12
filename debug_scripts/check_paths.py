@@ -15,11 +15,11 @@ def _mark(path: str) -> str:
     return "OK  " if os.path.exists(path) else "MISS"
 
 
-@click.command(name="hello")
+@click.command(name="check_paths")
 @click.option("--model_name", default=None,
               help="Full VLM name (e.g. google/gemma-4-31b-it). Omit to check curiosity paths only.")
 @click.pass_obj
-def hello(obj, model_name):
+def check_paths(obj, model_name):
     """Print every derived path with an exists/missing marker."""
     paths = Paths(
         parameters=obj["parameters"],
@@ -66,4 +66,4 @@ def hello(obj, model_name):
     gbw = paths.gameboy_worlds_storage()
     print(f"  GameBoyWorlds storage: {gbw or '(unreadable)'}")
 
-    print(f"\n-- output --\n  {paths.debug_dir('hello')}")
+    print(f"\n-- output --\n  {paths.debug_dir('check_paths')}")

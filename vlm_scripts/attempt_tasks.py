@@ -13,7 +13,7 @@ For each line (line_number = 0-indexed position in the JSONL):
      Do not reuse or reset this env across different init_states.
   2. For each task in tasks (task_index = 0-indexed position in the task list):
        group_idx  = f"{line_number}_{task_index}"
-       Reset env to init_state, then run SimpleCheckerSupervisor(
+       Reset env to init_state, then run AttemptCheckerSupervisor(
            task          = task_str,
            executor_class = <click option>,
            env           = env for this init_state,
@@ -75,7 +75,7 @@ from tqdm import tqdm
 from gameboy_worlds import get_environment
 from execution.registry import AVAILABLE_EXECUTORS
 from execution.report import EnvironmentStepRecord
-from execution.supervisors import SimpleCheckerSupervisor, derive_critique_hint
+from execution.supervisors import AttemptCheckerSupervisor, derive_critique_hint
 from utils import log_info, log_warn, log_error, VLM, HuggingFaceModel
 
 
@@ -141,7 +141,7 @@ def _attempt_task(
             if verbose:
                 print(f"  Attempt {attempt + 1}/{max_attempts}" + (f" | hint: {hint}" if hint else ""))
 
-            supervisor = SimpleCheckerSupervisor(
+            supervisor = AttemptCheckerSupervisor(
                 task=task_str,
                 executor_class=executor_class,
                 env=env,

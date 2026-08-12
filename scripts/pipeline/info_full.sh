@@ -21,22 +21,12 @@ source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 declare -A ARGS
 REQUIRED_ARGS=()
 
-populate_array VLM_ESSENTIALS REQUIRED_ARGS   # game, model_name, vlm_kind
-REQUIRED_ARGS+=("run_name")
-
-ARGS["executor"]="history"
-ARGS["mode"]="both"
-ARGS["hint_mode"]="both"
-ARGS["stage"]="all"
-ARGS["baseline"]=true
-ARGS["do_build"]=true
-ARGS["do_benchmark"]=true
-ARGS["max_steps"]=50
-ARGS["max_new_tokens"]=3000
-# Forwarded to the benchmark stage: false resumes each CSV from wherever it stopped, true
-# re-runs every episode. Needed at this level so a sweep can force the no-hint baseline to be
-# re-sampled alongside the hinted arms instead of reusing an older run's CSV.
-ARGS["regenerate"]=false
+# The key set and every default live in utils.sh (INFO_FULL_ESSENTIALS / INFO_FULL_DEFAULTS),
+# built as the union of the two stages this script calls. Nothing is redeclared here: a value
+# spelled out in both places is a value that drifts, and the sweep wrapper inherits the same
+# arrays, so a default changed in utils.sh changes for both entry points at once.
+populate_array INFO_FULL_ESSENTIALS REQUIRED_ARGS   # game, model_name, vlm_kind, run_name
+populate_dict INFO_FULL_DEFAULTS ARGS
 
 # --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -88,6 +78,10 @@ mode="${ARGS["mode"]}"
 if [[ "${ARGS["do_build"]}" == "true" ]]; then
     echo ""
     echo "########## Stage 1: build info documents (mode=$mode, stage=${ARGS["stage"]}) ##########"
+    # Each stage runs at its own width (see the split in INFO_FULL_DEFAULTS): building
+    # documents and sampling benchmark episodes do not want the same concurrency, and one
+    # shared --max_concurrency would force them to.
+    ARGS["max_concurrency"]="${ARGS["build_max_concurrency"]}"
     build_flags=$(args_to_flags_subset ARGS BUILD_INFO_ALL_ARG_KEYS)
     bash scripts/pipeline/build_info_all.sh $build_flags || exit 1
 else
@@ -98,6 +92,7 @@ fi
 if [[ "${ARGS["do_benchmark"]}" == "true" ]]; then
     echo ""
     echo "########## Stage 2: benchmark (hint_mode=${ARGS["hint_mode"]}) ##########"
+    ARGS["max_concurrency"]="${ARGS["bench_max_concurrency"]}"
     bench_flags=$(args_to_flags_subset ARGS BENCHMARK_INFO_ALL_ARG_KEYS)
     bash scripts/pipeline/benchmark_info_all.sh $bench_flags || exit 1
 else

@@ -21,25 +21,15 @@ source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 declare -A ARGS
 REQUIRED_ARGS=()
 
-populate_array VLM_ESSENTIALS REQUIRED_ARGS   # game, model_name, vlm_kind
-REQUIRED_ARGS+=("run_name")
-
-# --game is required by VLM_ESSENTIALS but meaningless here: the sweep discovers its own
-# games. It is accepted and ignored so the flag set stays uniform with the other pipeline
-# scripts; use --games to restrict.
-ARGS["games"]="auto"
-ARGS["skip_games"]=none
-ARGS["executor"]="history"
-ARGS["hint_mode"]="both"
-ARGS["stage"]="all"
-ARGS["baseline"]=true
-ARGS["do_build"]=true
-ARGS["do_benchmark"]=true
-ARGS["max_steps"]=50
-ARGS["max_new_tokens"]=3000
-ARGS["dry_run"]=false
-# See info_full.sh: true re-samples every benchmark episode, including the no-hint baseline.
-ARGS["regenerate"]=false
+# Inherited wholesale from info_full's arrays in utils.sh, plus this script's own
+# game-selection flags (--games, --skip_games, --dry_run) and an accepted-and-ignored --game.
+# See INFO_FULL_ALL_GAMES_DEFAULTS: --mode is deliberately not settable here, since each
+# game's mode is discovered from what it has on disk.
+#
+# Nothing is redeclared: the sweep and info_full.sh must not be able to disagree about a
+# default, or a flag the sweep hardcodes silently overrides the per-game script's value.
+populate_array INFO_FULL_ALL_GAMES_ESSENTIALS REQUIRED_ARGS   # model_name, vlm_kind, run_name
+populate_dict INFO_FULL_ALL_GAMES_DEFAULTS ARGS
 
 # --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")

@@ -34,7 +34,6 @@ from utils import log_info, log_warn
 from debug_scripts import markdown as md
 from debug_scripts.frames import trajectory_strip
 from utils.paths import Paths
-from debug_scripts.stats import wilson_str
 
 
 def _figure_tries(frame: pd.DataFrame, out_path: str):
@@ -103,7 +102,7 @@ def _completion_check_blocks(frame: pd.DataFrame) -> list:
 
     * **the breakdown** — a check that fires on everything is over-eager, one that never
       fires is dead weight paying a VLM call per step;
-    * **agreement with the checker** — ``success`` is :class:`SimpleCheckerSupervisor`
+    * **agreement with the checker** — ``success`` is :class:`AttemptCheckerSupervisor`
       judging the same trajectory from the frames and its own description, independently of
       the executor. ``agent_done`` with ``success == False`` is the failure that matters: a
       trajectory truncated before the task was done, then shipped forward as evidence;
@@ -268,7 +267,8 @@ def debug_attempt(obj, model_name, n_frames, max_trajectories):
         md.bullets([
             f"tasks proposed: **{n_proposed}**" if n_proposed else "tasks proposed: _(jsonl absent)_",
             f"tasks attempted: **{n_total}**",
-            f"tasks succeeded: **{n_success}** — {wilson_str(n_success, n_total)}",
+            f"tasks succeeded: **{n_success}/{n_total}** "
+            f"({n_success / max(n_total, 1) * 100:.1f}%)",
             f"succeeded on the **first, unaided** attempt: **{unaided}** "
             f"({unaided / max(n_success, 1) * 100:.1f}% of successes, "
             f"{unaided / max(n_total, 1) * 100:.1f}% of all tasks)",

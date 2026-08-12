@@ -246,7 +246,7 @@ Plan: <the replacement steps separated by [STEP], or NONE if not flawed>
 
 
 
-# --- Checker arm (SimpleCheckerSupervisor) ---------------------------------------------
+# --- Checker arm (AttemptCheckerSupervisor) --------------------------------------------
 
 DESCRIBE_SLICE_PROMPT = """You are watching frames [START_IDX]-[END_IDX] of [TOTAL] total frames from a game of [GAME].
 

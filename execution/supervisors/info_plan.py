@@ -1,9 +1,9 @@
 """
 Driving a task one plan step at a time.
 
-:class:`InfoPlanSupervisor` writes a plan, hands the executor one step at a time,
-judges each step, and decides whether to retry it, resume with a hint, or abandon the
-plan and rewrite it.
+:class:`InfoPlanSupervisor` selects relevant knowledge, writes a plan from it, hands the
+executor one step at a time, judges each step, and decides whether to retry it, resume
+with a hint, or abandon the plan and rewrite it.
 
 This is the largest module in the package and still interleaves two concerns: plan
 policy (when to retry, when to replan, when to give up) and VLM mechanics (build the
@@ -11,17 +11,29 @@ prompt, call, parse, log). Separating them is the obvious next move and is
 deliberately not attempted here — it is the newest and least-validated code in the
 project, and restructuring it before knowing which of its intervention mechanisms
 earns its VLM calls would be sculpting the wrong shape.
+
+The knowledge-selection half used to live on a separate ``InfoHintSupervisor``, which this
+class subclassed. That class was the test-time arm that spent its retrieved knowledge on a
+single hint written once at the opening frame; it has been retired along with its benchmark
+arm, and its selection machinery — :meth:`~InfoPlanSupervisor._retrieval_candidates`,
+:meth:`~InfoPlanSupervisor._init_state_candidates`,
+:meth:`~InfoPlanSupervisor._select_entries` — was folded in here unchanged.
 """
 
 from __future__ import annotations
 
+import os
 import re
-from typing import Any, List, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, List, Optional, Type
 
+from gameboy_worlds.interface import Environment
+
+from execution.executors import Executor
 from execution.report import EnvironmentStepRecord, ExecutorReport, parse_completion
 from execution.supervisors._format import action_trace, attempt_history_line
+from execution.supervisors.base import Supervisor
 from execution.supervisors.checker import summarise_trajectory_segments
-from execution.supervisors.info_hint import InfoHintSupervisor
 from execution.supervisors.prompts import (
     DISTILL_INSIGHTS_PROMPT,
     FILTER_INSIGHTS_PROMPT,
@@ -30,22 +42,32 @@ from execution.supervisors.prompts import (
     PLAN_FLAW_PROMPT,
     PLAN_PROMPT,
     REGRESSION_CHECK_PROMPT,
+    RELEVANCE_PROMPT,
     RESUME_HINT_PROMPT,
 )
-from utils import log_warn, parse_key_value, parse_list, parse_steps, parse_yes_no, VLM
+from utils import (
+    log_warn, parse_key_value, parse_list, parse_steps, parse_yes_no, VLM,
+)
 
 
-class InfoPlanSupervisor(InfoHintSupervisor):
+class InfoPlanSupervisor(Supervisor):
     """
     Plans from the info document, then supervises the executor through the plan step by step.
 
-    Where :class:`InfoHintSupervisor` spends its retrieved knowledge on a single hint written
-    once at the opening frame, this spends it on a *plan* and then stays in the loop: it
-    watches each step, judges whether it actually landed, and intervenes when it did not.
-    The retrieval is deliberately identical — this subclasses it and reuses
-    ``_retrieval_candidates`` / ``_init_state_candidates`` / ``_select_entries`` unchanged —
-    so a difference between the two arms is attributable to what is done with the knowledge,
-    not to which knowledge was found.
+    Knowledge reaches the planner through a relevance pass, in one of two modes:
+
+    ``retrieval``
+        Iterate over every entry of every loaded document and ask, one call each, whether it
+        fits this task and this screen. Entries are judged on ``Description`` + ``Examples`` +
+        their representative frame — never on their ``Insights``, so relevance is decided on
+        whether the context fits rather than on whether the advice sounds appealing.
+
+    ``init_state``
+        Skip the document entirely and read the stage-A ``insights.jsonl``, keeping rows whose
+        ``init_state`` matches the episode's. The init state is *given* by the benchmark row
+        rather than inferred, which makes this the retrieval-free upper bound. Rows are still
+        task-filtered by the same relevance call — one init state can carry many unrelated
+        tasks, so the init state narrows the candidate pool and the task filter picks from it.
 
     The loop, per episode:
 
@@ -78,6 +100,25 @@ class InfoPlanSupervisor(InfoHintSupervisor):
     every attempt and retry included, so this arm and the info arm play the same game with
     the same allowance and their CSVs stay comparable.
 
+    No executor is modified or subclassed: a step's hint travels through
+    ``Executor.__init__``'s existing ``hint`` argument, which ``Supervisor.call_executor``
+    already forwards.
+
+    :param task: The benchmark task string.
+    :param executor_class: :class:`~execution.executors.Executor` subclass to run.
+    :param env: The game environment.
+    :param game: Game name string.
+    :param max_steps: Env-step budget for the supervisor's whole lifetime.
+    :param max_tool_calls: Tool-call budget forwarded to the executor.
+    :param documents: Parsed :class:`~execution.info_doc.InfoDocument` objects (retrieval mode).
+    :param insight_rows: Stage-A rows from ``insights.jsonl`` (init_state mode).
+    :param mode: ``"retrieval"`` or ``"init_state"``.
+    :param init_state: The episode's init state; required for ``init_state`` mode.
+    :param hint_vlm_model: Model name for the relevance and hint-writing calls.
+    :param hint_vlm_kind: VLM kind for those calls.
+    :param hint_max_new_tokens: Token budget per relevance/hint VLM call.
+    :param max_concurrency: Parallel relevance calls (they are independent).
+    :param parameters: Optional parameter overrides.
     :param plan_vlm_model: Model for the planning, judging, hinting and revision calls.
         Defaults to ``hint_vlm_model``.
     :param plan_vlm_kind: VLM kind for those calls.
@@ -106,7 +147,21 @@ class InfoPlanSupervisor(InfoHintSupervisor):
 
     def __init__(
         self,
-        *args: Any,
+        task: str,
+        executor_class: Type[Executor],
+        env: Environment,
+        game: str,
+        max_steps: int,
+        max_tool_calls: int,
+        documents: Optional[List[Any]] = None,
+        insight_rows: Optional[List[dict]] = None,
+        mode: str = "retrieval",
+        init_state: Optional[str] = None,
+        hint_vlm_model: str = None,
+        hint_vlm_kind: str = None,
+        hint_max_new_tokens: int = 1000,
+        max_concurrency: int = 8,
+        parameters: Optional[dict] = None,
         plan_vlm_model: str = None,
         plan_vlm_kind: str = None,
         max_leg_steps: int = 5,
@@ -116,9 +171,23 @@ class InfoPlanSupervisor(InfoHintSupervisor):
         plan_max_new_tokens: int = 2400,
         judge_max_new_tokens: int = 4800,
         verbose: bool = False,
-        **kwargs: Any,
+        **executor_kwargs: Any,
     ) -> None:
-        super().__init__(*args, **kwargs)
+        self._documents = documents or []
+        self._insight_rows = insight_rows or []
+        self._mode = mode
+        self._init_state = init_state
+        self._max_concurrency = max_concurrency
+        self._hint_max_new_tokens = hint_max_new_tokens
+        super().__init__(task, executor_class, env, game, max_steps, max_tool_calls,
+                         parameters, **executor_kwargs)
+        self._hint_vlm = VLM(hint_vlm_model, hint_vlm_kind)
+        # Populated by the relevance pass so the caller can inspect why a plan came out the
+        # way it did without re-running the pipeline. ``selected_ids`` is the durable part:
+        # the benchmark CSV stores it per episode, so a plan can be traced back to the exact
+        # entries it was synthesised from long after the run.
+        self.selection_log: List[dict] = []
+        self.selected_ids: List[str] = []
         self.verbose = verbose
         self.max_leg_steps = max_leg_steps
         self.max_attempts_per_step = max_attempts_per_step
@@ -164,15 +233,136 @@ class InfoPlanSupervisor(InfoHintSupervisor):
         """
         return self._vlm_call(stage, self._plan_vlm, **kwargs)
 
+    # -- Knowledge selection ---------------------------------------------------
+
+    @staticmethod
+    def entry_id(entry) -> str:
+        """
+        Stable identifier for one selected entry, for the benchmark CSV and debug reports.
+
+        ``source`` is the provenance label the loader attached: the document's vertical in
+        retrieval mode (``zeroshot``), or vertical/group_idx in init_state mode
+        (``zeroshot/12_0``) — which pins the exact stage-A row in insights.jsonl. The
+        category disambiguates entries within a source.
+        """
+        return f"{entry.source}#{entry.category}" if entry.source else entry.category
+
+    def _current_frame(self):
+        return self._env.get_info()["core"]["current_frame"]
+
+    @staticmethod
+    def _entry_frame(entry):
+        from PIL import Image
+
+        # Stored frame paths are relative to their document's frames_root, so they are not
+        # openable on their own. Whoever produced the entry — load_document, or
+        # _init_state_candidates for rows read straight off insights.jsonl — has already
+        # resolved it.
+        path = entry.resolved_frame
+        if not path or not os.path.exists(path):
+            return None
+        return Image.open(path).convert("RGB")
+
+    def _judge_relevance(self, entry, kind: str, screen) -> tuple:
+        """One yes/no call for a single entry. Returns (is_relevant, reason)."""
+        prompt = (
+            RELEVANCE_PROMPT
+            .replace("[GAME]", self._game)
+            .replace("[TASK]", self._task)
+            .replace("[KIND]", kind)
+            .replace("[ENTRY]", entry.evidence_block())
+        )
+        images = [screen]
+        entry_frame = self._entry_frame(entry)
+        if entry_frame is not None:
+            images.append(entry_frame)
+
+        output = self._vlm_call("filter", self._hint_vlm, texts=prompt, images=images,
+                                max_new_tokens=self._hint_max_new_tokens)
+        verdict = parse_yes_no(output, "Relevant")
+        reason = (parse_key_value(output, "Reasoning") or "").strip()
+        return verdict is True, reason
+
+    def _select_entries(self, candidates, screen) -> List[Any]:
+        """Run the relevance pass over (entry, kind) candidates, in parallel."""
+        if not candidates:
+            return []
+
+        selected = []
+        with ThreadPoolExecutor(max_workers=self._max_concurrency) as pool:
+            futures = {
+                pool.submit(self._judge_relevance, entry, kind, screen): (entry, kind)
+                for entry, kind in candidates
+            }
+            for future in as_completed(futures):
+                entry, kind = futures[future]
+                try:
+                    relevant, reason = future.result()
+                except Exception as error:      # a failed judgement must not sink the episode
+                    log_warn(f"relevance call failed for '{entry.category}': {error}")
+                    continue
+                self.selection_log.append({
+                    "category": entry.category,
+                    "kind": kind,
+                    "source": entry.source,
+                    "relevant": relevant,
+                    "reason": reason,
+                })
+                if relevant:
+                    selected.append(entry)
+        return selected
+
+    def _retrieval_candidates(self):
+        from execution.info_doc import IMAGE_SECTION, TASK_SECTION
+
+        candidates = []
+        for document in self._documents:
+            candidates += [(e, "task") for e in document.entries(TASK_SECTION)]
+            candidates += [(e, "kind of screen") for e in document.entries(IMAGE_SECTION)]
+        return candidates
+
+    def _init_state_candidates(self):
+        """Stage-A rows for this episode's init state, as entries for the same relevance pass."""
+        from execution.info_doc import TASK_SECTION, InfoDocument, resolve_frame
+
+        available = sorted({row.get("init_state") for row in self._insight_rows
+                            if row.get("init_state")})
+        matching = [row for row in self._insight_rows
+                    if row.get("init_state") == self._init_state]
+
+        if not matching:
+            log_warn(
+                f"init_state '{self._init_state}' has no records in the loaded insights — "
+                f"running unplanned. Available init_states: {available}",
+                self._parameters,
+            )
+            return []
+
+        candidates = []
+        for row in matching:
+            document = InfoDocument.from_dict(row["document"])
+            for entry in document.entries(TASK_SECTION):
+                # These rows come straight off insights.jsonl rather than through
+                # load_document, so the two load-time fields have to be filled in here.
+                #
+                # Prefer the document's own recorded provenance; the row's "source" (set by
+                # the loader that read the file) is the fallback, and group_idx alone is the
+                # last resort — it is not comparable across verticals, since each numbers
+                # its groups independently.
+                label = document.provenance.label or row.get("source")
+                entry.source = f"{label}/{row.get('group_idx')}" if label else row.get("group_idx")
+                entry.resolved_frame = resolve_frame(document, entry.frame, self._parameters)
+                candidates.append((entry, "task"))
+        return candidates
+
     # -- Planning --------------------------------------------------------------
 
     def write_plan(self) -> List[str]:
         """Select relevant entries for the opening screen and turn them into a plan.
 
-        Reuses :meth:`InfoHintSupervisor.write_hint`'s selection half verbatim, then swaps
-        the synthesis prompt. Returns ``[]`` when nothing was selected — with no knowledge
-        there is nothing to plan from, and the caller falls back to running the task
-        unplanned rather than inventing a plan out of the prompt alone.
+        Returns ``[]`` when nothing was selected — with no knowledge there is nothing to
+        plan from, and :meth:`_evaluate` falls back to running the task unplanned rather
+        than inventing a plan out of the prompt alone.
         """
         self.selection_log = []
         self.selected_ids = []
@@ -771,3 +961,11 @@ class InfoPlanSupervisor(InfoHintSupervisor):
             "n_insights_kept": self.n_insights_kept,
             "n_insights_distilled": self.n_insights_distilled,
         }
+
+    def process_executor_return(self, report: ExecutorReport) -> ExecutorReport:
+        """Hand the report back unchanged — ``call_executor`` has already filed it.
+
+        This arm reads each leg in :meth:`_evaluate`, where the plan step it belongs to is
+        known; there is nothing useful to do with a report in isolation.
+        """
+        return report

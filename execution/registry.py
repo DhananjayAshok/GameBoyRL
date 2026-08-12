@@ -17,9 +17,9 @@ AVAILABLE_EXECUTORS: dict[str, type[Executor]] = {
     "simple": SimpleExecutor,
     "history": HistoryAwareExecutor,
     "sequence": SequencePlannerExecutor,
-    "subgoal": SubgoalDecomposerExecutor,
+    "subgoal": SubgoalDecomposerExecutor, # Should be a Supervisor
     "screendiff": ScreenDiffExecutor,
-    "reflective": ReflectiveExecutor,
+    "reflective": ReflectiveExecutor, # Should be a Supervisor 
     "spatialmap": SpatialMapExecutor,
     "value": ActionValueEstimatorExecutor,
     "belief": BeliefStateExecutor,

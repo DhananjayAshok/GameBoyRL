@@ -9,8 +9,9 @@ Two CSVs written by any run_benchmark.py arm (baseline / info / plan):
 Unlike ``debug.py benchmark``, the two CSVs are given as **paths**, so any two runs can be
 compared (base vs fine-tuned, two executors, two models, two prompting variants).
 
-Tasks are paired on the ``task`` column and split into the four quadrants
-(both pass, both fail, A only, B only); ``--n_examples`` episodes from each are rendered.
+Episodes are paired on **row position** — see :func:`~debug_scripts.benchmark._paired_index`
+for why a task string cannot key the join — and split into the four quadrants (both pass,
+both fail, A only, B only); ``--n_examples`` episodes from each are rendered.
 
 Frames
 ------
@@ -22,8 +23,7 @@ records hold their own images. Frame rendering therefore belongs to a reader of 
 artifact, not to a parser of this CSV's rendered ``report`` text — and a replay was only ever
 an illustration of the action sequence anyway, never the model's literal visual input.
 
-What is left here is the part that needs no frames: the pairing, the quadrants, and the
-paired significance test.
+What is left here is the part that needs no frames: the pairing and the quadrants.
 
 Output
 ------
@@ -36,11 +36,10 @@ import re
 import click
 import pandas as pd
 
-from utils import log_info, log_warn, log_error
+from utils import log_info, log_warn
 from debug_scripts import markdown as md
-from debug_scripts.benchmark import _load
+from debug_scripts.benchmark import _load, _paired_index
 from utils.paths import Paths
-from debug_scripts.stats import mcnemar_exact, wilson_str
 
 QUADRANTS = [
     ("both_pass", "Both pass"),
@@ -93,43 +92,41 @@ def debug_compare(obj, csv_a, csv_b, label_a, label_b, n_examples):
         log_warn(f"[compare] CSVs span several games {sorted(games)}; "
                  f"the report is labelled '{paths.game}'.")
 
-    shared = sorted(set(a["task"]) & set(b["task"]))
-    if not shared:
-        log_error("The two CSVs share no tasks — nothing to compare.", paths.parameters)
-    only_a = sorted(set(a["task"]) - set(shared))
-    only_b = sorted(set(b["task"]) - set(shared))
-    fa = a[a["task"].isin(shared)].drop_duplicates("task").set_index("task").loc[shared]
-    fb = b[b["task"].isin(shared)].drop_duplicates("task").set_index("task").loc[shared]
+    paired = _paired_index(a, label_a, b, label_b, paths.parameters)
+    fa, fb = a.loc[paired], b.loc[paired]
+    only_a = [i for i in a.index if i >= len(paired)]
+    only_b = [i for i in b.index if i >= len(paired)]
 
     quadrant_tasks = {
-        "both_pass": [t for t in shared if fa.loc[t, "success"] and fb.loc[t, "success"]],
-        "a_only": [t for t in shared if fa.loc[t, "success"] and not fb.loc[t, "success"]],
-        "b_only": [t for t in shared if fb.loc[t, "success"] and not fa.loc[t, "success"]],
-        "both_fail": [t for t in shared if not fa.loc[t, "success"] and not fb.loc[t, "success"]],
+        "both_pass": [i for i in paired if fa.loc[i, "success"] and fb.loc[i, "success"]],
+        "a_only": [i for i in paired if fa.loc[i, "success"] and not fb.loc[i, "success"]],
+        "b_only": [i for i in paired if fb.loc[i, "success"] and not fa.loc[i, "success"]],
+        "both_fail": [i for i in paired if not fa.loc[i, "success"] and not fb.loc[i, "success"]],
     }
 
     sections = []
     for key, title in QUADRANTS:
-        tasks = quadrant_tasks[key]
-        chosen = tasks[:n_examples] if n_examples else tasks
-        blocks = [md.h2(f"{title.format(a=label_a, b=label_b)} — {len(tasks)} task(s)")]
-        if not tasks:
+        rows = quadrant_tasks[key]
+        chosen = rows[:n_examples] if n_examples else rows
+        blocks = [md.h2(f"{title.format(a=label_a, b=label_b)} — {len(rows)} episode(s)")]
+        if not rows:
             blocks.append(md.para("_(none)_"))
             sections.append("\n".join(blocks))
             continue
-        blocks.append(md.para("Tasks: " + ", ".join(f"`{t}`" for t in tasks)))
-        for task in chosen:
-            blocks.append(md.h3(task))
+        blocks.append(md.para(
+            "Episodes: " + ", ".join(f"`[{i}] {fa.loc[i, 'task']}`" for i in rows)))
+        for i in chosen:
+            blocks.append(md.h3(f"[{i}] {fa.loc[i, 'task']}"))
             for label, frame in [(label_a, fa), (label_b, fb)]:
-                blocks.append(_episode_block(label, frame.loc[task]))
-        if n_examples and len(tasks) > len(chosen):
+                blocks.append(_episode_block(label, frame.loc[i]))
+        if n_examples and len(rows) > len(chosen):
             blocks.append(md.para(
-                f"_… {len(tasks) - len(chosen)} further task(s) in this quadrant "
+                f"_… {len(rows) - len(chosen)} further episode(s) in this quadrant "
                 f"(--n_examples)_"
             ))
         sections.append("\n".join(blocks))
 
-    n = len(shared)
+    n = len(paired)
     hits_a, hits_b = int(fa["success"].sum()), int(fb["success"].sum())
     summary = pd.DataFrame([
         {"run": label_a, "success": hits_a, "n": n, "success_%": hits_a / n * 100,
@@ -148,22 +145,26 @@ def debug_compare(obj, csv_a, csv_b, label_a, label_b, n_examples):
         ]),
         md.h2("Pairing"),
         md.bullets([
-            f"tasks compared: **{n}** (intersection)",
-            f"only in A: **{len(only_a)}** {'(' + ', '.join(only_a[:10]) + ')' if only_a else ''}",
-            f"only in B: **{len(only_b)}** {'(' + ', '.join(only_b[:10]) + ')' if only_b else ''}",
+            f"episodes compared: **{n}** (row for row over the common prefix)",
+            f"only in A: **{len(only_a)}** "
+            + (f"({', '.join(a.loc[i, 'task'] for i in only_a[:10])})" if only_a else ""),
+            f"only in B: **{len(only_b)}** "
+            + (f"({', '.join(b.loc[i, 'task'] for i in only_b[:10])})" if only_b else ""),
         ]),
+        md.note(
+            "Episodes are paired on row position, not task string: the benchmark anchors some "
+            "tasks to two init_states, so a task string matches more than one episode. The two "
+            "CSVs are checked to agree on every shared row before anything below is computed."
+        ),
         md.h2("Summary"),
         md.table(summary),
         md.bullets([
-            f"A success: {wilson_str(hits_a, n)}",
-            f"B success: {wilson_str(hits_b, n)}",
+            f"A success: **{hits_a}/{n}** ({hits_a / n * 100:.1f}%)",
+            f"B success: **{hits_b}/{n}** ({hits_b / n * 100:.1f}%)",
             f"both pass: **{len(quadrant_tasks['both_pass'])}** · "
             f"A only: **{len(quadrant_tasks['a_only'])}** · "
             f"B only: **{len(quadrant_tasks['b_only'])}** · "
             f"both fail: **{len(quadrant_tasks['both_fail'])}**",
-            f"McNemar exact p on the "
-            f"{len(quadrant_tasks['a_only'])}/{len(quadrant_tasks['b_only'])} discordant "
-            f"pairs: **{mcnemar_exact(len(quadrant_tasks['a_only']), len(quadrant_tasks['b_only'])):.3f}**",
         ]),
         md.note(
             "No frames are rendered here. Each episode's frames live in the archived "

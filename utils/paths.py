@@ -273,31 +273,10 @@ class Paths:
                     return line.split("=", 1)[1].strip().strip('"').strip("'")
         return None
 
-    def video_path(self, bench_game: str, model: str, task: str) -> str | None:
-        """
-        Latest recorded video for one benchmarked task, or None if absent.
-
-        Session layout (run_benchmark.py + GameBoyWorlds):
-        ``<gbw>/sessions/<game>/benchmark_zero_shot_<executor>_<model>/<task_str>/<n>_<hash>/videos/0.mp4``
-
-        Unlike the per-call PNGs, this path is keyed on the *model*, so base and fine-tuned
-        runs do not overwrite each other. Repeated runs of the same model leave several
-        ``<n>_<hash>`` dirs; the most recently modified one is returned.
-        """
-        gbw = self.gameboy_worlds_storage()
-        if gbw is None:
-            return None
-        task_str = task.replace(" ", "_").lower()
-        session = os.path.join(
-            gbw, "sessions", bench_game,
-            f"benchmark_zero_shot_{self.executor}_{model.lower()}", task_str,
-        )
-        if not os.path.isdir(session):
-            return None
-        runs = [os.path.join(session, d) for d in os.listdir(session)]
-        runs = [d for d in runs if os.path.isdir(d)]
-        if not runs:
-            return None
-        latest = max(runs, key=os.path.getmtime)
-        video = os.path.join(latest, "videos", "0.mp4")
-        return video if os.path.exists(video) else None
+    # There is deliberately no video_path() accessor. A video is found through the episode
+    # row's own ``session_dirs``, beside that episode's report.pkl.gz — see
+    # ``debug_scripts/benchmark.py:_video_path``. Rebuilding the path from the task name
+    # instead cannot address an episode: several benchmark rows share a task string, so they
+    # share the task-named sessions directory too. The rebuilt name was also wrong for every
+    # arm but the baseline, since the sessions directory is named for the arm that ran it
+    # (``benchmark_info_plan_retrieval_<executor>_<model>``, not ``benchmark_zero_shot_…``).

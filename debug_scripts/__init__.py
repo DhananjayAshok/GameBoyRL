@@ -17,7 +17,7 @@ the executor's own per-call PNGs are keyed on the executor class rather than the
 are only written under --verbose. It still constructs no VLM.
 """
 
-from debug_scripts.hello import hello
+from debug_scripts.check_paths import check_paths
 from debug_scripts.curiosity import debug_curiosity
 from debug_scripts.infer import debug_infer
 from debug_scripts.zeroshot import debug_zeroshot
@@ -27,7 +27,7 @@ from debug_scripts.compare import debug_compare
 from debug_scripts.info import debug_info, debug_info_hint
 
 __all__ = [
-    "hello",
+    "check_paths",
     "debug_curiosity",
     "debug_infer",
     "debug_zeroshot",
