@@ -139,6 +139,21 @@ class Paths:
         os.makedirs(path, exist_ok=True)
         return path
 
+    def debug_frames_dir(self, stage: str, *sub: str) -> str:
+        """``<storage_dir>/tmp/debug_frames/<game>/<stage>[/sub...]``, created on demand.
+
+        On storage rather than beside the markdown in :meth:`debug_dir`, because a
+        frame-by-frame report is thousands of PNGs and ``results_dir`` is on the home
+        filesystem, where the inode quota bites long before the disk quota does.
+
+        Keyed on game and stage, with callers appending model and task below that, so two
+        runs cannot overwrite each other's frames — which is exactly the failure the
+        executor's own ``--verbose`` PNGs have, being keyed on the executor class.
+        """
+        path = os.path.join(self.storage_dir, "tmp", "debug_frames", self.game, stage, *sub)
+        os.makedirs(path, exist_ok=True)
+        return path
+
     # ------------------------------------------------------------------
     # Curiosity / grouping
     # ------------------------------------------------------------------

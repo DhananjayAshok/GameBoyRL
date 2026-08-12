@@ -1,104 +1,53 @@
 """
-Benchmark diagnostics: per-episode trajectories, and a paired base-vs-fine-tuned diff.
+Benchmark diagnostics: per-episode frame-by-frame trajectories, and a paired
+base-vs-fine-tuned diff.
 
-Input (produced by scripts/benchmark.sh / scripts/pipeline/serve_and_benchmark.sh)
-----------------------------------------------------------------------------------
+Input
+-----
 <results_dir>/benchmark/<game>/<executor>_<model>.csv
     game, task, success, n_steps, n_invalid, subgoals_reached, all_subgoals, report,
     session_dirs
 `success` is the environment's own verdict (termination_reason == "terminated"), not a
 VLM judge — this is the only ground-truth success signal in the pipeline.
 
-The `report` column holds the full rendered trajectory: every prompt, every VLM output and
-every step outcome, as written by ExecutorReport.__str__. That text is per-model and is
-what this report renders.
+<session_dir>/report.pkl.gz    (session_dir from the row's `session_dirs`)
+    The archived :class:`~execution.report.SupervisorReport`. **This is what the report is
+    built from.** Its ``event_log`` interleaves the supervisor's own calls with the full
+    report of every executor leg, and each call record carries the images it saw, its
+    prompt, the raw response and the steps it produced.
 
-Why not the frame PNGs
-----------------------
-ExecutorReport.__str__ writes per-call PNGs to
-<results_dir>/benchmark/<game>/<ExecutorClassName>/<task>/ — keyed on the executor *class*,
-not the model — and rmtree's the directory first. A base run and a fine-tuned run therefore
-overwrite each other's frames and whatever is on disk belongs to whichever ran last. Those
-PNGs are unusable for a model comparison and are not linked. The recorded **videos** are
-model-specific (session dir includes the served model name) and are linked instead.
+This used to parse the CSV's rendered `report` column with a regex over box-drawing
+characters, because that string was the only durable per-episode record. It cost three
+things: no frames at all, only the *last* step per call (so a `sequence` executor lost every
+action but one), and no way to see the supervisor's own reasoning. Reading the archive
+instead fixes all three. The `report` column is still written and is still useful for
+grepping; nothing here parses it.
 
 Output
 ------
 <results_dir>/debug/<game>/benchmark/episodes_<model>.md   (one per model)
 <results_dir>/debug/<game>/benchmark/comparison.md
+Frames go to <storage_dir>/tmp/debug_frames/<game>/benchmark/<model>/<task>/ — on storage,
+not beside the markdown, because there are thousands of them per report.
 """
 
 import ast
+import gzip
+import json
 import os
-import re
+import pickle
 
 import click
 import pandas as pd
 
-from utils import log_info, log_warn
+from execution.report import (EnvironmentStepRecord, SupervisorVLMCallRecord,
+                              _step_summary)
+from utils import log_error, log_info, log_warn, parse_action_line
+from benchmark_scripts.common import REPORT_FILENAME
 from debug_scripts import markdown as md
+from debug_scripts.frames import to_pil
 from utils.paths import Paths
 from debug_scripts.stats import mcnemar_exact, wilson, wilson_str
-
-# TODO: this parses ExecutorReport.__str__ output and assumes ONE "│ → " outcome line
-# per call. That is no longer guaranteed: a VLM call now owns a list of steps
-# (ExecutorVLMCallRecord.steps), and SequencePlannerExecutor emits several outcome lines under
-# a single call header, so reports from the "sequence" executor lose all but one outcome here.
-#
-# The real fix is to stop parsing rendered text at all: every arm now archives its
-# SupervisorReport to <session_dir>/report.pkl.gz, so this command can read the records
-# directly — images, prompts, responses and every step per call — instead of reconstructing a
-# lossy subset from the CSV's `report` string.
-CALL_HEADER = re.compile(r"^\s*┌─ \[([A-Z_]+)\] \(call (\d+)\)")
-CALL_FOOTER = re.compile(r"^\s*└─+")
-PROMPT_MARK = "| Prompt:"
-OUTPUT_MARK = "│ VLM output:"
-STEP_MARK = "│ → "
-INDENT = "  │   "
-
-
-def parse_report(report: str) -> list[dict]:
-    """
-    Parse an ExecutorReport rendering back into per-call records.
-
-    :return: list of ``{"call", "tag", "prompt", "output", "outcome"}``.
-    """
-    if not isinstance(report, str) or not report.strip():
-        return []
-    calls, current, section = [], None, None
-    for line in report.splitlines():
-        header = CALL_HEADER.match(line)
-        if header:
-            if current:
-                calls.append(current)
-            current = {"call": int(header.group(2)), "tag": header.group(1).lower(),
-                       "prompt": [], "output": [], "outcome": ""}
-            section = None
-            continue
-        if current is None:
-            continue
-        if CALL_FOOTER.match(line):
-            calls.append(current)
-            current, section = None, None
-            continue
-        if line.strip().startswith(PROMPT_MARK.strip()):
-            section = "prompt"
-            continue
-        if line.strip().startswith(OUTPUT_MARK.strip()):
-            section = "output"
-            continue
-        if STEP_MARK in line:
-            current["outcome"] = line.split(STEP_MARK, 1)[1].strip()
-            section = None
-            continue
-        if section:
-            current[section].append(line[len(INDENT):] if line.startswith(INDENT) else line.strip())
-    if current:
-        calls.append(current)
-    for call in calls:
-        call["prompt"] = "\n".join(call["prompt"]).strip()
-        call["output"] = "\n".join(call["output"]).strip()
-    return calls
 
 
 def _as_list(value):
@@ -126,46 +75,229 @@ def _load(path: str) -> pd.DataFrame:
     return frame
 
 
-def _termination(report: str) -> str:
-    """Coarse outcome class from a rendered report — what ended the episode."""
-    calls = parse_report(report)
-    if not calls:
-        return "no calls"
-    outcomes = [c["outcome"] for c in calls if c["outcome"]]
-    if not outcomes:
-        return "no steps"
-    invalid = sum(1 for o in outcomes if o.startswith("INVALID"))
-    if invalid == len(outcomes):
-        return "all invalid"
-    return "ran to budget"
+# ---------------------------------------------------------------------------
+# The archive
+# ---------------------------------------------------------------------------
 
 
-def _episode_section(row, calls, paths, bench_game, model, report_dir, max_calls):
+def _session_dir(row):
+    """The emulator session directory recorded on one CSV row, or None."""
+    raw = row.get("session_dirs")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        dirs = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return dirs[0] if dirs else None
+
+
+def _load_report(row):
+    """The archived SupervisorReport for one episode, or None if it has none."""
+    session = _session_dir(row)
+    if session is None:
+        return None
+    path = os.path.join(session, REPORT_FILENAME)
+    if not os.path.exists(path):
+        return None
+    with gzip.open(path, "rb") as handle:
+        return pickle.load(handle)["report"]
+
+
+def _require_archives(frame: pd.DataFrame, csv_path: str, parameters: dict) -> dict:
+    """Load every episode's report, refusing a CSV that predates the archive.
+
+    Refused rather than degraded: a report that silently renders without frames looks like a
+    run that made no calls, and comparing one of those against a complete one is worse than
+    getting an error. A *few* missing archives are tolerated with a warning, since
+    ``save_report`` deliberately swallows its own failures so an unwritable archive cannot
+    cost an already-paid-for episode.
+    """
+    if "session_dirs" not in frame.columns:
+        log_error(
+            f"{csv_path} has no session_dirs column, so its episodes cannot be located. It "
+            "was written before the report archive existed — re-run the benchmark to get one.",
+            parameters,
+        )
+    reports = {}
+    for task, row in frame.set_index("task").iterrows():
+        report = _load_report(row)
+        if report is not None:
+            reports[task] = report
+    if not reports:
+        log_error(
+            f"No report.pkl.gz found for any episode in {csv_path}. The session directories "
+            "it names hold no archive, so this CSV predates report archiving — re-run the "
+            "benchmark.",
+            parameters,
+        )
+    if len(reports) < len(frame):
+        log_warn(f"[benchmark] {len(frame) - len(reports)} of {len(frame)} episodes have no "
+                 f"archive; they are rendered from their CSV row alone.")
+    return reports
+
+
+# ---------------------------------------------------------------------------
+# Rendering
+# ---------------------------------------------------------------------------
+
+
+def _slug(text: str) -> str:
+    return "".join(c if c.isalnum() else "_" for c in str(text).lower()).strip("_")[:60]
+
+
+def _storage_link(report_dir: str, name: str, target: str, parameters: dict) -> str:
+    """A symlink inside the report dir pointing at *target* on storage.
+
+    Frames and videos live on ``/project2`` while the markdown lives under ``results/`` on
+    the home filesystem — eight ``../`` levels apart. That relative path resolves fine on
+    disk, but every markdown renderer refuses to load an image from outside the workspace
+    root, so the images silently do not appear. One symlink per report keeps the links short
+    and inside the tree while the bytes stay on storage.
+
+    Refuses to replace a real directory: that would be deleting whatever a previous run or a
+    person put there. A stale symlink pointing somewhere else is just repointed.
+    """
+    link = os.path.join(report_dir, name)
+    if os.path.islink(link):
+        if os.path.realpath(link) == os.path.realpath(target):
+            return link
+        os.unlink(link)
+    elif os.path.exists(link):
+        log_error(
+            f"{link} exists and is not a symlink, so the report cannot point it at "
+            f"{target}. Move it aside.",
+            parameters,
+        )
+    os.symlink(target, link)
+    return link
+
+
+def _via_link(path: str, target_root: str, link_root: str) -> str:
+    """Rewrite a storage path to go through the report's symlink instead."""
+    return os.path.join(link_root, os.path.relpath(path, target_root))
+
+
+def _save_frame(frame, directory: str, name: str, overwrite: bool):
+    """One numpy frame to PNG, returning its path (or None if it could not be rendered)."""
+    path = os.path.join(directory, f"{name}.png")
+    if os.path.exists(path) and not overwrite:
+        return path
+    try:
+        to_pil(frame).save(path)
+    except Exception as error:  # noqa: BLE001 - a bad frame must not kill the report
+        log_warn(f"[benchmark] could not write {path}: {error}")
+        return None
+    return path
+
+
+def _executor_call_blocks(call, index: int, frames_dir: str, report_dir: str,
+                          prefix: str, overwrite: bool) -> list:
+    """One executor VLM call: what it saw, what it was asked, what it said, what it did."""
+    lines = [md.para(f"**call {index}** · tag `{call.tag}`")]
+
+    for i, image in enumerate(call.images):
+        path = _save_frame(image, frames_dir, f"{prefix}_call{index}_saw{i}", overwrite)
+        if path:
+            lines.append(md.img(f"call {index} input {i}", path, report_dir))
+    if not call.images:
+        lines.append(md.para("_(no images on this call)_"))
+
+    lines.append(md.details(f"call {index} prompt", md.code(call.prompt)))
+    lines.append(md.para("output"))
+    lines.append(md.code(call.response))
+
+    action = parse_action_line(call.response)
+    lines.append(md.para(f"parsed action: `{action if action else 'none'}`"))
+
+    # Every step, not just the last: one call can own several (SequencePlannerExecutor), and
+    # the old text parser kept only the final one.
+    if call.steps:
+        lines.append(md.code("\n".join(
+            f"{i + 1:>3}  {_step_summary(step)}" for i, step in enumerate(call.steps)
+        )))
+    else:
+        lines.append(md.para("_(this call took no steps)_"))
+
+    env_steps = [s for s in call.steps if isinstance(s, EnvironmentStepRecord)]
+    if env_steps:
+        path = _save_frame(env_steps[-1].frame_after, frames_dir,
+                           f"{prefix}_call{index}_after", overwrite)
+        if path:
+            lines.append(md.img(f"call {index} next frame", path, report_dir))
+    return lines
+
+
+def _event_blocks(report, frames_dir: str, report_dir: str, overwrite: bool) -> list:
+    """The whole event log in order: supervisor calls and executor legs, interleaved."""
+    lines = []
+    leg = 0
+    for position, event in enumerate(report.event_log):
+        if isinstance(event, SupervisorVLMCallRecord):
+            lines.append(md.h3(f"supervisor · {event.stage}"))
+            for i, image in enumerate(event.images):
+                path = _save_frame(image, frames_dir, f"sup{position}_saw{i}", overwrite)
+                if path:
+                    lines.append(md.img(f"supervisor {event.stage} input {i}", path, report_dir))
+            lines.append(md.details(f"{event.stage} prompt", md.code(event.prompt)))
+            lines.append(md.para("output"))
+            lines.append(md.code(str(event.response)))
+        else:
+            leg += 1
+            hint = (event.init_kwargs or {}).get("hint")
+            lines.append(md.h3(f"executor leg {leg} · task: {event.task!r}"))
+            lines.append(md.bullets([
+                f"termination: `{event.termination_reason}`",
+                f"step budget: **{event.max_steps}**",
+                f"hint: {f'`{hint}`' if hint else '_none_'}",
+                f"VLM calls: **{len(event.vlm_call_log)}**",
+            ]))
+            for index, call in enumerate(event.vlm_call_log, 1):
+                lines += _executor_call_blocks(
+                    call, index, frames_dir, report_dir, f"leg{leg}", overwrite)
+    return lines
+
+
+def _episode_section(row, report, paths, bench_game, model, report_dir,
+                     frames_root: str, video_roots, overwrite: bool) -> str:
+    """One task: its outcome, its video, then every call frame by frame."""
     subgoals = _as_list(row["subgoals_reached"])
     all_subgoals = _as_list(row["all_subgoals"])
-    head = [
-        md.h2(f"{row['task']}"),
+    task = row["task"]
+
+    blocks = [
+        md.h2(str(task)),
         md.bullets([
             f"success: **{row['success']}**",
             f"steps: **{row['n_steps']}** · invalid: **{row['n_invalid']}**",
             f"subgoals: **{len(subgoals)}/{len(all_subgoals)}** "
             f"({', '.join(subgoals) if subgoals else 'none reached'})",
-            f"VLM calls recorded: **{len(calls)}**",
         ]),
     ]
-    video = paths.video_path(bench_game, model, row["task"])
-    if video:
-        head.append(md.para(f"video: {md.link(os.path.basename(video), video, report_dir)}"))
 
-    body = []
-    for call in calls[:max_calls] if max_calls else calls:
-        body.append(f"**call {call['call']}** [{call['tag']}] → `{call['outcome'] or 'n/a'}`\n")
-        body.append(md.details("prompt", md.code(call["prompt"])))
-        body.append(md.para("output"))
-        body.append(md.code(call["output"]))
-    if max_calls and len(calls) > max_calls:
-        body.append(md.para(f"_… {len(calls) - max_calls} further calls omitted (--max_calls)_"))
-    return "\n".join(head + body)
+    video = paths.video_path(bench_game, model, task)
+    if video and video_roots is not None:
+        target = _via_link(video, *video_roots)
+        blocks.append(md.para(f"video: {md.link(os.path.basename(video), target, report_dir)}"))
+    elif video:
+        blocks.append(md.para(f"video: `{video}`"))
+    else:
+        blocks.append(md.para("_(no video recorded)_"))
+
+    if report is None:
+        blocks.append(md.warn("No archived report for this episode — nothing to walk."))
+        return "\n".join(blocks)
+
+    blocks.append(md.bullets([
+        f"supervisor: `{report.supervisor_name}`",
+        f"events: **{len(report.event_log)}** "
+        f"({len(report.supervisor_calls)} supervisor call(s), "
+        f"{len(report.executor_reports)} executor leg(s))",
+    ]))
+    frames_dir = os.path.join(frames_root, _slug(model), _slug(task))
+    os.makedirs(frames_dir, exist_ok=True)
+    blocks += _event_blocks(report, frames_dir, report_dir, overwrite)
+    return "\n".join(blocks)
 
 
 @click.command(name="benchmark")
@@ -177,28 +309,44 @@ def _episode_section(row, calls, paths, bench_game, model, report_dir, max_calls
               help="Game whose benchmark CSVs to read. 'none' uses --game.")
 @click.option("--max_episodes", default=0, show_default=True,
               help="Cap episodes rendered in episodes_*.md (0 = all).")
-@click.option("--max_calls", default=0, show_default=True,
-              help="Cap calls rendered per episode (0 = all).")
 @click.pass_obj
-def debug_benchmark(obj, model_name, compare_model, bench_game, max_episodes, max_calls):
-    """Per-episode trajectories plus a paired base-vs-fine-tuned comparison."""
+def debug_benchmark(obj, model_name, compare_model, bench_game, max_episodes):
+    """Per-episode frame-by-frame trajectories plus a paired base-vs-fine-tuned comparison."""
     paths = Paths(
         parameters=obj["parameters"], game=obj["game"], run_name=obj["run_name"],
-        executor=obj["executor"], model_name=model_name, output_dir=obj["output_dir"], mode=obj["mode"],
+        executor=obj["executor"], model_name=model_name, output_dir=obj["output_dir"],
+        mode=obj["mode"],
     )
     report_dir = paths.debug_dir("benchmark")
+    overwrite = obj["overwrite"]
     game = paths.game if bench_game == "none" else bench_game
+
+    # Frames and videos are on storage; the markdown is not. Link both into the report dir so
+    # the image and video targets stay inside the tree — see _storage_link.
+    frames_root = _storage_link(
+        report_dir, "frames", paths.debug_frames_dir("benchmark"), paths.parameters)
+    gbw = paths.gameboy_worlds_storage()
+    video_roots = None
+    if gbw is not None:
+        sessions_root = os.path.join(gbw, "sessions", game)
+        if os.path.isdir(sessions_root):
+            video_roots = (sessions_root,
+                           _storage_link(report_dir, "videos", sessions_root,
+                                         paths.parameters))
     base_model = paths.model_save_name
     ft_model = paths.finetuned_model_name if compare_model == "none" else compare_model
 
     base_path = paths.require(paths.benchmark_csv(game, base_model), "benchmark")
     base = _load(base_path)
-    log_info(f"[benchmark] base: {len(base)} tasks from {base_path}")
+    base_reports = _require_archives(base, base_path, paths.parameters)
+    log_info(f"[benchmark] base: {len(base)} tasks from {base_path} "
+             f"({len(base_reports)} archived)")
 
     ft_path = paths.benchmark_csv(game, ft_model)
-    finetuned = None
+    finetuned, ft_reports = None, {}
     if os.path.exists(ft_path):
         finetuned = _load(ft_path)
+        ft_reports = _require_archives(finetuned, ft_path, paths.parameters)
         log_info(f"[benchmark] finetuned: {len(finetuned)} tasks from {ft_path}")
     else:
         log_warn(f"[benchmark] no fine-tuned CSV at {ft_path} — comparison will be skipped.")
@@ -206,16 +354,16 @@ def debug_benchmark(obj, model_name, compare_model, bench_game, max_episodes, ma
     written = []
 
     # ---------------- (a) per-episode trajectories ----------------
-    for model, frame in [(base_model, base), (ft_model, finetuned)]:
+    for model, frame, reports in [(base_model, base, base_reports),
+                                  (ft_model, finetuned, ft_reports)]:
         if frame is None:
             continue
         rows = frame.head(max_episodes) if max_episodes else frame
-        sections = []
-        for _, row in rows.iterrows():
-            calls = parse_report(row["report"])
-            sections.append(
-                _episode_section(row, calls, paths, game, model, report_dir, max_calls)
-            )
+        sections = [
+            _episode_section(row, reports.get(row["task"]), paths, game, model, report_dir,
+                             frames_root, video_roots, overwrite)
+            for _, row in rows.iterrows()
+        ]
         n_success = int(frame["success"].sum())
         blocks = [
             md.h1(f"Benchmark episodes — {game} / {paths.executor} / {model}"),
@@ -227,11 +375,9 @@ def debug_benchmark(obj, model_name, compare_model, bench_game, max_episodes, ma
                 f"mean invalid actions per episode: **{frame['n_invalid'].mean():.2f}**",
             ]),
             md.note(
-                "Trajectories are reconstructed from the CSV's `report` column, which is written "
-                "per model. The per-call PNGs under "
-                f"`{os.path.join(paths.results_dir, 'benchmark', game)}/<ExecutorClass>/` are keyed "
-                "on the executor class rather than the model and are overwritten by whichever run "
-                "finished last, so they are deliberately not linked here."
+                "Every call below is read from the archived supervisor report beside that "
+                f"episode's video, not reconstructed from text. Frames are written to "
+                f"`{frames_root}` — on storage, since a full report is thousands of PNGs."
             ),
             "\n\n".join(sections),
         ]
@@ -269,39 +415,44 @@ def debug_benchmark(obj, model_name, compare_model, bench_game, max_episodes, ma
              "invalid_per_ep": f["n_invalid"].mean(), "steps_per_ep": f["n_steps"].mean()},
         ])
 
+        def _step_lines(report) -> str:
+            """Every step the episode took, in order, from its archive."""
+            if report is None:
+                return "_(no archive)_"
+            steps = [_step_summary(step)
+                     for leg in report.executor_reports
+                     for call in leg.vlm_call_log
+                     for step in call.steps]
+            return md.code("\n".join(f"{i + 1:>3}  {s}" for i, s in enumerate(steps)))
+
         def _diff_sections(tasks, left_model, right_model):
             out = []
             for task in tasks:
-                left_calls = parse_report(b.loc[task, "report"])
-                right_calls = parse_report(f.loc[task, "report"])
-                left_actions = [c["outcome"] for c in left_calls if c["outcome"]]
-                right_actions = [c["outcome"] for c in right_calls if c["outcome"]]
+                left_report, right_report = base_reports.get(task), ft_reports.get(task)
                 lines = [
                     md.h3(task),
                     md.table(pd.DataFrame([
                         {"model": left_model, "success": bool(b.loc[task, "success"]),
                          "steps": b.loc[task, "n_steps"], "invalid": b.loc[task, "n_invalid"],
-                         "subgoals": f"{b.loc[task, 'subgoals_reached_n']}/{b.loc[task, 'all_subgoals_n']}",
-                         "calls": len(left_calls)},
+                         "subgoals": f"{b.loc[task, 'subgoals_reached_n']}/{b.loc[task, 'all_subgoals_n']}"},
                         {"model": right_model, "success": bool(f.loc[task, "success"]),
                          "steps": f.loc[task, "n_steps"], "invalid": f.loc[task, "n_invalid"],
-                         "subgoals": f"{f.loc[task, 'subgoals_reached_n']}/{f.loc[task, 'all_subgoals_n']}",
-                         "calls": len(right_calls)},
+                         "subgoals": f"{f.loc[task, 'subgoals_reached_n']}/{f.loc[task, 'all_subgoals_n']}"},
                     ])),
                 ]
-                for model, calls, actions in [
-                    (left_model, left_calls, left_actions),
-                    (right_model, right_calls, right_actions),
-                ]:
+                for model, report in [(left_model, left_report), (right_model, right_report)]:
                     video = paths.video_path(game, model, task)
-                    link = f" · video: {md.link('mp4', video, report_dir)}" if video else ""
-                    lines.append(md.para(f"**{model}** step outcomes{link}"))
-                    lines.append(md.code("\n".join(f"{i + 1:>3}  {a}" for i, a in enumerate(actions))))
+                    link = ""
+                    if video and video_roots is not None:
+                        target = _via_link(video, *video_roots)
+                        link = f" · video: {md.link('mp4', target, report_dir)}"
+                    lines.append(md.para(f"**{model}** steps{link}"))
+                    lines.append(_step_lines(report))
+                    calls = [c for leg in (report.executor_reports if report else [])
+                             for c in leg.vlm_call_log]
                     if calls:
-                        lines.append(md.details(
-                            f"{model} — final VLM output",
-                            md.code(calls[-1]["output"]),
-                        ))
+                        lines.append(md.details(f"{model} — final VLM output",
+                                                md.code(calls[-1].response)))
                 out.append("\n".join(lines))
             return "\n\n".join(out) if out else md.para("_(none)_")
 

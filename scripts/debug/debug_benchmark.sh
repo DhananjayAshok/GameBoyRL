@@ -18,7 +18,6 @@ populate_dict DEBUG_MODEL_DEFAULTS ARGS
 ARGS["compare_model"]="none"
 ARGS["bench_game"]="none"
 ARGS["max_episodes"]=0
-ARGS["max_calls"]=0
 
 # --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -69,5 +68,4 @@ python debug.py $group_flags benchmark \
     --model_name "${ARGS["model_name"]}" \
     --compare_model "${ARGS["compare_model"]}" \
     --bench_game "${ARGS["bench_game"]}" \
-    --max_episodes "${ARGS["max_episodes"]}" \
-    --max_calls "${ARGS["max_calls"]}" || exit 1
+    --max_episodes "${ARGS["max_episodes"]}" || exit 1
