@@ -1033,6 +1033,28 @@
             z-index: 402;
             cursor: e-resize;
         }
+        #left-nav-trigger::after {
+            content: '\203A';
+            position: absolute;
+            left: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 22px;
+            height: 44px;
+            background: rgba(12, 12, 22, 0.82);
+            border-radius: 0 8px 8px 0;
+            color: rgba(255,255,255,0.9);
+            font-size: 1.4rem;
+            line-height: 44px;
+            text-align: center;
+            box-shadow: 2px 0 8px rgba(0,0,0,0.25);
+            opacity: 0;
+            transition: opacity 0.18s ease;
+            pointer-events: none;
+        }
+        #left-nav-trigger:hover::after {
+            opacity: 1;
+        }
         #left-nav-panel {
             position: fixed;
             left: -240px;
