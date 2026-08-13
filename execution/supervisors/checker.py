@@ -37,7 +37,7 @@ class AttemptCheckerSupervisor(Supervisor):
 
     **Not a benchmark supervisor.** The benchmark arms are
     :class:`~execution.supervisors.dummy.DummySupervisor` and
-    :class:`~execution.supervisors.info_plan.InfoPlanSupervisor`; this class is used only by
+    :class:`~execution.supervisors.info_subgoal.InfoSubgoalSupervisor`; this class is used only by
     ``vlm_scripts.attempt_tasks``, to label attempted tasks during data generation. Its
     ``success`` is a VLM judgement, not the environment's ground-truth verdict, so it must
     not be read as a benchmark result.

@@ -1,12 +1,20 @@
 """
 Supervisors — agents that wrap executor runs and do something with the result.
 
-The concrete supervisors share :class:`~execution.supervisors.base.Supervisor`
-and little else, so each lives in its own module:
+Four arms, each one the previous plus a single capability:
 
 - :mod:`.dummy`        run the executor and do nothing else (the benchmark baseline)
-- :mod:`.checker`      judge a finished trajectory (data generation, not a benchmark arm)
-- :mod:`.info_plan`    retrieve knowledge, plan from it, drive the task one step at a time
+- :mod:`.revising`     short legs; critique the log, revise the hint, retry
+- :mod:`.subgoal`      a plan; each step is a target, judged and retried
+- :mod:`.info_subgoal` the plan and hints are written from retrieved knowledge
+
+They are a **chain, not a set of options**: document requires subgoal, subgoal requires
+revision. Four configurations rather than eight, so inheritance says what is meant, and
+feature flags would make illegal states representable. The rule the chain rests on lives in
+:mod:`.revising` — a list of targets, each judged and retried except the last, which only
+the environment can clear.
+
+:mod:`.checker` is not an arm. It judges a finished trajectory, for data generation.
 
 All of them return ``{"report": SupervisorReport, ...}`` from
 :meth:`~execution.supervisors.base.Supervisor.evaluate`, so a caller reads the report or a
@@ -29,14 +37,18 @@ from execution.supervisors.checker import (
     summarise_trajectory_segments,
 )
 from execution.supervisors.dummy import DummySupervisor
-from execution.supervisors.info_plan import InfoPlanSupervisor
+from execution.supervisors.revising import RevisingSupervisor
+from execution.supervisors.subgoal import SubgoalSupervisor
+from execution.supervisors.info_subgoal import InfoSubgoalSupervisor
 
 __all__ = [
     "Supervisor",
     "DummySupervisor",
+    "RevisingSupervisor",
+    "SubgoalSupervisor",
+    "InfoSubgoalSupervisor",
     "AttemptCheckerSupervisor",
     "summarise_trajectory_segments",
     "derive_critique_hint",
-    "InfoPlanSupervisor",
     "PLAN_SEPARATOR",
 ]

@@ -225,7 +225,7 @@ ATTEMPT_TASKS_ESSENTIALS=("tasks_path")
 populate_array VLM_ESSENTIALS ATTEMPT_TASKS_ESSENTIALS
 declare -A ATTEMPT_TASKS_DEFAULTS
 populate_dict VLM_DEFAULTS ATTEMPT_TASKS_DEFAULTS
-ATTEMPT_TASKS_DEFAULTS["executor"]="history"
+ATTEMPT_TASKS_DEFAULTS["executor"]="single_actions"
 ATTEMPT_TASKS_DEFAULTS["max_steps"]=50
 ATTEMPT_TASKS_DEFAULTS["max_tool_calls"]=10
 ATTEMPT_TASKS_DEFAULTS["lookback"]=8
@@ -262,7 +262,7 @@ BUILD_INFO_DEFAULTS["stage"]="all"
 # Names the output dir (info_<model>_<executor>), so documents distilled from one executor's
 # trajectories never overwrite another's. The curiosity stem carries no executor of its own,
 # so without this the two verticals would collide on the same path.
-BUILD_INFO_DEFAULTS["executor"]="history"
+BUILD_INFO_DEFAULTS["executor"]="single_actions"
 BUILD_INFO_DEFAULTS["overwrite_from_round"]=none
 # Override the shared VLM default of 1000: stage A emits six labelled fields plus a bullet
 # list of insights, and the stage-B combine emits a merged list that grows with the entry.
@@ -359,7 +359,7 @@ BUILD_INFO_ALL_ESSENTIALS+=("run_name")
 declare -A BUILD_INFO_ALL_DEFAULTS
 populate_dict VLM_DEFAULTS BUILD_INFO_ALL_DEFAULTS
 BUILD_INFO_ALL_DEFAULTS["max_new_tokens"]=3000
-BUILD_INFO_ALL_DEFAULTS["executor"]="history"
+BUILD_INFO_ALL_DEFAULTS["executor"]="single_actions"
 BUILD_INFO_ALL_DEFAULTS["mode"]="both"
 BUILD_INFO_ALL_DEFAULTS["stage"]="all"
 BUILD_INFO_ALL_DEFAULTS["n_frames"]=8
@@ -375,10 +375,10 @@ populate_array VLM_ESSENTIALS BENCHMARK_INFO_ALL_ESSENTIALS
 BENCHMARK_INFO_ALL_ESSENTIALS+=("run_name")
 declare -A BENCHMARK_INFO_ALL_DEFAULTS=(
     # One knob for both halves: which attempts/curiosity dirs the documents were built from,
-    # AND the executor run at test time. These were separate (build=history, bench=simple)
-    # and must not be — the baseline has to be the same executor as the plan run, or the
-    # delta mixes the plan effect with a scaffold change.
-    ["executor"]="history"
+    # AND the executor run at test time. These were separate (build and bench used
+    # different executors) and must not be — the baseline has to be the same executor as
+    # the plan run, or the delta mixes the plan effect with a scaffold change.
+    ["executor"]="single_actions"
     ["mode"]="both"
     ["knowledge_mode"]="both"
     ["baseline"]=true
@@ -475,7 +475,7 @@ DEBUG_ESSENTIALS=()
 populate_array ESSENTIAL_ARGS DEBUG_ESSENTIALS
 declare -A DEBUG_DEFAULTS=(
     ["run_name"]="my_run"
-    ["executor"]="history"
+    ["executor"]="single_actions"
     ["output_dir"]="none"
     ["mode"]="both"
 )

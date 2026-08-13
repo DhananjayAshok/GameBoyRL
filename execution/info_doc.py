@@ -4,7 +4,7 @@ The info document: a game's distilled knowledge, as JSON.
 The document is the shared artifact of the context-engineering vertical. It has two
 producers — vlm_scripts/build_info.py, which distils one from real trajectories, and
 execution/parametric_doc.py, which has the model write one from its own priors — is read by
-execution.supervisors.InfoPlanSupervisor at test time, and is rendered by
+execution.supervisors.InfoSubgoalSupervisor at test time, and is rendered by
 debug_scripts/info.py. This module owns its *shape* so none of them disagree about it.
 
 Exactly two sections of entries, no task-agnostic "general knowledge" section — every insight
@@ -81,6 +81,15 @@ class Provenance:
         run name is a component of this, so it is not recorded a second time. ``None`` for
         a parametric document, which has no input.
     :param built_at: ISO-8601 UTC timestamp.
+    :param input_tokens: Prompt tokens spent building this document. ``None`` for a
+        document written before the counts existed, or where the backend did not report
+        them — distinct from ``0``.
+
+        This is a property **of the document**, not of the run that loaded it: a cached
+        document reports what it cost when it was built, and every later run that reuses
+        it sees that same number. It must therefore never be added into a run's episode
+        totals, or the same tokens are charged again on every rerun.
+    :param output_tokens: Generated tokens spent building this document. Same semantics.
     """
 
     source: str = ""
@@ -88,6 +97,8 @@ class Provenance:
     model: Optional[str] = None
     trajectory_stem: Optional[str] = None
     built_at: Optional[str] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
 
     @property
     def label(self) -> str:
@@ -105,6 +116,8 @@ class Provenance:
             "model": self.model,
             "trajectory_stem": self.trajectory_stem,
             "built_at": self.built_at,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
         }
 
     @classmethod
@@ -116,6 +129,8 @@ class Provenance:
             model=data.get("model"),
             trajectory_stem=data.get("trajectory_stem"),
             built_at=data.get("built_at"),
+            input_tokens=data.get("input_tokens"),
+            output_tokens=data.get("output_tokens"),
         )
 
 

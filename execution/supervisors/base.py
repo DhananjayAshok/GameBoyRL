@@ -28,7 +28,8 @@ from typing import Any, Optional, Type
 from gameboy_worlds.interface import Environment
 
 from execution.executors import Executor
-from execution.report import ExecutorReport, SupervisorReport, SupervisorVLMCallRecord
+from execution.report import (ExecutorReport, SupervisorReport, SupervisorVLMCallRecord,
+                              per_prompt_token_counts)
 from utils import VLM, load_parameters, log_error
 
 
@@ -152,20 +153,26 @@ class Supervisor(ABC):
         :return: Exactly what the VLM returned, unchanged.
         """
         kwargs.setdefault("max_new_tokens", self._max_new_tokens)
-        result = self._vlm.infer(**kwargs)
+        inferred = self._vlm.infer(**kwargs)
+        result, meta = inferred["output"], inferred["meta"]
         texts = kwargs.get("texts")
         images = kwargs.get("images") or []
         if isinstance(texts, list):
             responses = result if isinstance(result, list) else [result] * len(texts)
+            token_counts = per_prompt_token_counts(meta, len(texts))
             # Per-prompt images when the caller batched them that way, else the shared set.
             for index, (prompt, response) in enumerate(zip(texts, responses)):
                 call_images = images[index] if index < len(images) and isinstance(images[index], list) else images
                 self.report.event_log.append(SupervisorVLMCallRecord(
                     stage=stage, images=call_images, prompt=prompt, response=response,
+                    input_tokens=token_counts[index][0],
+                    output_tokens=token_counts[index][1],
                 ))
         else:
+            # A single prompt is one record, so meta's counts are scalars.
             self.report.event_log.append(SupervisorVLMCallRecord(
                 stage=stage, images=images, prompt=texts, response=result,
+                input_tokens=meta["input_tokens"], output_tokens=meta["output_tokens"],
             ))
         return result
 

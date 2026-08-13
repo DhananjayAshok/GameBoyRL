@@ -5,13 +5,13 @@ A run is **one list**: :attr:`ExecutorReport.vlm_call_log`, holding one
 :class:`ExecutorVLMCallRecord` per inference call, in order. Each call owns the steps it
 produced, in :attr:`ExecutorVLMCallRecord.steps`:
 
-- **0 steps** — an auxiliary call (``reflection``, ``map_update``, ``done_check``, …)
-  that reasoned about the run without acting on it.
+- **0 steps** — an auxiliary call (``done_check``, or any other tag a variant adds) that
+  reasoned about the run without acting on it.
 - **1 step** — the ordinary case: an action-tagged call that took an
   :class:`EnvironmentStepRecord`, ran a passive tool (:class:`ExecutorToolCallRecord`), or
   produced nothing usable (:class:`InvalidStepRecord`).
-- **N steps** — a call that committed to several actions at once, as
-  :class:`~execution.executors.planning.SequencePlannerExecutor` does.
+- **N steps** — a call that committed to several actions at once, as the ``sequence``
+  action policy does.
 
 ``steps`` used to be a second, parallel list on the report, paired with the call log by
 walking both in lockstep. That pairing was positional, so an executor emitting anything
@@ -48,7 +48,7 @@ import numpy as np
 from gameboy_worlds.interface import HighLevelAction
 
 from execution.executor_action import ExecutorAction
-from utils import load_parameters, log_error, parse_yes_no
+from utils import load_parameters, log_error, parse_yes_no, sum_optional
 
 
 @dataclass
@@ -107,6 +107,20 @@ class EnvironmentStepRecord:
     :type action_success: int
     :param reward: Reward returned by the environment for this step.
     :type reward: float
+    :param frame_changed: Whether the screen actually moved. The environment's own signal
+        (``info["core"]["frame_changed"]``), not a comparison of the two frames above.
+
+        On the record rather than only on the executor because it is the difference
+        between "you pressed A" and "you pressed A and nothing happened", and anything
+        rendering a trajectory back to a model needs it — an agent that cannot tell a
+        blocked move from a successful one repeats it until the budget runs out.
+
+        .. todo:: **Drop the default.** It exists only so reports written before this
+            field can still be unpickled, and a default of ``True`` silently claims the
+            screen moved for every one of them. Once the pre-refactor reports are wiped,
+            make this a required field so an unset value is impossible rather than
+            plausible.
+    :type frame_changed: bool
     """
     frame_before: np.ndarray
     frame_after: np.ndarray
@@ -115,6 +129,7 @@ class EnvironmentStepRecord:
     transition_states: List[Dict[str, Any]]
     action_success: int
     reward: float = 0.0
+    frame_changed: bool = True
 
 
 @dataclass
@@ -142,6 +157,45 @@ class InvalidStepRecord:
 StepRecord = Union[EnvironmentStepRecord, ExecutorToolCallRecord, InvalidStepRecord]
 
 
+def per_prompt_token_counts(
+    meta: Dict[str, Any], n_prompts: int
+) -> List[tuple]:
+    """Split a batched call's ``meta`` into one ``(input_tokens, output_tokens)`` per prompt.
+
+    A batched call is recorded as one record per prompt/response pair, so its counts have
+    to be distributed across those records. ``meta``'s values are normally per-record lists
+    of length ``n_prompts`` and are used directly.
+
+    Anything else is **collapsed onto the first prompt**, with ``0`` on the rest: a scalar
+    (which is what a caller sees if the batch degenerated to one shared reply), or a list
+    of the wrong length (a backend reporting one usage for the whole batch). ``0`` here
+    carries the same meaning as in :mod:`utils.lm_inference` — "already counted on a
+    sibling entry" — so the sum across the batch stays correct even though the attribution
+    to individual prompts is not. Losing the attribution is acceptable; losing the total is
+    not, which is why this never drops the counts on the floor.
+
+    ``None`` is preserved rather than turned into ``0``: an unreported count must stay
+    unknown so it propagates through :func:`~utils.lm_inference.sum_optional`.
+
+    Shared by ``Executor._batched_vlm_call`` and ``Supervisor._vlm_call`` so the two sides
+    distribute counts identically — writing it out twice is how they would come to disagree.
+
+    :param meta: ``{"input_tokens": ..., "output_tokens": ...}`` from one ``VLM.infer``.
+    :param n_prompts: How many prompts the batch held, i.e. how many records to fill.
+    :return: ``n_prompts`` ``(input_tokens, output_tokens)`` tuples, in prompt order.
+    """
+    def spread(value: Any) -> List[Optional[int]]:
+        if isinstance(value, list) and len(value) == n_prompts:
+            return list(value)
+        total = sum_optional(value) if isinstance(value, list) else value
+        rest = None if total is None else 0
+        return [total] + [rest] * (n_prompts - 1)
+
+    inputs = spread(meta.get("input_tokens"))
+    outputs = spread(meta.get("output_tokens"))
+    return list(zip(inputs, outputs))
+
+
 @dataclass
 class ExecutorVLMCallRecord:
     """
@@ -149,8 +203,8 @@ class ExecutorVLMCallRecord:
 
     :param tag: Short label identifying the role of this call within the executor's
         logic. The full set in use: ``"action"`` and ``"score"`` (both in
-        :data:`ACTION_TAGS`), ``"done_check"`` (:data:`DONE_CHECK_TAG`), and the
-        auxiliary ``"reflection"``, ``"map_update"``, ``"decompose"``. The tag says what
+        :data:`ACTION_TAGS`), plus ``"done_check"`` (:data:`DONE_CHECK_TAG`). No executor
+        emits an auxiliary tag today. The tag says what
         the call was *for*; :attr:`steps` says what it *did*. Only action-tagged calls
         are expected to own steps, but the tag is a label, not the mechanism — nothing
         infers step ownership from it.
@@ -167,6 +221,19 @@ class ExecutorVLMCallRecord:
         stored rather than reconstructed, and it survives pickling of the call log on
         its own.
     :type steps: List[StepRecord]
+    :param input_tokens: Prompt tokens this call consumed, as reported by the backend.
+        ``None`` means the backend did not report it — a different fact from zero, and it
+        propagates through :attr:`ExecutorReport.total_input_tokens` rather than being
+        silently treated as no cost.
+    :type input_tokens: Optional[int]
+    :param output_tokens: Generated tokens this call produced. ``None`` as above.
+
+        For a **batched** call the executor records one entry per prompt/response pair,
+        and the backend's per-record counts are distributed across them. Where the
+        backend reports a single usage covering the whole batch, the counts land on the
+        first record and the rest carry ``0`` — "already counted on a sibling" — so the
+        sum over the batch is still right.
+    :type output_tokens: Optional[int]
     """
 
     tag: str
@@ -174,6 +241,8 @@ class ExecutorVLMCallRecord:
     prompt: str
     response: str
     steps: List[StepRecord] = field(default_factory=list)
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
 
     @property
     def env_steps(self) -> List[EnvironmentStepRecord]:
@@ -293,6 +362,38 @@ class ExecutorReport:
         what the benchmark runners do.
         """
         return [s.response for s in self.steps if isinstance(s, InvalidStepRecord)]
+
+    @property
+    def total_input_tokens(self) -> Optional[int]:
+        """Prompt tokens across every VLM call this executor made.
+
+        **Derived from** :attr:`vlm_call_log`, not stored — the same rule as
+        :attr:`steps` and :attr:`invalid_steps`. A stored counter would be a second copy
+        of a fact the log already holds, and the two would disagree the first time a call
+        was recorded without the counter being bumped. Being a property also makes it a
+        live running total mid-run: read it at any point and it describes the calls made
+        so far.
+
+        ``None`` if any call's count is unknown, via
+        :func:`~utils.lm_inference.sum_optional` — an unreported call makes the total
+        unknown rather than quietly understated.
+
+        .. important:: This covers :attr:`vlm_call_log` **only**. Inference performed
+            inside a passive tool is not included: see the TODO on
+            :meth:`~execution.executors.Executor._use_tool`. No tool infers today, so the
+            number is currently complete, but it will silently stop being so the moment
+            one does.
+        """
+        return sum_optional([call.input_tokens for call in self.vlm_call_log])
+
+    @property
+    def total_output_tokens(self) -> Optional[int]:
+        """Generated tokens across every VLM call this executor made.
+
+        Same derivation, ``None`` propagation and tool-call caveat as
+        :attr:`total_input_tokens`.
+        """
+        return sum_optional([call.output_tokens for call in self.vlm_call_log])
 
     def __str__(self) -> str:
         """Return the full interleaved VLM-call / step trajectory as a string.
@@ -457,7 +558,8 @@ def says_complete(response: str) -> bool:
 @dataclass
 class SimpleReport(ExecutorReport):
     """
-    Report produced by :class:`~execution.executors.SimpleExecutor`.
+    Report produced by :class:`~execution.executors.executor.PolicyExecutor`, and so by
+    every arm.
 
     Adds nothing to the stored state — only convenience read-only accessors over
     :attr:`~ExecutorReport.steps`. (:attr:`~ExecutorReport.invalid_steps` used to be a
@@ -535,6 +637,10 @@ class SupervisorVLMCallRecord:
     :param response: The raw text returned.
     :param steps: What this call produced. Always empty today — see
         :class:`SupervisorToolCallRecord`.
+    :param input_tokens: Prompt tokens this call consumed, or ``None`` if the backend did
+        not report it. Same semantics as :class:`ExecutorVLMCallRecord`, including how a
+        batched call distributes its counts across the per-prompt records.
+    :param output_tokens: Generated tokens this call produced, or ``None``.
 
     .. note:: An unparseable reply leaves no marker: it is recorded in :attr:`response`
         like any other, and the caller's failure to parse it is not represented. The
@@ -548,6 +654,8 @@ class SupervisorVLMCallRecord:
     prompt: str
     response: str
     steps: List[SupervisorStepRecord] = field(default_factory=list)
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
 
 
 @dataclass
@@ -600,6 +708,46 @@ class SupervisorReport:
         consumer that wanted this total was reimplementing the same sum.
         """
         return sum(len(report.invalid_steps) for report in self.executor_reports)
+
+    @property
+    def supervisor_input_tokens(self) -> Optional[int]:
+        """Prompt tokens the supervisor spent on its **own** reasoning.
+
+        Supervisor and executor cost are kept apart rather than merged into one total,
+        because the question the arms exist to answer is what the supervision itself
+        costs: an arm that plans well but spends more on planning than it saves on
+        execution has not won, and a single number cannot show that. Consumers wanting
+        the combined figure use :attr:`total_input_tokens`.
+
+        ``None`` propagates via :func:`~utils.lm_inference.sum_optional`.
+        """
+        return sum_optional([call.input_tokens for call in self.supervisor_calls])
+
+    @property
+    def supervisor_output_tokens(self) -> Optional[int]:
+        """Generated tokens from the supervisor's own calls. See
+        :attr:`supervisor_input_tokens`."""
+        return sum_optional([call.output_tokens for call in self.supervisor_calls])
+
+    @property
+    def executor_input_tokens(self) -> Optional[int]:
+        """Prompt tokens across every executor leg this supervisor ran."""
+        return sum_optional([report.total_input_tokens for report in self.executor_reports])
+
+    @property
+    def executor_output_tokens(self) -> Optional[int]:
+        """Generated tokens across every executor leg this supervisor ran."""
+        return sum_optional([report.total_output_tokens for report in self.executor_reports])
+
+    @property
+    def total_input_tokens(self) -> Optional[int]:
+        """Prompt tokens for the whole episode — supervisor plus every executor leg."""
+        return sum_optional([self.supervisor_input_tokens, self.executor_input_tokens])
+
+    @property
+    def total_output_tokens(self) -> Optional[int]:
+        """Generated tokens for the whole episode — supervisor plus every executor leg."""
+        return sum_optional([self.supervisor_output_tokens, self.executor_output_tokens])
 
     def __str__(self) -> str:
         """The interleaved event log as text, for the benchmark CSV's ``report`` column.

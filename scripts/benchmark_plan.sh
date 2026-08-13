@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs the benchmark suite with an info-document plan (the context-engineering arm).
 # A sibling of benchmark.sh: same game/executor/model args, but each task goes through an
-# InfoPlanSupervisor that retrieves knowledge, writes a plan from it, and supervises the
+# InfoSubgoalSupervisor that retrieves knowledge, writes a plan from it, and supervises the
 # executor through that plan one step at a time.
 #
 #   --knowledge_mode retrieval   plans from documents distilled out of real trajectories.
@@ -19,13 +19,13 @@
 # the source selection (curiosity_only / zeroshot_only / both), and the two are orthogonal.
 #
 # --info_docs takes comma-separated paths, so several sources can be unioned in one run.
-# Results land in results/benchmark/<game>/info_plan_<knowledge_mode>_<executor>_<model>.csv.
+# Results land in results/benchmark/<game>/info_subgoal_<knowledge_mode>_<executor>_<model>.csv.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 
 # Script-specific defaults and required args
 declare -A ARGS
-ARGS["executor"]="simple"
+ARGS["executor"]="single_none"
 ARGS["executor_vlm_model"]="Qwen/Qwen3-VL-8B-Instruct"   # use "none" for absent optionals, never ""
 ARGS["executor_vlm_kind"]="huggingface"   # use "none" for absent optionals, never ""
 ARGS["knowledge_mode"]="retrieval"
@@ -114,6 +114,6 @@ if [[ "${ARGS["supervisor_vlm_kind"]}" != "none" ]]; then supervisor_kind_arg="-
 # knowledge_mode, so the CSV/log naming below still matches the runner's own.
 group_flags="--game ${ARGS["game"]} --executor ${ARGS["executor"]} --save_video True --max_steps ${ARGS["max_steps"]} --executor_vlm_model ${ARGS["executor_vlm_model"]} --executor_vlm_kind ${ARGS["executor_vlm_kind"]} $supervisor_model_arg $supervisor_kind_arg $regenerate_flag"
 arm_flags="--mode ${ARGS["knowledge_mode"]} --max_concurrency ${ARGS["max_concurrency"]} $docs_arg"
-common="python run_benchmark.py $group_flags plan $arm_flags"
+common="python run_benchmark.py $group_flags info_subgoal $arm_flags"
 
 $common

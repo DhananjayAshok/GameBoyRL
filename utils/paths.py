@@ -291,4 +291,4 @@ class Paths:
     # instead cannot address an episode: several benchmark rows share a task string, so they
     # share the task-named sessions directory too. The rebuilt name was also wrong for every
     # arm but the baseline, since the sessions directory is named for the arm that ran it
-    # (``benchmark_info_plan_retrieval_<executor>_<model>``, not ``benchmark_zero_shot_…``).
+    # (``benchmark_info_subgoal_retrieval_<executor>_<model>``, not ``benchmark_dummy_…``).

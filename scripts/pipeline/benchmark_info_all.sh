@@ -24,7 +24,7 @@
 #             built from, and the executor run at test time. The baseline below must be the
 #             same executor as the plan runs or the delta is not attributable to the plan.
 #
-# Results: results/benchmark/<game>/info_plan_<knowledge_mode>_<executor>_<model>.csv
+# Results: results/benchmark/<game>/info_subgoal_<knowledge_mode>_<executor>_<model>.csv
 #          results/benchmark/<game>/<executor>_<model>.csv               (baseline)
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
@@ -148,7 +148,7 @@ for run_knowledge_mode in $knowledge_modes; do
         --max_concurrency "${ARGS["max_concurrency"]}" \
         --regenerate "${ARGS["regenerate"]}" \
         $supervisor_model_arg $supervisor_kind_arg || exit 1
-    echo "  -> $results_dir/benchmark/$game/info_plan_${run_knowledge_mode}_${executor}_${model_save_name}.csv"
+    echo "  -> $results_dir/benchmark/$game/info_subgoal_${run_knowledge_mode}_${executor}_${model_save_name}.csv"
 done
 
 # The no-knowledge run on the SAME executor and model. Without it the plan numbers above are
@@ -168,4 +168,4 @@ if [[ "${ARGS["baseline"]}" == "true" ]]; then
 fi
 
 echo ""
-echo "Done. Compare the info_plan_* CSVs against the baseline in $results_dir/benchmark/$game/"
+echo "Done. Compare the info_subgoal_* CSVs against the baseline in $results_dir/benchmark/$game/"

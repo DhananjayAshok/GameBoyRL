@@ -24,7 +24,7 @@ geometry has to remain auditable after the fact.
 frames the builder actually saw. A model that has seen no screens has nothing well-founded to
 put there, and an invented image category is worse than an absent one — it would be matched
 against a real screen by the relevance pass. So the image section is left empty, and
-``InfoPlanSupervisor._candidates`` yields nothing for it without needing a special case.
+``InfoSubgoalSupervisor._candidates`` yields nothing for it without needing a special case.
 
 Frames are likewise absent: every entry has ``frame=None``, which
 :func:`~execution.info_doc.resolve_frame` maps to ``None`` and the relevance call handles by
@@ -114,7 +114,7 @@ def _entries_from_payload(payload: list, parameters: Optional[dict]) -> List[Ent
     what the relevance pass judges and the insights are the only thing the planner ever
     reads, so an item missing either contributes nothing but a wasted VLM call per episode.
     Malformed items are skipped individually rather than failing the whole document — one
-    bad element out of twelve is not a reason to fall back to no knowledge at all.
+    bad element out of ten is not a reason to fall back to no knowledge at all.
     """
     entries = []
     for item in payload:
@@ -143,14 +143,14 @@ def _entries_from_payload(payload: list, parameters: Optional[dict]) -> List[Ent
 def generate_parametric_document(
     game: str,
     vlm: VLM,
-    n_categories: int = 12,
+    n_categories: int = 10,
     max_new_tokens: int = 4000,
     parameters: Optional[dict] = None,
 ) -> InfoDocument:
     """Ask *vlm* to write a document for *game* from its own knowledge.
 
     One call. The reply is parsed strictly and a document that comes back empty stays empty
-    — :meth:`InfoPlanSupervisor.write_plan` already degrades to running the task unplanned
+    — :meth:`InfoSubgoalSupervisor.write_plan` already degrades to running the task unplanned
     when nothing is selected, and that is the honest behaviour for a game the model does not
     know. Inventing entries to avoid an empty document would be exactly the failure this
     control exists to detect.
@@ -162,12 +162,13 @@ def generate_parametric_document(
     :param max_new_tokens: Token budget for the single generation call.
     :return: A document with ``provenance.source == "parametric"`` and an empty image section.
     """
-    output = vlm.infer(
+    result = vlm.infer(
         texts=PARAMETRIC_PROMPT
             .replace("[GAME]", game)
             .replace("[N_CATEGORIES]", str(n_categories)),
         max_new_tokens=max_new_tokens,
     )
+    output, meta = result["output"], result["meta"]
 
     payload = _extract_json_array(output)
     if payload is None:
@@ -187,6 +188,11 @@ def generate_parametric_document(
         model=getattr(vlm, "_model_name", None),
         trajectory_stem=None,
         built_at=datetime.now(timezone.utc).isoformat(),
+        # What writing this document cost. On the provenance rather than returned,
+        # because load_or_generate_parametric_document hands back a reloaded copy — see
+        # its docstring — so anything not serialised is lost on the generating run too.
+        input_tokens=meta["input_tokens"],
+        output_tokens=meta["output_tokens"],
     )
     return document
 
@@ -195,7 +201,7 @@ def load_or_generate_parametric_document(
     game: str,
     path: str,
     vlm: VLM,
-    n_categories: int = 12,
+    n_categories: int = 10,
     max_new_tokens: int = 4000,
     regenerate: bool = False,
     parameters: Optional[dict] = None,

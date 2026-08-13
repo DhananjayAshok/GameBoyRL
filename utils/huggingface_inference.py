@@ -4,7 +4,7 @@ from typing import Any, Optional, Union
 
 from PIL import Image
 
-from utils.lm_inference import InferenceModel
+from utils.lm_inference import InferenceModel, _collapse_meta
 from utils.log_handling import log_error, log_info, log_warn
 from utils.parameter_handling import load_parameters
 from transformers import (
@@ -111,7 +111,26 @@ class HuggingFaceModel(HuggingFaceModelBase, InferenceModel):
         temperature: Optional[float] = None,
         stop_strings: list[str] = None,
         num_return_sequences: int = 1,
-    ) -> list[str]:
+    ) -> tuple[list[str], list[tuple[Optional[int], int]]]:
+        """
+        Generate for a batch of message lists and report per-sequence token counts.
+
+        Both returned lists are flat with length ``batch * num_return_sequences``, ordered
+        ``[r0s0, r0s1, ..., r1s0, ...]`` (row ``j`` belongs to record
+        ``j // num_return_sequences``).
+
+        Token counts are **pre-trim**: they describe what the model actually generated,
+        before the ``[STOP]``/stop-string truncation applied to the text below. Input
+        tokens are the record's real prompt length (padding excluded) and are reported on
+        the record's first row only, with ``0`` on its remaining rows, since the prompt is
+        encoded once per record however many sequences are sampled from it. Output tokens
+        count generated tokens up to the terminating EOS, excluding it (generation pads
+        with ``eos_token_id``, so the two are indistinguishable here).
+
+        :return: ``(final_texts, usage_stats)`` where ``usage_stats[j]`` is
+            ``(input_tokens, output_tokens)`` for ``final_texts[j]``.
+        :rtype: tuple[list[str], list[tuple[Optional[int], int]]]
+        """
         processor = HUGGINGFACE_MODEL_MAPPING[self.model].processor
         model = HUGGINGFACE_MODEL_MAPPING[self.model].model
         inputs = get_inputs(self.model_kind, processor, messages).to(model.device)
@@ -143,6 +162,28 @@ class HuggingFaceModel(HuggingFaceModelBase, InferenceModel):
         )
         output_only = outputs[:, start_index:]
         output_texts = processor.batch_decode(output_only, skip_special_tokens=True)
+
+        if "attention_mask" in inputs:
+            record_input_tokens = [int(count) for count in inputs["attention_mask"].sum(dim=1)]
+        else:
+            # No mask means nothing was padded, so every record used the full width.
+            record_input_tokens = [start_index] * inputs["input_ids"].shape[0]
+        pad_token_id = tokenizer.eos_token_id  # what generate() was told to pad with
+        if isinstance(pad_token_id, (list, tuple)):
+            pad_token_id = pad_token_id[0]
+        usage_stats = []
+        for row_index, row in enumerate(output_only.tolist()):
+            n_generated = len(row)
+            for token_index, token in enumerate(row):
+                if token == pad_token_id:
+                    n_generated = token_index
+                    break
+            record_index = row_index // num_return_sequences
+            is_first_row_of_record = row_index % num_return_sequences == 0
+            usage_stats.append(
+                (record_input_tokens[record_index] if is_first_row_of_record else 0, n_generated)
+            )
+
         final_texts = []
         for text in output_texts:
             # HF includes the stop string in the output; strip at the earliest hit.
@@ -154,7 +195,7 @@ class HuggingFaceModel(HuggingFaceModelBase, InferenceModel):
             if earliest < len(text):
                 text = text[:earliest]
             final_texts.append(text.lstrip("assistant").strip())
-        return final_texts
+        return final_texts, usage_stats
 
     def do_infer(
         self,
@@ -164,7 +205,26 @@ class HuggingFaceModel(HuggingFaceModelBase, InferenceModel):
         temperature: Optional[float] = None,
         stop_strings: list[str] = None,
         num_return_sequences: int = 1,
-    ) -> list[list[str]]:
+    ) -> dict[str, Any]:
+        """
+        Run local HuggingFace generation on a batch. Parameters are as
+        :meth:`InferenceModel.do_infer`.
+
+        Token counts come from the generation tensors (see :meth:`_generate`) and carry
+        two HuggingFace-specific caveats worth knowing when comparing them to an API
+        backend's: they are **pre-trim** (what the model actually generated, before the
+        ``[STOP]``/stop-string truncation applied to the returned text), and output tokens
+        **exclude** the terminating EOS. The prompt is encoded once per record however
+        many sequences are sampled, so ``input_tokens`` does not scale with
+        ``num_return_sequences``.
+
+        :return: ``{"output": ..., "meta": ...}`` where ``output`` holds the post-processed
+            output strings shaped ``[batch, num_return_sequences]`` and ``meta`` is
+            ``{"input_tokens": [...], "output_tokens": [...]}``, each a list of length
+            ``batch`` (one entry per record, output tokens summed over the record's
+            sequences). See :meth:`InferenceModel._build_meta`.
+        :rtype: dict[str, Any]
+        """
         if self.is_defunct:
             log_error(
                 f"Cannot run inference on defunct model.",
@@ -178,7 +238,7 @@ class HuggingFaceModel(HuggingFaceModelBase, InferenceModel):
             self.get_single_message_list(text, img_list)
             for text, img_list in zip(texts, images)
         ]
-        flat_texts = self._generate(
+        flat_texts, flat_usages = self._generate(
             messages,
             max_new_tokens,
             temperature=temperature,
@@ -187,9 +247,11 @@ class HuggingFaceModel(HuggingFaceModelBase, InferenceModel):
         )
         batch_size = len(texts)
         final_texts = [[] for _ in range(batch_size)]
+        final_usages = [[] for _ in range(batch_size)]
         for i, text in enumerate(flat_texts):
             final_texts[i // num_return_sequences].append(text)
-        return final_texts
+            final_usages[i // num_return_sequences].append(flat_usages[i])
+        return {"output": final_texts, "meta": self._build_meta(usages=final_usages)}
 
     def infer_messages(
         self,
@@ -198,22 +260,35 @@ class HuggingFaceModel(HuggingFaceModelBase, InferenceModel):
         temperature: Optional[float] = None,
         stop_strings: list[str] = None,
         num_return_sequences: int = 1,
-    ) -> Union[str, list[str]]:
+    ) -> dict[str, Any]:
+        """
+        Run local HuggingFace generation on a pre-formatted chat messages list.
+
+        The same pre-trim / EOS-excluded token-counting caveats as :meth:`do_infer` apply.
+
+        :return: ``{"output": ..., "meta": ...}``. ``output`` is a single output string if
+            ``num_return_sequences == 1``, else a list of ``num_return_sequences`` output
+            strings. A messages list is a single record, so ``meta``'s
+            ``input_tokens``/``output_tokens`` are scalars (int or None) regardless of
+            ``num_return_sequences``, with output tokens summed over the sequences.
+        :rtype: dict[str, Any]
+        """
         if self.is_defunct:
             log_error(
                 f"Cannot run inference on defunct model.",
                 parameters=self.parameters,
             )
-        outputs = self._generate(
+        outputs, usages = self._generate(
             [messages],
             max_new_tokens,
             temperature=temperature,
             stop_strings=stop_strings,
             num_return_sequences=num_return_sequences,
         )
+        meta = _collapse_meta(self._build_meta(usages=[usages]))
         if num_return_sequences == 1:
-            return outputs[0]
-        return outputs
+            return {"output": outputs[0], "meta": meta}
+        return {"output": outputs, "meta": meta}
 
 
 @dataclass

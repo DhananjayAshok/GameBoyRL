@@ -219,7 +219,7 @@ def describe_pairwise(
             texts=[describe_prompt_template for _ in pair_indices],
             images=[[window[i], window[i + 1]] for i in pair_indices],
             max_new_tokens=max_new_tokens,
-        )
+        )["output"]
         for i, describe_output in zip(pair_indices, describe_outputs):
             describe_output = describe_output.lower()
             if verbose:
@@ -289,7 +289,7 @@ def infer_task(
         texts=infer_prompt,
         images=list(window),
         max_new_tokens=max_new_tokens,
-    ).lower()
+    )["output"].lower()
     if verbose:
         print(f"INFER output:\n{infer_output}\n---")
 
@@ -311,7 +311,7 @@ def infer_task(
     refine_output = vlm.infer(
         texts=refine_prompt,
         max_new_tokens=max_new_tokens,
-    ).lower()
+    )["output"].lower()
     if verbose:
         print(f"REFINE output:\n{refine_output}\n---")
 
@@ -378,7 +378,7 @@ def _distill_tasks(all_tasks: list[str], vlm: VLM, game: str, max_new_tokens: in
     distill_output = vlm.infer(
         texts=distill_prompt,
         max_new_tokens=max_new_tokens,
-    ).lower()
+    )["output"].lower()
     distilled_task = parse_key_value(distill_output, "Task")
     if distilled_task is None:
         distilled_task = all_tasks[0]

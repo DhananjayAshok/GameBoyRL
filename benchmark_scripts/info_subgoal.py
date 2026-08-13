@@ -41,7 +41,7 @@ from gameboy_worlds import get_benchmark_tasks
 
 from execution.parametric_doc import load_or_generate_parametric_document
 from execution.registry import AVAILABLE_EXECUTORS
-from execution.supervisors import PLAN_SEPARATOR, InfoPlanSupervisor
+from execution.supervisors import PLAN_SEPARATOR, InfoSubgoalSupervisor
 from utils import VLM, log_error, log_info
 from utils.paths import Paths
 
@@ -63,7 +63,7 @@ def _plan_summary(result: dict, report) -> dict:
         "n_plan_steps": len(result["plan"]),
         "n_steps_cleared": sum(1 for r in step_log if r["cleared"]),
         "n_attempts": len(attempts),
-        "n_replans": sum(len(r["replans"]) for r in step_log),
+        "n_replans": result["n_replans"],
         # Without these an over-aggressive filter and a bad planner are indistinguishable
         # from the outcome alone.
         "n_insights_candidate": result["n_insights_candidate"],
@@ -86,7 +86,7 @@ SUMMARY_COLUMNS = [
 ]
 
 
-@click.command(name="plan")
+@click.command(name="info_subgoal")
 @click.option("--info_docs", default=None, type=str,
               help="Comma-separated info.json path(s). Required for --mode retrieval.")
 @click.option("--mode", default="retrieval", type=click.Choice(["retrieval", "parametric"]),
@@ -94,13 +94,12 @@ SUMMARY_COLUMNS = [
                    "trajectories (retrieval), or one the model writes from its own priors "
                    "given only the game's name (parametric). Everything downstream is "
                    "identical, so the pair isolates what distillation actually bought.")
-@click.option("--parametric_categories", default=12, show_default=True, type=int,
+@click.option("--parametric_categories", default=10, show_default=True, type=int,
               help="Upper bound on task categories requested when generating a parametric "
-                   "document. Ignored under --mode retrieval.")
-@click.option("--parametric_max_new_tokens", default=4000, show_default=True, type=int,
-              help="Token budget for the single parametric generation call. The whole "
-                   "document comes back in one reply, so a low value truncates the JSON and "
-                   "yields an empty document.")
+                   "document. Ignored under --mode retrieval. The generation call uses "
+                   "--supervisor_max_new_tokens like every other call on that model; the "
+                   "whole document comes back in one reply, so ask for fewer categories "
+                   "rather than lowering that budget.")
 @click.option("--max_concurrency", default=8, show_default=True, type=int,
               help="Parallel relevance calls during selection; they are independent.")
 @click.option("--max_leg_steps", default=5, show_default=True, type=int,
@@ -118,9 +117,9 @@ SUMMARY_COLUMNS = [
               help="Token budget per executor action call. Overrides the project-wide "
                    "executor_vlm_max_new_tokens for this process only.")
 @click.pass_obj
-def plan_cmd(obj, info_docs, mode, parametric_categories, parametric_max_new_tokens,
-             max_concurrency, max_leg_steps, max_attempts_per_step, max_replans,
-             max_frames_per_slice, executor_max_new_tokens):
+def info_subgoal_cmd(obj, info_docs, mode, parametric_categories,
+                      max_concurrency, max_leg_steps, max_attempts_per_step, max_replans,
+                      max_frames_per_slice, executor_max_new_tokens):
     """Benchmark with a plan written from the document and supervised step by step."""
     parameters = obj["parameters"]
     game = obj["game"]
@@ -158,7 +157,7 @@ def plan_cmd(obj, info_docs, mode, parametric_categories, parametric_max_new_tok
             path=doc_path,
             vlm=VLM(knowledge_model, knowledge_kind),
             n_categories=parametric_categories,
-            max_new_tokens=parametric_max_new_tokens,
+            max_new_tokens=obj["supervisor_max_new_tokens"],
             regenerate=obj["regenerate"],
             parameters=parameters,
         )]
@@ -166,7 +165,7 @@ def plan_cmd(obj, info_docs, mode, parametric_categories, parametric_max_new_tok
     emulator_kwargs = {
         "headless": True,
         "save_video": obj["save_video"],
-        "session_name": f"benchmark_info_plan_{mode}_{executor}_{model_save_name}",
+        "session_name": f"benchmark_info_subgoal_{mode}_{executor}_{model_save_name}",
         "max_steps": obj["max_steps"],
     }
 
@@ -185,13 +184,14 @@ def plan_cmd(obj, info_docs, mode, parametric_categories, parametric_max_new_tok
     ]
     tasks = common.select_tasks(get_benchmark_tasks(game=game), obj["n_tasks"])
     save_path = common.results_path(
-        parameters, game, f"info_plan_{mode}_{executor}_{model_save_name}", obj["n_tasks"])
+        parameters, game, f"info_subgoal_{mode}_{executor}_{model_save_name}",
+        obj["n_tasks"])
     results, n_completed = common.load_checkpoint(save_path, obj["regenerate"],
                                                   columns, parameters)
 
     def run_one(row):
         def play(environment):
-            supervisor = InfoPlanSupervisor(
+            supervisor = InfoSubgoalSupervisor(
                 task=row["task"],
                 executor_class=executor_class,
                 env=environment,
@@ -204,7 +204,7 @@ def plan_cmd(obj, info_docs, mode, parametric_categories, parametric_max_new_tok
                 max_new_tokens=obj["supervisor_max_new_tokens"],
                 max_concurrency=max_concurrency,
                 max_leg_steps=max_leg_steps,
-                max_attempts_per_step=max_attempts_per_step,
+                max_attempts_per_target=max_attempts_per_step,
                 max_replans=max_replans,
                 max_frames_per_slice=max_frames_per_slice,
                 verbose=obj["verbose"],
@@ -233,7 +233,7 @@ def plan_cmd(obj, info_docs, mode, parametric_categories, parametric_max_new_tok
 
         return common.run_episode(
             row, play,
-            arm="plan",
+            arm="info_subgoal",
             controller_variant=obj["controller_variant"],
             executor_name=executor_class.__name__,
             model=model_save_name,

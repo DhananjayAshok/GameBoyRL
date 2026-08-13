@@ -1,6 +1,6 @@
 from utils.parameter_handling import load_parameters
 from utils.log_handling import log_warn, log_error
-from typing import List, Union
+from typing import Any, List, Union
 import numpy as np
 from abc import ABC
 from PIL import Image
@@ -88,14 +88,25 @@ class VLM:
         ] = None,
         temperature: float = None,
         n_outputs: int = 1,
-    ) -> Union[str, list[str], list[list[str]]]:
+    ) -> dict[str, Any]:
         """
         Performs inference using the VLM.
 
-        If a single string is passed and n_outputs==1, a single string is returned.
-        If a list is passed and n_outputs==1, a list is returned.
-        If n_outputs > 1 and texts is a single string, a list of n_outputs strings is returned.
-        If n_outputs > 1 and texts is a list, a list of n_outputs lists is returned.
+        Returns ``{"output": ..., "meta": ...}`` — the same shape every entry point in
+        :mod:`utils.lm_inference` returns, passed through unchanged. Callers that only
+        want the text read ``["output"]``; callers that must account for what the call
+        cost read ``["meta"]``.
+
+        ``output`` follows the input shape. If a single string is passed and n_outputs==1,
+        a single string. If a list is passed and n_outputs==1, a list. If n_outputs > 1 and
+        texts is a single string, a list of n_outputs strings. If n_outputs > 1 and texts
+        is a list, a list of n_outputs lists.
+
+        ``meta`` is ``{"input_tokens": ..., "output_tokens": ...}`` with one entry **per
+        record** — scalars if ``texts`` was a string, otherwise lists of length
+        ``len(texts)``. It never gains an ``n_outputs`` dimension. Either count is ``None``
+        where the backend did not report it, which propagates through sums rather than
+        degrading to a partial total.
 
         :param texts: A single text prompt or a list of text prompts.
         :type texts: str or list[str]
@@ -108,10 +119,12 @@ class VLM:
         :type temperature: float or None
         :param n_outputs: Number of independent samples to draw. When > 1 always returns a list.
         :type n_outputs: int
-        :return: A single output string if ``texts`` was a string and n_outputs==1, a list of
-            output strings if ``texts`` was a list and n_outputs==1, or a list of n_outputs strings
-            if n_outputs > 1 and ``texts`` was a single string, or list of n_outputs lists otherwise.
-        :rtype: str or list[str] or list[list[str]]
+        :return: ``{"output": ..., "meta": ...}``. ``output`` is a single output string if
+            ``texts`` was a string and n_outputs==1, a list of output strings if ``texts``
+            was a list and n_outputs==1, a list of n_outputs strings if n_outputs > 1 and
+            ``texts`` was a single string, or a list of n_outputs lists otherwise. ``meta``
+            holds per-record ``input_tokens``/``output_tokens``.
+        :rtype: dict[str, Any]
         """
         if images is not None:
             treated_images = get_converted_image_list(images)
@@ -250,7 +263,7 @@ def ocr(
     texts = [text_prompt] * len(images)
     if vlm is None:
         vlm = OCRVLM(parameters=parameters)
-    ocred = vlm.infer(texts=texts, images=images, max_new_tokens=max_new_tokens)
+    ocred = vlm.infer(texts=texts, images=images, max_new_tokens=max_new_tokens)["output"]
     for i, res in enumerate(ocred):
         if res.strip().lower() == "none":
             log_warn(
@@ -297,7 +310,7 @@ def object_detection(
         texts=[text_prompt for _ in images],
         images=[[image] for image in images],
         max_new_tokens=60,
-    )
+    )["output"]
     founds = []
     for i, output in enumerate(outputs):
         verdict = parse_yes_no(output, "Answer")
@@ -345,7 +358,7 @@ def identify_matches(
         images.append([reference, screen])
     if model is None:
         model = ObjectDetectionVLM(parameters=parameters)
-    outputs = model.infer(texts=texts, images=images, max_new_tokens=120)
+    outputs = model.infer(texts=texts, images=images, max_new_tokens=120)["output"]
     results = []
     for output in outputs:
         verdict = parse_yes_no(output, "Answer")

@@ -31,17 +31,16 @@ triggered a second time — the executor is sealed after construction.
                 super().__init__(...)   # triggers _execute() immediately
                 self._my_arg = my_arg  # too late — _execute already ran
 
-.. note:: **Variants that bypass this loop**
+.. note:: **There is exactly one loop**
 
-    Most executors customise behaviour by overriding the hooks below.  Exactly one does
-    not: :class:`~execution.executors.planning.SequencePlannerExecutor` overrides
-    :meth:`_execute` outright, because it runs a whole planned sequence per VLM call
-    rather than one action.  Every other executor — including
-    :class:`~execution.executors.deliberative.ActionValueEstimatorExecutor`, which
-    customises :meth:`_query_vlm` and :meth:`_pick_action` — uses the base loop.
+    :class:`~execution.executors.executor.PolicyExecutor` is the only subclass, and every
+    arm is that class composed with a different pair of policies. Nothing overrides
+    :meth:`_execute`.
 
-    Keep this note accurate: it exists so that "which executors bypass the base loop"
-    is answerable from this file alone.
+    This used to read as a warning that one variant bypassed the loop and reimplemented
+    its budget accounting, invalid handling and completion check. That variant was the
+    sequence planner, and it needed its own loop only because one of its calls produced
+    several environment steps. A decision now yields a *list* of actions, so it does not.
 """
 
 from __future__ import annotations
@@ -52,8 +51,10 @@ from typing import Any, Dict, Optional, Type
 from gameboy_worlds.interface import Environment, HighLevelAction
 
 from execution.executor_action import ExecutorAction
-from execution.report import (EnvironmentStepRecord, ExecutorReport, InvalidStepRecord,
-                              ExecutorToolCallRecord, ExecutorVLMCallRecord, parse_completion)
+from execution.report import (ACTION_TAGS, EnvironmentStepRecord, ExecutorReport,
+                              InvalidStepRecord, ExecutorToolCallRecord,
+                              ExecutorVLMCallRecord, parse_completion,
+                              per_prompt_token_counts)
 from utils import load_parameters, log_error, log_info, ExecutorVLM, parse_key_value
 
 MAX_CONSECUTIVE_INVALID = 10
@@ -95,10 +96,11 @@ class Executor(ABC):
         called and the executor plays until the environment or the step budget
         stops it.
 
-        How often the check runs is the executor's choice, made in its
-        ``_execute`` loop: after every environment step by default, subject to
-        :data:`DONE_CHECK_EVERY_K_STEPS`, but see
-        :class:`SequencePlannerExecutor`, which checks once per committed plan.
+        How often the check runs follows from one rule in the loop: at a **decision
+        boundary**, and only when the decision ran to the end. That is every environment
+        step for a policy that decides one action at a time, and once per committed plan
+        for one that decides several — the two cadences the arms used to implement
+        separately. :data:`DONE_CHECK_EVERY_K_STEPS` thins it further.
 
         There is deliberately **no give-up mechanism**.  The check asks one
         question — is the task complete — and "this is hopeless" is not an
@@ -154,9 +156,11 @@ Complete: <yes or no>
 Reasoning: <why, referring to what is visible in image 2>
 [STOP]"""
 
-    #: How the reasoning passed to the completion check is introduced. Overridden by
-    #: executors whose stored reasoning is not step-level (see
-    #: :class:`SequencePlannerExecutor`), so the prompt never misrepresents what the text is.
+    #: How the reasoning passed to the completion check is introduced. The action policy
+    #: supplies it (see :attr:`PolicyExecutor.DONE_CHECK_REASONING_LABEL`), because whether
+    #: the stored reasoning explains *this action* or *the plan this action came from*
+    #: depends entirely on how the decision was made — and a prompt that mislabels it is
+    #: asking the judge to read a sentence as something it is not.
     DONE_CHECK_REASONING_LABEL = "The reasoning given for that action was:"
 
     #: Env actions shown to the completion check as history.
@@ -396,20 +400,29 @@ Reasoning: <why, referring to what is visible in image 2>
         ``self._vlm.infer`` directly.  All keyword arguments are forwarded
         verbatim to :meth:`~utils.vlm.ExecutorVLM.infer`.
 
-        Exactly **one** :class:`~execution.report.ExecutorVLMCallRecord` is appended per call,
-        and it becomes :attr:`_current_call`.  Every step recorded afterwards —
-        :meth:`_take_action`, :meth:`_use_tool`, :meth:`_record_invalid` — is filed
-        under it, so a call owns precisely what it caused.  A later ``_vlm_call``
-        takes ownership from here on.
+        Exactly **one** :class:`~execution.report.ExecutorVLMCallRecord` is appended per
+        prompt, and — for a single-prompt call — it becomes :attr:`_current_call`.  Every
+        step recorded afterwards — :meth:`_take_action`, :meth:`_use_tool`,
+        :meth:`_record_invalid` — is filed under it, so a call owns precisely what it
+        caused.  A later ``_vlm_call`` takes ownership from here on.
 
-        ``n_outputs > 1`` is **not supported**: several sampled responses to one call
-        have no single owner for the resulting step, and logging one record per sample
-        is what made an executor's calls and steps drift apart.  Ask once, or make each
-        sample its own ``_vlm_call``.
+        **Batching.**  Pass a *list* of prompts to ask several independent questions in one
+        round trip; the reply is a list in the same order, and one record is appended per
+        prompt/response pair.  A batched call is auxiliary by construction:
 
-        :param tag: Short label for the call's role, e.g. ``"action"``,
-            ``"reflection"``, ``"map_update"``, ``"decompose"``, ``"score"``,
-            ``"done_check"``.
+        - it does **not** become :attr:`_current_call`, so ownership of the next step stays
+          with whichever single call last claimed it.  A batch has no single owner, and
+          silently handing it one is precisely how calls and steps came to be mis-paired.
+        - its tag must not be in :data:`~execution.report.ACTION_TAGS`.  An action decided
+          across several prompts has no owning call for the step it produces.
+
+        ``n_outputs > 1`` is still **not supported**, and is a different thing from
+        batching: several *samples of one prompt* have no single owner for the resulting
+        step, whereas several *prompts* each own nothing.  Ask once, or make each sample
+        its own ``_vlm_call``.
+
+        :param tag: Short label for the call's role — ``"action"``, ``"score"`` or
+            ``"done_check"`` today, plus any auxiliary tag a future variant needs.
 
             .. important:: If this call is the one that decides the action, its tag must
                 be in :data:`~execution.report.ACTION_TAGS`. Ownership of the step that
@@ -419,25 +432,84 @@ Reasoning: <why, referring to what is visible in image 2>
         :type tag: str
         :param kwargs: Keyword arguments forwarded to
             :meth:`~utils.vlm.ExecutorVLM.infer`.
-        :return: The raw VLM output string.
+        :return: The raw VLM output string, or a list of them for a batched call.
         """
         kwargs.setdefault("max_new_tokens", self._max_new_tokens)
-        result = self._vlm.infer(**kwargs)
         texts = kwargs["texts"]
         images = kwargs["images"]
-        assert isinstance(texts, str)
+
+        if isinstance(texts, list):
+            return self._batched_vlm_call(tag, **kwargs)
+
+        response = self._vlm.infer(**kwargs)
+        result, meta = response["output"], response["meta"]
         if isinstance(result, list):
             log_error(
-                f"_vlm_call({tag!r}) received {len(result)} responses. Multi-sample calls "
-                "are unsupported: the steps that follow would have no single owning call, "
-                "which is how VLM calls and steps came to be mis-paired. Drop n_outputs, "
-                "or issue one _vlm_call per sample.",
+                f"_vlm_call({tag!r}) received {len(result)} responses for one prompt. "
+                "Multi-sample calls are unsupported: the steps that follow would have no "
+                "single owning call, which is how VLM calls and steps came to be "
+                "mis-paired. Drop n_outputs, or issue one _vlm_call per sample.",
                 parameters=self._parameters,
             )
-        record = ExecutorVLMCallRecord(tag=tag, prompt=texts, images=images, response=result)
+        # A single prompt is one record, so meta's counts are scalars.
+        record = ExecutorVLMCallRecord(
+            tag=tag, prompt=texts, images=images, response=result,
+            input_tokens=meta["input_tokens"], output_tokens=meta["output_tokens"],
+        )
         self.report.vlm_call_log.append(record)
         self._current_call = record
         return result
+
+    def _batched_vlm_call(self, tag: str, **kwargs: Any) -> list:
+        """Several prompts in one round trip, recorded one entry per pair.
+
+        Split out from :meth:`_vlm_call` rather than branching inline so the single-prompt
+        path — the one that assigns step ownership — stays readable as a straight line.
+
+        Takes the prompts and images out of ``kwargs`` rather than as parameters so the
+        whole dict can be forwarded to ``infer`` untouched — naming them here as well is
+        how they ended up passed twice.
+
+        Mirrors ``Supervisor._vlm_call``'s list handling, including per-prompt images when
+        the caller batched them that way and the shared set otherwise, so the two sides of
+        the codebase stay one pattern rather than two that drift.
+        """
+        texts = kwargs["texts"]
+        images = kwargs["images"]
+        if tag in ACTION_TAGS:
+            log_error(
+                f"_vlm_call({tag!r}) was batched with {len(texts)} prompts, but "
+                f"{tag!r} is an action tag. A batch owns no steps, so the action it "
+                "decided would be filed under some earlier call. Decide the action in a "
+                "single call, and batch only auxiliary work.",
+                parameters=self._parameters,
+            )
+
+        results = self._vlm.infer(**kwargs)
+        raw_responses, meta = results["output"], results["meta"]
+        responses = raw_responses if isinstance(raw_responses, list) else [raw_responses] * len(texts)
+        if len(responses) != len(texts):
+            # One record per prompt/response pair is the invariant every consumer reads
+            # the log under; a short reply list would silently drop prompts from it.
+            log_error(
+                f"_vlm_call({tag!r}) sent {len(texts)} prompts and got "
+                f"{len(responses)} responses back. The call log records one entry per "
+                "pair, so the two must match.",
+                parameters=self._parameters,
+            )
+
+        token_counts = per_prompt_token_counts(meta, len(texts))
+        for index, (prompt, response) in enumerate(zip(texts, responses)):
+            call_images = (images[index]
+                           if index < len(images) and isinstance(images[index], list)
+                           else images)
+            self.report.vlm_call_log.append(ExecutorVLMCallRecord(
+                tag=tag, prompt=prompt, images=call_images, response=response,
+                input_tokens=token_counts[index][0],
+                output_tokens=token_counts[index][1],
+            ))
+        # _current_call is deliberately left alone: see the batching note on _vlm_call.
+        return responses
 
     def _get_action_strings(self, return_all: bool = False) -> Dict[Type[HighLevelAction], str]:
         """
@@ -464,10 +536,11 @@ Reasoning: <why, referring to what is visible in image 2>
         """
         The last *k* environment actions, oldest first, for the completion check.
 
-        Derived from :attr:`report.steps` rather than from any subclass's own bookkeeping,
-        so every executor gets history here without duplicating
-        :class:`HistoryAwareExecutor`'s state. That class keeps its own list for its own
-        prompt; the two serve different callers and are deliberately not merged.
+        Derived from :attr:`report.steps` rather than from the history policy's state, so
+        the completion check sees the same trajectory on every arm — including the ones
+        whose history policy remembers nothing. The two are deliberately not merged: this
+        serves the judge and always exists, while a history policy serves the acting model
+        and may be empty by design.
         """
         k = self.DONE_CHECK_HISTORY_K if k is None else k
         env_steps = [s for s in self.report.steps if isinstance(s, EnvironmentStepRecord)]

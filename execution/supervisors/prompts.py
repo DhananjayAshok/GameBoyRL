@@ -39,9 +39,9 @@ Critique: <what went wrong overall>
 Hint: <one or two sentence hint for a better approach>
 [STOP]"""
 
-# --- Plan arm (InfoPlanSupervisor) -----------------------------------------------------
+# --- Plan arm (InfoSubgoalSupervisor) -----------------------------------------------------
 # Module level because two parties share it: the planner prompt tells the model to emit it,
-# and InfoPlanSupervisor splits on it — so the token the model is asked for and the token
+# and InfoSubgoalSupervisor splits on it — so the token the model is asked for and the token
 # the code looks for cannot drift apart.
 #
 # It now lives in utils.parsing alongside parse_steps, the only code that splits on it, and
@@ -285,7 +285,7 @@ Safe success point: <frame number, or N/A if never completed or unknown>
 [STOP]"""
 
 
-# --- Knowledge selection (InfoPlanSupervisor) ------------------------------------------
+# --- Knowledge selection (InfoSubgoalSupervisor) ------------------------------------------
 # [FRAME_NOTE] and [EVIDENCE_NOTE] vary with whether the entry carries a representative
 # frame. A document distilled from trajectories has one per entry; a parametric document
 # (written from the model's priors, never having seen a screen) has none. The two slots are

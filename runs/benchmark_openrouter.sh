@@ -14,7 +14,7 @@ models=(
 #    "openai/gpt-4o-mini"
 #)
 
-executors=("reflective")
+executors=("single_actions")
 
 for game in "${games[@]}"; do
     echo "Running benchmark for game: $game"

@@ -212,7 +212,7 @@ def extract_insights(trajectory, task, vlm, game, max_new_tokens, n_frames=8, ve
     if verbose:
         print(f"EXTRACT prompt:\n{prompt}\n---")
 
-    output = vlm.infer(texts=prompt, images=frames, max_new_tokens=max_new_tokens)
+    output = vlm.infer(texts=prompt, images=frames, max_new_tokens=max_new_tokens)["output"]
     if verbose:
         print(f"EXTRACT output:\n{output}\n---")
 
@@ -326,7 +326,7 @@ def run_stage_a(task_map, traj_map, out_dir, vlm, game, max_new_tokens, n_frames
                     "task": task,
                     "insights": parsed["insights"],
                     # A nested object, not rendered text: the row is already JSON, and the
-                    # readers (stage B, debug.py info, InfoPlanSupervisor) all want the
+                    # readers (stage B, debug.py info, InfoSubgoalSupervisor) all want the
                     # document back rather than a string to re-parse.
                     "document": doc.to_dict(),
                 }
@@ -391,7 +391,7 @@ def fold_section(doc1: InfoDocument, doc2: InfoDocument, section: str, root: str
 
         if verbose:
             print(f"MATCH prompt ({section}):\n{prompt}\n---")
-        output = vlm.infer(texts=prompt, images=images or None, max_new_tokens=max_new_tokens)
+        output = vlm.infer(texts=prompt, images=images or None, max_new_tokens=max_new_tokens)["output"]
         if verbose:
             print(f"MATCH output:\n{output}\n---")
 
@@ -413,7 +413,7 @@ def fold_section(doc1: InfoDocument, doc2: InfoDocument, section: str, root: str
         )
         if verbose:
             print(f"COMBINE prompt:\n{combine_prompt}\n---")
-        combined_out = vlm.infer(texts=combine_prompt, max_new_tokens=max_new_tokens)
+        combined_out = vlm.infer(texts=combine_prompt, max_new_tokens=max_new_tokens)["output"]
         if verbose:
             print(f"COMBINE output:\n{combined_out}\n---")
 

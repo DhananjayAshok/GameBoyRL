@@ -2,11 +2,11 @@
 Rendering an executor attempt as text for a supervisor prompt.
 
 Pure functions of ``(report, env_steps)`` — no policy, no VLM, no supervisor state. They
-were methods on :class:`~execution.supervisors.info_plan.InfoPlanSupervisor` purely because
+were methods on :class:`~execution.supervisors.info_subgoal.InfoSubgoalSupervisor` purely because
 that is where they were written; none of them read ``self`` for anything but a call to
 another function in this module.
 
-Splitting them out leaves ``info_plan`` holding the three concerns that actually interact
+Splitting them out leaves the supervisor arms holding the concerns that actually interact
 — planning, judging, and the loop — rather than four.
 """
 

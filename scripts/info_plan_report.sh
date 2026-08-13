@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Deep diagnostics for the info-plan arm: writes results/debug/<game>/info_plan/report<suffix>.md
+# Deep diagnostics for the info_subgoal arm: writes results/debug/<game>/info_subgoal/report<suffix>.md
 # and regenerates the per-episode frame-by-frame replays it links to.
 #
-# Reads the two CSVs an info-plan run leaves behind — the baseline history arm and the
-# info_plan_retrieval arm — so it only makes sense after both have been run for the same
+# Reads the two CSVs an info_subgoal run leaves behind — the baseline (dummy) arm and the
+# info_subgoal_retrieval arm — so it only makes sense after both have been run for the same
 # <stem> (model name tail) and <suffix> (e.g. _first5).
 #
 # Previously lived in tmp.sh and was called positionally from run.sh; it is here so that
@@ -15,6 +15,7 @@ source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 declare -A ARGS
 ARGS["suffix"]="_first5"
 ARGS["stem"]="gemma-4-31b-it"
+ARGS["executor"]="single_actions"
 
 REQUIRED_ARGS=("game")
 
@@ -64,9 +65,10 @@ done
 GAME="${ARGS["game"]}"
 SUFFIX="${ARGS["suffix"]}"
 STEM="${ARGS["stem"]}"
+EXECUTOR="${ARGS["executor"]}"
 
-GAME=$GAME SUFFIX=$SUFFIX STEM=$STEM python - <<'PY'
-"""Deep diagnostics for the info-plan arm: where the budget goes and why steps do not clear."""
+GAME=$GAME SUFFIX=$SUFFIX STEM=$STEM EXECUTOR=$EXECUTOR python - <<'PY'
+"""Deep diagnostics for the info_subgoal arm: where the budget goes and why steps do not clear."""
 import json
 import os
 from collections import Counter
@@ -77,12 +79,14 @@ GAME = os.environ.get("GAME", "deja_vu_1")
 SUFFIX = os.environ.get("SUFFIX", "_first5")
 BASE = f"results/benchmark/{GAME}"
 STEM = os.environ.get("STEM", "gemma-4-31b-it")
-OUT_DIR = f"results/debug/{GAME}/info_plan"
+# The arm name is part of both CSV paths now, so it cannot be hardcoded here.
+EXECUTOR = os.environ.get("EXECUTOR", "single_actions")
+OUT_DIR = f"results/debug/{GAME}/info_subgoal"
 os.makedirs(OUT_DIR, exist_ok=True)
 
 ARMS = {
-    "baseline history": f"{BASE}/history_{STEM}{SUFFIX}.csv",
-    "info PLAN":        f"{BASE}/info_plan_retrieval_history_{STEM}{SUFFIX}.csv",
+    "baseline":  f"{BASE}/dummy_{EXECUTOR}_{STEM}{SUFFIX}.csv",
+    "info subgoal": f"{BASE}/info_subgoal_retrieval_{EXECUTOR}_{STEM}{SUFFIX}.csv",
 }
 
 lines = []
@@ -112,7 +116,7 @@ for label, frame in frames.items():
          f"{frame['n_steps'].mean():.1f} |")
 emit()
 
-base, plan = frames.get("baseline history"), frames.get("info PLAN")
+base, plan = frames.get("baseline"), frames.get("info subgoal")
 
 # ------------------------------------------------------- 2. paired comparison
 # Joined on ROW INDEX: both runners walk get_benchmark_tasks() in order, and task strings

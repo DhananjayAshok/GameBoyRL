@@ -14,6 +14,9 @@ from utils.lm_inference import (
     vLLMModel,
     parse_key_value,
     parse_yes_no,
+    sum_meta,
+    sum_optional,
+    zero_meta,
 )
 from utils.parsing import (
     PLAN_SEPARATOR,

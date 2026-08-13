@@ -1,19 +1,26 @@
 """
 Entry point for the benchmark_scripts package. Use --help for CLI options.
 
-Two arms, one group: ``run_benchmark.py --game X baseline`` (no knowledge) and
-``... plan`` (knowledge retrieved from prebuilt documents, turned into a plan, and
-supervised to completion). Called by scripts/benchmark.sh,
+Four arms, one group, each adding one capability to the one before it::
+
+    run_benchmark.py --game X baseline       no supervisor reasoning at all
+    run_benchmark.py --game X revision       short legs, hint revised between them
+    run_benchmark.py --game X subgoal        a plan from the task alone, driven step by step
+    run_benchmark.py --game X info_subgoal   the same, planned from a retrieved document
+
+Called by scripts/benchmark.sh, scripts/benchmark_plan.sh,
 scripts/pipeline/benchmark_info_all.sh and run.sh.
 
-There used to be a third arm, ``info``, which spent the same retrieved knowledge on a
-single hint written once at the opening frame. It has been retired along with
-``InfoHintSupervisor``; ``plan`` is now the only arm that reads the documents.
+There used to be an ``info`` arm, which spent retrieved knowledge on a single hint written
+once at the opening frame. It has been retired along with ``InfoHintSupervisor``, and its
+absence is why knowledge is only available to an arm that plans: a document is spent
+writing a plan, and without one there is nothing to spend it on.
 
 Options shared by every arm live on the group and reach the subcommands through ctx.obj;
 each arm declares only what is its own. That is what stops --max_replans being silently
-accepted by the baseline, which a single flat command could not prevent. Group options must
-precede the subcommand word.
+accepted by the baseline, or --info_docs by an arm that has no plan to spend it on, which a
+single flat command with a --supervisor flag could not prevent. Group options must precede
+the subcommand word.
 
 Note for anyone resuming an old run: every arm's CSV carries a trailing session_dirs column
 and no n_resets column, so CSVs written before this package cannot be resumed.
@@ -25,7 +32,7 @@ import click
 
 from gameboy_worlds import AVAILABLE_GAMES
 
-from benchmark_scripts import baseline, plan
+from benchmark_scripts import baseline, info_subgoal, revision, subgoal
 from execution.registry import AVAILABLE_EXECUTORS
 from utils import load_parameters
 
@@ -33,7 +40,7 @@ from utils import load_parameters
 @click.group()
 @click.option("--game", default="pokemon_red", type=click.Choice(AVAILABLE_GAMES))
 @click.option("--controller_variant", default="low_level", type=str)
-@click.option("--executor", default="simple",
+@click.option("--executor", default="single_none",
               type=click.Choice(list(AVAILABLE_EXECUTORS.keys())))
 @click.option("--executor_vlm_model", default=None, type=str)
 @click.option("--executor_vlm_kind", default=None, type=str)
@@ -96,7 +103,9 @@ def main(ctx, game, controller_variant, executor, executor_vlm_model, executor_v
 
 
 main.add_command(baseline, name="baseline")
-main.add_command(plan, name="plan")
+main.add_command(revision, name="revision")
+main.add_command(subgoal, name="subgoal")
+main.add_command(info_subgoal, name="info_subgoal")
 
 
 if __name__ == "__main__":

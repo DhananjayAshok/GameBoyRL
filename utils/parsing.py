@@ -233,7 +233,7 @@ def parse_action_line(text) -> Optional[str]:
     return None
 
 
-# Separator InfoPlanSupervisor joins plan steps with, and the `hint` CSV column stores the
+# Separator InfoSubgoalSupervisor joins plan steps with, and the `hint` CSV column stores the
 # whole plan under. It lives here with parse_steps, the only code that splits on it;
 # execution/supervisors/ re-exports the name so `from execution.supervisors import
 # PLAN_SEPARATOR` keeps working.

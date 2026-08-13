@@ -6,12 +6,29 @@
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 
+# Covers the three knowledge-free arms via --supervisor:
+#   dummy     the control: one executor run per task, no supervisor reasoning
+#   revision  short executor legs with a hint revised between them
+#   subgoal   a plan written from the task alone, driven step by step
+# The fourth arm, info_subgoal, lives in benchmark_plan.sh because it needs the document
+# flags, and those must not be accepted by an arm with no plan to spend a document on.
+#
+# --max_leg_steps / --max_attempts_per_step / --max_replans apply only to the supervised
+# arms and are not passed under --supervisor dummy, which takes no options of its own.
+# That is what keeps the control arm the control.
+
 # Script-specific defaults and required args
 declare -A ARGS
-ARGS["executor"]="simple"
+ARGS["supervisor"]="dummy"
+ARGS["executor"]="single_none"
 ARGS["executor_vlm_model"]="Qwen/Qwen3-VL-8B-Instruct"   # use "none" for absent optionals, never ""
 ARGS["executor_vlm_kind"]="huggingface"   # use "none" for absent optionals, never ""
+ARGS["supervisor_vlm_model"]="none"   # unset falls back to the executor's model
+ARGS["supervisor_vlm_kind"]="none"
 ARGS["max_steps"]="50"
+ARGS["max_leg_steps"]="5"
+ARGS["max_attempts_per_step"]="3"
+ARGS["max_replans"]="2"
 ARGS["regenerate"]="false"
 
 REQUIRED_ARGS=("game")
@@ -62,8 +79,39 @@ done
 regenerate_flag=""
 if [[ "${ARGS["regenerate"]}" == "true" ]]; then regenerate_flag="--regenerate"; fi
 
-# Group options precede the subcommand word: run_benchmark.py is a click group and
-# `baseline` is the no-knowledge arm.
-common="python run_benchmark.py --game ${ARGS["game"]} --executor ${ARGS["executor"]} --save_video True --max_steps ${ARGS["max_steps"]} --executor_vlm_model ${ARGS["executor_vlm_model"]} --executor_vlm_kind ${ARGS["executor_vlm_kind"]} $regenerate_flag baseline"
+# The supervisor name is the registry key. The control arm's subcommand word is `baseline`
+# rather than `dummy`, so it is mapped here rather than renamed out from under callers.
+case "${ARGS["supervisor"]}" in
+    dummy)
+        subcommand="baseline"; arm_flags="" ;;
+    revision)
+        subcommand="revision"
+        arm_flags="--max_leg_steps ${ARGS["max_leg_steps"]}" ;;
+    subgoal)
+        subcommand="subgoal"
+        arm_flags="--max_leg_steps ${ARGS["max_leg_steps"]} --max_attempts_per_step ${ARGS["max_attempts_per_step"]} --max_replans ${ARGS["max_replans"]}" ;;
+    info_subgoal)
+        echo "Error: --supervisor info_subgoal needs --mode/--info_docs; use scripts/benchmark_plan.sh"
+        exit 1 ;;
+    *)
+        echo "Error: unknown --supervisor '${ARGS["supervisor"]}' (dummy, revision, subgoal)"
+        exit 1 ;;
+esac
 
+# Passed only when set: the group resolves an unset supervisor model to the executor's, and
+# forwarding the literal "none" would name a model that does not exist.
+supervisor_flags=""
+if [[ "${ARGS["supervisor_vlm_model"]}" != "none" ]]; then
+    supervisor_flags="--supervisor_vlm_model ${ARGS["supervisor_vlm_model"]}"
+fi
+if [[ "${ARGS["supervisor_vlm_kind"]}" != "none" ]]; then
+    supervisor_flags="$supervisor_flags --supervisor_vlm_kind ${ARGS["supervisor_vlm_kind"]}"
+fi
+
+# Group options precede the subcommand word: run_benchmark.py is a click group.
+group_flags="--game ${ARGS["game"]} --executor ${ARGS["executor"]} --save_video True --max_steps ${ARGS["max_steps"]} --executor_vlm_model ${ARGS["executor_vlm_model"]} --executor_vlm_kind ${ARGS["executor_vlm_kind"]} $supervisor_flags $regenerate_flag"
+
+common="python run_benchmark.py $group_flags $subcommand $arm_flags"
+
+echo "$common"
 $common

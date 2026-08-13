@@ -34,14 +34,14 @@ def baseline_cmd(obj):
     emulator_kwargs = {
         "headless": True,
         "save_video": obj["save_video"],
-        "session_name": f"benchmark_zero_shot_{executor}_{model_save_name}",
+        "session_name": f"benchmark_dummy_{executor}_{model_save_name}",
         "max_steps": obj["max_steps"],
     }
 
     columns = common.COMMON_COLUMNS + [common.SESSION_COLUMN]
     tasks = common.select_tasks(get_benchmark_tasks(game=game), obj["n_tasks"])
     save_path = common.results_path(parameters, game,
-                                    f"{executor}_{model_save_name}", obj["n_tasks"])
+                                    f"dummy_{executor}_{model_save_name}", obj["n_tasks"])
     results, n_completed = common.load_checkpoint(save_path, obj["regenerate"],
                                                   columns, parameters)
 
@@ -68,7 +68,7 @@ def baseline_cmd(obj):
 
         return common.run_episode(
             row, play,
-            arm="baseline",
+            arm="dummy",
             controller_variant=obj["controller_variant"],
             executor_name=executor_class.__name__,
             model=model_save_name,

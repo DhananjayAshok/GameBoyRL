@@ -165,6 +165,123 @@ def get_max_queries_per_minute(model: str, parameters: dict[str, Any]) -> int:
             return _RATE_LIMITS[matches[0]]
 
 
+def sum_optional(values: list[Optional[int]]) -> Optional[int]:
+    """
+    Sum token counts, propagating unknowns.
+
+    ``None`` means "the backend did not report this count". A single ``None`` makes the
+    whole sum ``None`` rather than a silently partial total. ``0`` is used elsewhere to
+    mean "already counted on a sibling entry" and sums harmlessly.
+
+    :param values: Token counts, any of which may be None.
+    :type values: list[Optional[int]]
+    :return: The total, or None if any value was None.
+    :rtype: Optional[int]
+    """
+    total = 0
+    for value in values:
+        if value is None:
+            return None
+        total += value
+    return total
+
+
+def sum_meta(*metas: dict[str, Any]) -> dict[str, Optional[int]]:
+    """
+    Add ``meta`` dicts together, flattening list-valued entries.
+
+    Callers that make several inference calls and have to report one total — the document
+    builders, ``derive_critique_hint`` — accumulate a list of ``meta`` dicts and collapse
+    it here. The shapes are deliberately mixed: a batched call yields **per-record lists**
+    while a single call yields **scalars**, and both land in the same sum. Flattening is
+    therefore not a convenience, it is the whole job; adding the shapes without it would
+    raise on the first batched entry.
+
+    ``None`` propagates exactly as in :func:`sum_optional` — one unreported count makes the
+    total unknown rather than a partial sum.
+
+    :param metas: Any number of ``{"input_tokens": ..., "output_tokens": ...}`` dicts,
+        whose values may be ints, None, or lists of either.
+    :return: One ``{"input_tokens": ..., "output_tokens": ...}`` with scalar values.
+    :rtype: dict[str, Optional[int]]
+    """
+    totals = {}
+    for key in ("input_tokens", "output_tokens"):
+        flat: list[Optional[int]] = []
+        for meta in metas:
+            value = meta.get(key) if meta else None
+            if isinstance(value, list):
+                flat.extend(value)
+            else:
+                flat.append(value)
+        totals[key] = sum_optional(flat)
+    return totals
+
+
+def zero_meta() -> dict[str, int]:
+    """
+    The ``meta`` of a code path that made no inference calls at all.
+
+    Zero rather than None: "made no calls" is a known quantity, and collapsing it to
+    "unknown" would poison every total it is summed into. Used by the early returns of
+    helpers that may legitimately do no work.
+    """
+    return {"input_tokens": 0, "output_tokens": 0}
+
+
+def _collapse_meta(meta: dict[str, list[Optional[int]]]) -> dict[str, Optional[int]]:
+    """
+    Collapse a single-record meta dict (each value a length-1 list) to scalar values.
+
+    :param meta: Meta dict whose values are lists of length 1.
+    :type meta: dict[str, list[Optional[int]]]
+    :return: The same dict with each value replaced by its single element.
+    :rtype: dict[str, Optional[int]]
+    """
+    return {key: value[0] for key, value in meta.items()}
+
+
+def _extract_usage(
+    response: Any,
+    *,
+    input_attr: str,
+    output_attr: str,
+    parameters: dict[str, Any] = None,
+) -> tuple[Optional[int], Optional[int]]:
+    """
+    Read the token usage off an API response, tolerating providers that omit it.
+
+    :param response: The raw response object returned by the API client.
+    :type response: Any
+    :param input_attr: Name of the input-token attribute on ``response.usage``
+        (``"prompt_tokens"`` for OpenAI-compatible, ``"input_tokens"`` for Anthropic).
+    :type input_attr: str
+    :param output_attr: Name of the output-token attribute on ``response.usage``.
+    :type output_attr: str
+    :param parameters: Loaded parameters dict, used for logging.
+    :type parameters: dict[str, Any] or None
+    :return: ``(input_tokens, output_tokens)``, either of which is None if the response
+        did not report it.
+    :rtype: tuple[Optional[int], Optional[int]]
+    """
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        log_warn(
+            "API response did not report token usage; recording input/output tokens as None.",
+            parameters=parameters,
+        )
+        return None, None
+    input_tokens = getattr(usage, input_attr, None)
+    output_tokens = getattr(usage, output_attr, None)
+    if input_tokens is None or output_tokens is None:
+        log_warn(
+            f"API response usage is missing {input_attr}/{output_attr} "
+            f"(got {input_tokens}/{output_tokens}); recording the missing count as None.",
+            parameters=parameters,
+        )
+    return input_tokens, output_tokens
+
+
 class RateLimitedAPIBase:
     """
     Mixin that provides rate-limited API client state and ``wait()`` logic.
@@ -255,7 +372,7 @@ class InferenceModel(ABC):
         temperature: Optional[float] = None,
         stop_strings: list[str] = None,
         num_return_sequences: int = 1,
-    ) -> list[list[str]]:
+    ) -> dict[str, Any]:
         """
         Run inference on a batch of text prompts with associated images. Assumes validated inputs
 
@@ -274,10 +391,52 @@ class InferenceModel(ABC):
         :type stop_strings: list[str] or None
         :param num_return_sequences: Number of independent sequences to return per prompt.
         :type num_return_sequences: int
-        :return: Post-processed output strings shaped ``[batch, num_return_sequences]``.
-        :rtype: list[list[str]]
+        :return: ``{"output": ..., "meta": ...}`` where ``output`` holds the post-processed
+            output strings shaped ``[batch, num_return_sequences]`` and ``meta`` is
+            ``{"input_tokens": [...], "output_tokens": [...]}`` with one entry per record
+            (i.e. lists of length ``batch``), each entry an int or None if the backend did
+            not report the count. See :meth:`_build_meta` for the per-record accounting.
+        :rtype: dict[str, Any]
         """
         pass
+
+    def _build_meta(
+        self, *, usages: list[list[tuple[Optional[int], Optional[int]]]]
+    ) -> dict[str, list[Optional[int]]]:
+        """
+        Aggregate per-sequence token counts into the per-record ``meta`` dict.
+
+        ``meta`` is always per *record*: it never gains a ``num_return_sequences``
+        dimension. A record's counts are the sum over its sequences, which means the
+        accounting for ``num_return_sequences > 1`` differs by backend, deliberately —
+        each reflects what that backend actually consumed:
+
+        - ``AnthropicModel``/``OpenRouterModel`` issue one call per sequence, so the
+          prompt genuinely is consumed ``num_return_sequences`` times and is summed.
+        - ``OpenAIAPIModel``/``vLLMModel`` use the API's native ``n``, so the prompt is
+          consumed once; the extra sequences carry ``0`` input tokens.
+        - ``HuggingFaceModel`` encodes the prompt once per record, likewise.
+
+        ``None`` means "not reported by the backend" and propagates: if any sequence of a
+        record has an unknown count, the record's count is None rather than a partial sum.
+
+        :param usages: Per-sequence ``(input_tokens, output_tokens)`` tuples shaped
+            ``[batch, num_return_sequences]``.
+        :type usages: list[list[tuple[Optional[int], Optional[int]]]]
+        :return: ``{"input_tokens": [...], "output_tokens": [...]}``, each a list of
+            length ``batch``.
+        :rtype: dict[str, list[Optional[int]]]
+        """
+        return {
+            "input_tokens": [
+                sum_optional([usage[0] for usage in record_usages])
+                for record_usages in usages
+            ],
+            "output_tokens": [
+                sum_optional([usage[1] for usage in record_usages])
+                for record_usages in usages
+            ],
+        }
 
     def get_output_final(self, output_text: str) -> str:
         """
@@ -370,14 +529,22 @@ class InferenceModel(ABC):
         stop_strings: list[str] = None,
         num_return_sequences: int = 1,
         batch_size: int = None
-    ) -> Union[str, list[str], list[list[str]]]:
+    ) -> dict[str, Any]:
         """
         Run inference on a batch of text prompts with associated images.
 
-        If a single string is passed, a single string is returned. If a list is passed, a list is returned.
+        Returns ``{"output": ..., "meta": ...}``.
 
-        When ``num_return_sequences > 1``, each item is itself a list of
+        ``output`` follows the input shape: if a single string is passed, a single string
+        is returned; if a list is passed, a list is returned. When
+        ``num_return_sequences > 1``, each item is itself a list of
         ``num_return_sequences`` output strings.
+
+        ``meta`` is ``{"input_tokens": ..., "output_tokens": ...}`` with one entry **per
+        record** — a bare int (or None) if a single string was passed, otherwise a list of
+        length ``len(texts)``. ``meta`` never gains a ``num_return_sequences`` dimension;
+        a record's output tokens are summed over its sequences. See :meth:`_build_meta`
+        for how each backend accounts for the prompt when ``num_return_sequences > 1``.
 
         :param texts: A single text prompt or a list of text prompts.
         :type texts: str or list[str]
@@ -395,11 +562,14 @@ class InferenceModel(ABC):
         :param batch_size: Number of samples to process in a single batch. If None, defaults to
             ``max_batch_size_vllm``, ``max_batch_size_huggingface``, or ``max_batch_size_api`` from
             project parameters, depending on the concrete model class.
-        :return: A single output string if ``texts`` was a string and ``num_return_sequences == 1``;
-            a list of output strings if ``texts`` was a list and ``num_return_sequences == 1``;
-            a list of ``num_return_sequences`` strings if ``texts`` was a string and
-            ``num_return_sequences > 1``; or a list of such lists otherwise.
-        :rtype: str or list[str] or list[list[str]]
+        :return: ``{"output": ..., "meta": ...}``. ``output`` is a single output string if
+            ``texts`` was a string and ``num_return_sequences == 1``; a list of output
+            strings if ``texts`` was a list and ``num_return_sequences == 1``; a list of
+            ``num_return_sequences`` strings if ``texts`` was a string and
+            ``num_return_sequences > 1``; or a list of such lists otherwise. ``meta`` holds
+            per-record ``input_tokens``/``output_tokens``, scalars if ``texts`` was a string
+            and lists of length ``len(texts)`` otherwise.
+        :rtype: dict[str, Any]
         """
         texts, images, passed_in_str = self._standardize_format(texts, images)
         parameters = self.parameters if hasattr(self, "parameters") else load_parameters()
@@ -413,6 +583,7 @@ class InferenceModel(ABC):
             else:
                 batch_size = parameters["max_batch_size_api"]
         results = []
+        meta = {"input_tokens": [], "output_tokens": []}
         for i in range(0, len(texts), batch_size):
             batch_texts = texts[i : i + batch_size]
             batch_images = images[i : i + batch_size]
@@ -424,17 +595,22 @@ class InferenceModel(ABC):
                 stop_strings=stop_strings,
                 num_return_sequences=num_return_sequences,
             )
-            results.extend(batch_results)
+            results.extend(batch_results["output"])
+            for key in meta:
+                meta[key].extend(batch_results["meta"][key])
+        if passed_in_str:
+            meta = _collapse_meta(meta)
         if num_return_sequences == 1:
             if passed_in_str:
-                return results[0][0]
+                output = results[0][0]
             else:
-                return [r[0] for r in results]
+                output = [r[0] for r in results]
         else:
             if passed_in_str:
-                return results[0]
+                output = results[0]
             else:
-                return results
+                output = results
+        return {"output": output, "meta": meta}
 
     @abstractmethod
     def infer_messages(
@@ -444,13 +620,16 @@ class InferenceModel(ABC):
         temperature: Optional[float] = None,
         stop_strings: list[str] = None,
         num_return_sequences: int = 1,
-    ) -> Union[str, list[str]]:
+    ) -> dict[str, Any]:
         """
         Run inference on a pre-formatted chat messages list.
 
-        :return: A single output string if ``num_return_sequences == 1``, else a list of
-            ``num_return_sequences`` output strings.
-        :rtype: str or list[str]
+        :return: ``{"output": ..., "meta": ...}``. ``output`` is a single output string if
+            ``num_return_sequences == 1``, else a list of ``num_return_sequences`` output
+            strings. A messages list is a single record, so ``meta``'s
+            ``input_tokens``/``output_tokens`` are scalars (int or None) regardless of
+            ``num_return_sequences``, with output tokens summed over the sequences.
+        :rtype: dict[str, Any]
         """
         pass
 
@@ -463,7 +642,7 @@ class InferenceModel(ABC):
         temperature: Optional[float] = None,
         stop_strings: list[str] = None,
         num_return_sequences: int = 1,
-    ) -> Union[str, None, list]:
+    ) -> dict[str, Any]:
         """
         Run inference once at ``temperature``, then deterministically complete the
         portion of the output following ``switch_phrase``.
@@ -472,6 +651,15 @@ class InferenceModel(ABC):
         in the output, truncates before it and re-queries (at ``temperature=None``,
         i.e. deterministic) with the truncated output plus ``switch_phrase`` appended
         to the prompt, to obtain a deterministic final answer.
+
+        .. note:: **``meta`` here is a scalar total, not per-record.** Every other entry
+            point reports one entry per record; this one reports the summed cost of both
+            passes for the whole call. The reason is that ``first_outputs_list`` below is
+            nested per *record* when ``num_return_sequences > 1`` but per *call* when it is
+            1, so ``next_batch_mapping``'s first key is not a record index in both cases
+            and per-record attribution would be wrong in one of them. This function has no
+            callers in this repo; the nesting should be made consistent before anything
+            starts relying on it, at which point this can report per-record like the rest.
 
         :param texts: A single text prompt or a list of text prompts.
         :type texts: str or list[str]
@@ -487,13 +675,16 @@ class InferenceModel(ABC):
         :type stop_strings: list[str] or None
         :param num_return_sequences: Number of independent sequences to return.
         :type num_return_sequences: int
-        :return: The completed output string (or None if ``switch_phrase`` was not found),
-            or a list of such results when ``num_return_sequences > 1``.
-        :rtype: str or None or list
+        :return: ``{"output": ..., "meta": ...}``. ``output`` is the completed output string
+            (or None if ``switch_phrase`` was not found), or a list of such results when
+            ``num_return_sequences > 1``. ``meta`` is a scalar
+            ``{"input_tokens": ..., "output_tokens": ...}`` covering both passes — see the
+            note above.
+        :rtype: dict[str, Any]
         """
         texts, images, passed_in_str = self._standardize_format(texts, images)
         asked_for_single_sequence = num_return_sequences == 1
-        first_outputs = self.infer(
+        first_result = self.infer(
             texts,
             max_new_tokens,
             images=images,
@@ -501,8 +692,9 @@ class InferenceModel(ABC):
             stop_strings=stop_strings,
             num_return_sequences=num_return_sequences,
         )
+        first_outputs = first_result["output"]
 
-    
+
         first_outputs_list = [first_outputs] if asked_for_single_sequence else first_outputs # always a doubly nested list. 
         next_batch_text = []
         next_batch_images = []
@@ -524,17 +716,20 @@ class InferenceModel(ABC):
                 next_batch_output_so_fars.append(output_so_far)
 
         if len(next_batch_text) == 0:
+            # The first pass still cost tokens even though no second pass was needed.
+            meta = sum_meta(first_result["meta"])
             if asked_for_single_sequence:
                 if passed_in_str:
-                    return None
+                    output = None
                 else:
-                    return [None for _ in texts]
+                    output = [None for _ in texts]
             else:
                 if passed_in_str:
-                    return [None for _ in range(num_return_sequences)]
+                    output = [None for _ in range(num_return_sequences)]
                 else:
-                    return [[None for _ in range(num_return_sequences)] for _ in texts]
-        second_output = self.infer(
+                    output = [[None for _ in range(num_return_sequences)] for _ in texts]
+            return {"output": output, "meta": meta}
+        second_result = self.infer(
             next_batch_text,
             largest_max_tokens,
             images=next_batch_images,
@@ -542,6 +737,7 @@ class InferenceModel(ABC):
             stop_strings=stop_strings,
             num_return_sequences=1,
         )
+        second_output = second_result["output"]
         for i, output in enumerate(second_output):
             second_output[i] = next_batch_output_so_fars[i] + "\n" + switch_phrase + " " + output.lstrip(switch_phrase).lstrip()
         
@@ -560,9 +756,10 @@ class InferenceModel(ABC):
         for i, result in enumerate(results):
             if passed_in_str:
                 results[i] = result[0]
+        meta = sum_meta(first_result["meta"], second_result["meta"])
         if asked_for_single_sequence:
-            return results[0]
-        return results
+            return {"output": results[0], "meta": meta}
+        return {"output": results, "meta": meta}
 
 
 class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
@@ -677,39 +874,51 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         pass
 
     @abstractmethod
-    def get_output_texts(self, response: Any) -> list[str]:
+    def get_output_texts(self, response: Any) -> tuple[list[str], list[tuple[Optional[int], Optional[int]]]]:
         """
-        Extract raw output text strings from a single model API response.
+        Extract raw output text strings and token usage from a single model API response.
+
+        The usage list is parallel to the text list. Where a response reports a single
+        ``usage`` covering several choices (the native-``n`` case), the counts are
+        emitted on the first entry and the remaining entries carry ``0`` — meaning
+        "already counted on a sibling entry", so summing a record's entries yields the
+        correct total. ``None`` means the API did not report the count at all.
 
         :param response: The raw response object returned by the API client.
         :type response: Any
-        :return: List of output text strings, one per sequence in the response.
-        :rtype: list[str]
+        :return: ``(texts, usages)`` where ``texts`` holds one output string per sequence
+            in the response and ``usages`` holds the matching
+            ``(input_tokens, output_tokens)`` tuples.
+        :rtype: tuple[list[str], list[tuple[Optional[int], Optional[int]]]]
         """
         pass
 
-    def get_outputs(self, response: Any) -> list[str]:
+    def get_outputs(self, response: Any) -> tuple[list[str], list[tuple[Optional[int], Optional[int]]]]:
         """
         Extract and post-process all output texts from a single API response.
 
         :param response: The raw response object returned by the API client.
         :type response: Any
-        :return: List of cleaned output strings, one per sequence.
-        :rtype: list[str]
+        :return: ``(texts, usages)`` where ``texts`` holds the cleaned output strings, one
+            per sequence, and ``usages`` holds the matching
+            ``(input_tokens, output_tokens)`` tuples (passed through unchanged).
+        :rtype: tuple[list[str], list[tuple[Optional[int], Optional[int]]]]
         """
-        
-        return [self.get_output_final(t) for t in self.get_output_texts(response)]
+        texts, usages = self.get_output_texts(response)
+        return [self.get_output_final(t) for t in texts], usages
 
-    def get_output(self, response: Any) -> str:
+    def get_output(self, response: Any) -> tuple[str, tuple[Optional[int], Optional[int]]]:
         """
         Extract and post-process the first output text from a single API response.
 
         :param response: The raw response object returned by the API client.
         :type response: Any
-        :return: Cleaned output string.
-        :rtype: str
+        :return: ``(text, usage)`` for the first sequence, where ``usage`` is
+            ``(input_tokens, output_tokens)``.
+        :rtype: tuple[str, tuple[Optional[int], Optional[int]]]
         """
-        return self.get_outputs(response)[0]
+        texts, usages = self.get_outputs(response)
+        return texts[0], usages[0]
 
     def infer_messages(
         self,
@@ -718,17 +927,30 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         temperature: Optional[float] = None,
         stop_strings: list[str] = None,
         num_return_sequences: int = 1,
-    ) -> Union[str, list[str]]:
+    ) -> dict[str, Any]:
+        """
+        Run inference on a pre-formatted chat messages list via the API.
+
+        :return: ``{"output": ..., "meta": ...}``. ``output`` is a single output string if
+            ``num_return_sequences == 1``, else a list of ``num_return_sequences`` output
+            strings. A messages list is a single record, so ``meta``'s
+            ``input_tokens``/``output_tokens`` are scalars (int or None) regardless of
+            ``num_return_sequences``, with output tokens summed over the sequences. When
+            ``SUPPORTS_NATIVE_N`` is False the ``num_return_sequences`` separate calls each
+            consume the prompt, so ``input_tokens`` is their sum; see :meth:`_build_meta`.
+        :rtype: dict[str, Any]
+        """
         if num_return_sequences > 1 and temperature is None:
             log_error(
                 f"num_return_sequences={num_return_sequences} requires temperature to be set "
                 f"(got temperature=None); otherwise all sequences would be identical.",
                 parameters=self.parameters,
             )
-        outputs = asyncio.run(self._infer_messages_async(messages, max_new_tokens, temperature, stop_strings, num_return_sequences))
+        outputs, usages = asyncio.run(self._infer_messages_async(messages, max_new_tokens, temperature, stop_strings, num_return_sequences))
+        meta = _collapse_meta(self._build_meta(usages=[usages]))
         if num_return_sequences == 1:
-            return outputs[0]
-        return outputs
+            return {"output": outputs[0], "meta": meta}
+        return {"output": outputs, "meta": meta}
 
     async def _infer_messages_async(
         self,
@@ -737,10 +959,10 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         temperature: Optional[float],
         stop_strings: list[str],
         num_return_sequences: int,
-    ) -> list[str]:
+    ) -> tuple[list[str], list[tuple[Optional[int], Optional[int]]]]:
         """
         Issue the request(s) for a single chat messages list and return ``num_return_sequences``
-        output strings.
+        output strings alongside their matching ``(input_tokens, output_tokens)`` tuples.
 
         A single ``self.wait()`` paces this call relative to the last request issued;
         all ``num_return_sequences`` requests (if multiple) are then fired concurrently.
@@ -750,15 +972,20 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
             self.wait()
             if self.SUPPORTS_NATIVE_N:
                 response = await self.query_client(client, messages, max_new_tokens, temperature=temperature, stop_strings=stop_strings, num_return_sequences=num_return_sequences)
-                outputs = self.get_outputs(response)
+                outputs, usages = self.get_outputs(response)
                 if len(outputs) != num_return_sequences:
                     log_error(
                         f"Expected {num_return_sequences} outputs but got {len(outputs)}. Response was: {response}",
                         parameters=self.parameters,
                     )
-                return outputs
+                if len(usages) != len(outputs):
+                    log_error(
+                        f"Expected {len(outputs)} usage entries but got {len(usages)}. Response was: {response}",
+                        parameters=self.parameters,
+                    )
+                return outputs, usages
             else:
-                async def query_one() -> str:
+                async def query_one() -> tuple[str, tuple[Optional[int], Optional[int]]]:
                     response = await self.query_client(client, messages, max_new_tokens, temperature=temperature, stop_strings=stop_strings)
                     return self.get_output(response)
 
@@ -772,7 +999,7 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         temperature: Optional[float] = None,
         stop_strings: list[str] = None,
         num_return_sequences: int = 1,
-    ) -> list[list[str]]:
+    ) -> dict[str, Any]:
         """
         Encodes all images to base64, constructs API message dicts, enforces
         the rate limit, queries the client, and returns post-processed outputs.
@@ -789,8 +1016,10 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         :type stop_strings: list[str] or None
         :param num_return_sequences: Number of independent sequences to return per prompt.
         :type num_return_sequences: int
-        :return: Post-processed output strings shaped ``[batch, num_return_sequences]``.
-        :rtype: list[list[str]]
+        :return: ``{"output": ..., "meta": ...}`` where ``output`` holds the post-processed
+            output strings shaped ``[batch, num_return_sequences]`` and ``meta`` holds
+            per-record ``input_tokens``/``output_tokens`` lists of length ``batch``.
+        :rtype: dict[str, Any]
         """
         if len(images[0]) != 0:
             all_images = []
@@ -811,8 +1040,8 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
                 parameters=self.parameters,
             )
 
-        outputs = asyncio.run(self._do_infer_async(inputs, max_new_tokens, temperature, stop_strings, num_return_sequences))
-        return outputs
+        outputs, usages = asyncio.run(self._do_infer_async(inputs, max_new_tokens, temperature, stop_strings, num_return_sequences))
+        return {"output": outputs, "meta": self._build_meta(usages=usages)}
 
     async def _do_infer_async(
         self,
@@ -821,10 +1050,11 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         temperature: Optional[float],
         stop_strings: list[str],
         num_return_sequences: int,
-    ) -> list[list[str]]:
+    ) -> tuple[list[list[str]], list[list[tuple[Optional[int], Optional[int]]]]]:
         """
         Issue one query per input message concurrently and return outputs shaped
-        ``[batch, num_return_sequences]``.
+        ``[batch, num_return_sequences]``, alongside per-sequence
+        ``(input_tokens, output_tokens)`` tuples nested identically.
 
         A single ``self.wait()`` paces the start of this batch relative to the last
         request issued; all requests within the batch are then fired concurrently.
@@ -833,26 +1063,34 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         async with self._make_async_client() as client:
             self.wait()
             if self.SUPPORTS_NATIVE_N:
-                async def query_one(input_message: dict) -> list[str]:
+                async def query_one(input_message: dict) -> tuple[list[str], list[tuple[Optional[int], Optional[int]]]]:
                     response = await self.query_client(
                         client, [input_message], max_new_tokens, temperature=temperature, stop_strings=stop_strings, num_return_sequences=num_return_sequences
                     )
-                    seq_outputs = self.get_outputs(response)
+                    seq_outputs, seq_usages = self.get_outputs(response)
                     if len(seq_outputs) != num_return_sequences:
                         log_error(
                             f"Expected {num_return_sequences} outputs but got {len(seq_outputs)}. Response was: {response}",
                             parameters=self.parameters,
                         )
-                    return seq_outputs
+                    if len(seq_usages) != len(seq_outputs):
+                        log_error(
+                            f"Expected {len(seq_outputs)} usage entries but got {len(seq_usages)}. Response was: {response}",
+                            parameters=self.parameters,
+                        )
+                    return seq_outputs, seq_usages
 
-                return list(await asyncio.gather(*(query_one(input_message) for input_message in inputs)))
+                pairs = await asyncio.gather(*(query_one(input_message) for input_message in inputs))
+                return [pair[0] for pair in pairs], [pair[1] for pair in pairs]
             else:
-                async def query_one(input_message: dict) -> str:
+                async def query_one(input_message: dict) -> tuple[str, tuple[Optional[int], Optional[int]]]:
                     response = await self.query_client(client, [input_message], max_new_tokens, temperature=temperature, stop_strings=stop_strings)
                     return self.get_output(response)
 
                 flat = await asyncio.gather(*(query_one(input_message) for input_message in inputs for _ in range(num_return_sequences)))
-                return [list(flat[i * num_return_sequences : (i + 1) * num_return_sequences]) for i in range(len(inputs))]
+                outputs = [[flat[i * num_return_sequences + j][0] for j in range(num_return_sequences)] for i in range(len(inputs))]
+                usages = [[flat[i * num_return_sequences + j][1] for j in range(num_return_sequences)] for i in range(len(inputs))]
+                return outputs, usages
 
 
 class OpenAIAPIModel(OpenAICompatibleAPIBase, APIModel):
@@ -954,17 +1192,29 @@ class OpenAIAPIModel(OpenAICompatibleAPIBase, APIModel):
                     await asyncio.sleep(backoff_time)
         raise RuntimeError(f"OpenAI API call failed after {max_tries} attempts. Last error: {last_error}") from last_error
 
-    def get_output_texts(self, response: Any) -> list[str]:
+    def get_output_texts(self, response: Any) -> tuple[list[str], list[tuple[Optional[int], Optional[int]]]]:
         """
-        Extract output text strings from an OpenAI API response (one per choice).
+        Extract output text strings and token usage from an OpenAI API response.
+
+        The API reports a single ``usage`` for the whole call, covering the shared prompt
+        once and the completions of all choices together. It is therefore emitted on the
+        first choice, with ``0`` on the remaining choices (``None`` if the count was not
+        reported at all), so that summing a record's choices gives the correct total.
 
         :param response: The raw response object from the OpenAI client.
         :type response: Any
-        :return: List of output text strings, one per choice.
-        :rtype: list[str]
+        :return: ``(texts, usages)``, one entry each per choice.
+        :rtype: tuple[list[str], list[tuple[Optional[int], Optional[int]]]]
         """
+        input_tokens, output_tokens = _extract_usage(
+            response,
+            input_attr="prompt_tokens",
+            output_attr="completion_tokens",
+            parameters=self.parameters,
+        )
         texts = []
-        for choice in response.choices:
+        usages = []
+        for choice_index, choice in enumerate(response.choices):
             text = ""
             message = choice.message
             if hasattr(message, "reasoning") and message.reasoning is not None:
@@ -977,7 +1227,16 @@ class OpenAIAPIModel(OpenAICompatibleAPIBase, APIModel):
             if text.strip() == "":
                 log_warn(f"Received empty output text from model for choice: {choice}")
             texts.append(text.strip())
-        return texts
+            if choice_index == 0:
+                usages.append((input_tokens, output_tokens))
+            else:
+                # Already counted on choice 0; None stays None so a genuinely missing
+                # count is never mistaken for a zero contribution.
+                usages.append((
+                    None if input_tokens is None else 0,
+                    None if output_tokens is None else 0,
+                ))
+        return texts, usages
 
 
 class OpenAIModel(OpenAIAPIModel):
@@ -1107,19 +1366,28 @@ class AnthropicModel(APIModel):
                     await asyncio.sleep(backoff_time)
         raise RuntimeError(f"Anthropic API call failed after {max_tries} attempts. Last error: {last_error}") from last_error
 
-    def get_output_texts(self, response: Any) -> list[str]:
+    def get_output_texts(self, response: Any) -> tuple[list[str], list[tuple[Optional[int], Optional[int]]]]:
         """
-        Extract the output text string from an Anthropic API response.
+        Extract the output text string and token usage from an Anthropic API response.
+
+        Anthropic has no native multi-sample API, so a response always holds exactly one
+        sequence and its usage is exact for that sequence.
 
         :param response: The raw response object from the Anthropic client.
         :type response: Any
-        :return: A single-element list containing the output text string.
-        :rtype: list[str]
+        :return: ``(texts, usages)``, each a single-element list.
+        :rtype: tuple[list[str], list[tuple[Optional[int], Optional[int]]]]
         """
         text = response.content[0].text
         if text.strip() == "":
             log_warn(f"Received empty output text from model: {response}")
-        return [text.strip()]
+        usage = _extract_usage(
+            response,
+            input_attr="input_tokens",
+            output_attr="output_tokens",
+            parameters=self.parameters,
+        )
+        return [text.strip()], [usage]
 
 
 class vLLMModel(OpenAIAPIModel):

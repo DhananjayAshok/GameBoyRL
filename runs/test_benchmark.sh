@@ -6,7 +6,7 @@ models=(
     "gpt-4o-mini"
 )
 
-executors=("history")
+executors=("single_actions")
 
 for game in "${games[@]}"; do
     echo "Running benchmark for game: $game"

@@ -293,7 +293,7 @@ def _executor_call_blocks(call, index: int, frames_dir: str, report_dir: str,
     action = parse_action_line(call.response)
     lines.append(md.para(f"parsed action: `{action if action else 'none'}`"))
 
-    # Every step, not just the last: one call can own several (SequencePlannerExecutor), and
+    # Every step, not just the last: one call can own several (the sequence policy), and
     # the old text parser kept only the final one.
     if call.steps:
         lines.append(md.code("\n".join(

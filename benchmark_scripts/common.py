@@ -40,6 +40,15 @@ COMMON_COLUMNS = [
     "success",
     "n_steps",
     "n_invalid",
+    # Supervisor and executor cost are kept apart rather than summed: the comparison the
+    # arms exist to make is what the supervision itself costs, and an arm that plans well
+    # but spends more on planning than it saves on execution is not a win. A single total
+    # cannot show that, and a reader who wants one can add two columns. Empty where the
+    # backend did not report usage, which is a different fact from zero.
+    "supervisor_input_tokens",
+    "supervisor_output_tokens",
+    "executor_input_tokens",
+    "executor_output_tokens",
     "subgoals_reached",
     "all_subgoals",
     "report",
@@ -175,6 +184,14 @@ class EpisodeOutcome:
     success: bool = False
     n_steps: int = 0
     n_invalid: int = 0
+    #: Token cost of the episode, read off the report in :func:`run_episode` exactly as
+    #: ``n_invalid`` is. None means the backend did not report usage — kept distinct from
+    #: 0, which is what a supervisor that genuinely made no calls (the baseline arm's
+    #: DummySupervisor) reports.
+    supervisor_input_tokens: Optional[int] = None
+    supervisor_output_tokens: Optional[int] = None
+    executor_input_tokens: Optional[int] = None
+    executor_output_tokens: Optional[int] = None
     subgoals_reached: list = field(default_factory=list)
     subgoals_all: Any = None
     error: bool = True
@@ -285,6 +302,11 @@ def run_episode(row, play: Callable[[Any], PlayResult], *, arm: str,
         outcome.n_steps += last_state["core"]["steps"]
         outcome.n_invalid += result.report.n_invalid if result.report is not None else 0
         outcome.report_str = str(result.report) if result.report is not None else None
+        if result.report is not None:
+            outcome.supervisor_input_tokens = result.report.supervisor_input_tokens
+            outcome.supervisor_output_tokens = result.report.supervisor_output_tokens
+            outcome.executor_input_tokens = result.report.executor_input_tokens
+            outcome.executor_output_tokens = result.report.executor_output_tokens
         outcome.extras = result.extras
 
         if session_path is not None:
@@ -317,6 +339,10 @@ def common_row(row, outcome: EpisodeOutcome) -> list:
         outcome.success,
         outcome.n_steps,
         outcome.n_invalid,
+        outcome.supervisor_input_tokens,
+        outcome.supervisor_output_tokens,
+        outcome.executor_input_tokens,
+        outcome.executor_output_tokens,
         outcome.subgoals_reached,
         outcome.subgoals_all,
         outcome.report_str,

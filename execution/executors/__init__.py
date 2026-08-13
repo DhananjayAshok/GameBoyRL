@@ -1,18 +1,20 @@
 """
-Executor agents, grouped by where each variant intervenes in the loop.
+Executor agents: one loop, composed from two independent policies.
 
-The base class defines a template method; the variants differ in which hooks they
-override.  That is the grouping used by the modules here:
+- :mod:`.base`      the abstract contract — reporting, VLM-call logging, step ownership,
+                    the completion check. Everything that is the same for every arm.
+- :mod:`.executor`  the single concrete executor: the loop, the prompt, the environment.
+- :mod:`.policies`  the two axes an arm varies on — how a decision is made
+                    (``single`` / ``scored`` / ``sequence``) and what is remembered
+                    (``none`` / ``actions`` / ``visual``).
 
-- :mod:`.base`          the loop and its hooks
-- :mod:`.simple`        the reference implementation, plus a history block
-- :mod:`.planning`      commit to a multi-step plan up front
-- :mod:`.stateful`      maintain a running artifact and inject it into the prompt
-- :mod:`.deliberative`  change how a single decision is made
+This used to be a class per variant, grouped by which hook each one overrode. That grouping
+described the *implementation* rather than the behaviour, and it could not express the
+thing that actually matters: the two axes are independent, so a variant that changed how
+an action was requested could not also change what was remembered. Nine arms now come from
+three plus three plus one loop.
 
-Every name below is re-exported so that ``from execution.executors import X`` works
-regardless of which module X happens to live in.  :mod:`execution.registry` is the
-public surface for consumers outside this package.
+:mod:`execution.registry` is the public surface for consumers outside this package.
 """
 
 from execution.executors.base import (
@@ -20,33 +22,24 @@ from execution.executors.base import (
     MAX_CONSECUTIVE_INVALID,
     Executor,
 )
-from execution.executors.simple import (
-    HistoryAwareExecutor,
-    SimpleExecutor,
-)
-from execution.executors.planning import (
-    SequencePlannerExecutor,
-    SubgoalDecomposerExecutor,
-)
-from execution.executors.stateful import (
-    ScreenDiffExecutor,
-    SpatialMapExecutor,
-)
-from execution.executors.deliberative import (
-    ActionValueEstimatorExecutor,
-    ReflectiveExecutor,
+from execution.executors.executor import PolicyExecutor, make_executor_class
+from execution.executors.policies import (
+    AVAILABLE_ACTION_POLICIES,
+    AVAILABLE_HISTORY_POLICIES,
+    ActionPolicy,
+    Decision,
+    HistoryPolicy,
 )
 
 __all__ = [
     "Executor",
+    "PolicyExecutor",
+    "make_executor_class",
     "MAX_CONSECUTIVE_INVALID",
     "DEBUG_ON_INVALID",
-    "SimpleExecutor",
-    "HistoryAwareExecutor",
-    "SequencePlannerExecutor",
-    "SubgoalDecomposerExecutor",
-    "ScreenDiffExecutor",
-    "SpatialMapExecutor",
-    "ReflectiveExecutor",
-    "ActionValueEstimatorExecutor",
+    "ActionPolicy",
+    "HistoryPolicy",
+    "Decision",
+    "AVAILABLE_ACTION_POLICIES",
+    "AVAILABLE_HISTORY_POLICIES",
 ]
