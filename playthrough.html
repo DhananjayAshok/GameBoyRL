@@ -161,8 +161,7 @@
         .hero-teaser-wrap {
             position: relative;
             overflow-x: hidden;
-            min-height: 78vh;
-            max-height: 92vh;
+            min-height: 100vh;
             background: #000;
         }
 
@@ -1184,7 +1183,7 @@
     <!-- ============================================================
      NAVBAR
 ============================================================ -->
-    <nav class="navbar navbar-over-video" role="navigation" aria-label="main navigation">
+    <nav class="navbar" role="navigation" aria-label="main navigation">
         <div class="container">
             <div class="navbar-brand">
                 <a class="navbar-item" href="index.html">
@@ -1199,140 +1198,42 @@
             </div>
             <div id="navMenu" class="navbar-menu">
                 <div class="navbar-end">
-                    <a class="navbar-item is-active-page" href="index.html">Main</a>
+                    <a class="navbar-item" href="index.html">Main</a>
                     <a class="navbar-item" href="execution.html">Execution Track</a>
-                    <a class="navbar-item" href="playthrough.html">Playthrough Track</a>
+                    <a class="navbar-item is-active-page" href="playthrough.html">Playthrough Track</a>
                 </div>
             </div>
         </div>
     </nav>
 
-    <!-- ════════════════════════════════════════════════════════════
-     HERO – TITLE, AUTHORS & TEASER VIDEO (overlay)
-════════════════════════════════════════════════════════════ -->
-    <section class="hero hero-teaser-wrap" id="hero-video">
-        <video id="teaser-video" class="teaser-video-bg" muted playsinline autoplay loop preload="auto">
-            <source src="assets/GameBoyWorldsTeaser.mp4" type="video/mp4">
-        </video>
-        <div class="teaser-overlay" aria-hidden="true"></div>
-        <button type="button" class="scroll-indicator" id="scroll-indicator-btn" aria-label="Scroll to content">
-            <span class="scroll-indicator-arrow"><i class="fas fa-chevron-down"></i></span>
-            <span>Scroll</span>
-        </button>
+    <section class="hero is-small is-dark" style="padding:3rem 0 2rem;">
         <div class="hero-body">
             <div class="container">
-                <div class="hero-teaser-content">
-
-                    <p class="title paper-title">
-                        GameBoyWorlds: Creating Self-Improving Agents in Embodied Environments
-                        <br>
-                        <span style="font-size: 0.6em; color: #cdd6f4;">In Submission</span>
-                    </p>
-
-                    <!-- Authors -->
-                    <p class="author-list">
-                        Dhananjay Ashok<sup>1</sup>&ensp;
-                        [Placeholder]<sup>2</sup>&ensp;
-                        Jonathan May<sup>1</sup>&ensp;
-                        Jesse Thomasson<sup>3</sup>
-                    </p>
-
-                    <!-- Affiliations -->
-                    <p class="affiliation-list">
-                        <sup>1</sup>ISI (USC)&emsp;
-                        <sup>2</sup>USC&emsp;
-                        <sup>3</sup>GTech
-                    </p>
-
-
-                    <!-- Link buttons -->
-                    <div class="link-buttons">
-                        <a class="button is-dark" href="#" target="_blank">
-                            <span class="icon"><i class="ai ai-arxiv"></i></span>
-                            <span>arXiv</span>
-                        </a>
-                        <a class="button is-dark" href="https://github.com/DhananjayAshok/GameBoyRL/" target="_blank">
-                            <span class="icon"><i class="fab fa-github"></i></span>
-                            <span>Code</span>
-                        </a>
-                        <a class="button is-dark" href="https://github.com/DhananjayAshok/GameBoyWorlds"
-                            target="_blank">
-                            <span class="icon"><i class="fab fa-github"></i></span>
-                            <span>GameBoyWorlds</span>
-                        </a>
-                        <a class="button is-success" href="#" target="_blank">
-                            <span class="icon"><i class="fas fa-cube"></i></span>
-                            <span>Model Weights</span>
-                        </a>
-                        <a class="button is-warning" href="#" target="_blank">
-                            <span class="icon"><i class="fas fa-chart-bar"></i></span>
-                            <span>Evals</span>
-                        </a>
-                    </div>
-
-                </div>
+                <h1 class="title" style="color:#fff;">Playthrough Track</h1>
+                <p class="subtitle" style="color:rgba(255,255,255,0.7);">
+                    Human and AI full-game playthroughs across the GameBoyWorlds suite.
+                </p>
             </div>
         </div>
     </section>
 
-    <!-- Overview – teaser video (below hero, after scroll) -->
-    <section class="section is-light-alt" id="overview" style="padding: 2rem 1.5rem; max-width: 100%; margin: 0 auto;">
-        <div class="teaser-video-wrap">
-            <h2 class="section-heading">Project Overview</h2>
-            <div class="section-divider"></div>
-            <video controls muted playsinline autoplay loop preload="auto"
-                style="width:100%; border-radius:8px; display:block;">
-                <source src="assets/robometer_teaser_video.mp4" type="video/mp4">
-            </video>
-            <br>
-            <h3 class="title is-4" style="color:#1a1a2e;">Specific Contributions</h3>
-            <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
-                <strong>GameBoyWorlds Framework</strong><br />
-                A Gymnasium compatible set of environments that allow agents to play 24 unique GameBoy titles, including
-                releases from classic franchises such as Pok&eacute;mon and Legend of Zelda. Titles include more obscure
-                ROM hacks (i.e. fan made games), which are considerably less exposed to frontier Language Models during
-                their training. With provided harnesses and documentation on how to track customized metrics, create
-                custom tasks etc, we hope GameBoyWorlds will prove a useful resource for work on game playing embodied
-                agents.
-            </div>
-            <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
-                <strong>Task Execution Benchmark</strong><br />
-                A collection of 1200 natural language tasks with reliable success identification, allowing us to
-                benchmark modern agents on game playing. We find that even the most powerful model XXX, YYY
-                (placeholder).
-            </div>
-            <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
-                <strong>Self Improving Agent Pipeline</strong><br />
-                A pipeline for self improving agents that use curiosity based exploration and self assessment to
-                autonomously acquire skills. We show that agents improve their task success rates without any human
-                demonstrations or game-specific reward engineering.
-            </div>
-        </div>
-
-    </section>
-
-    <!-- ════════════════════════════════════════════════════════════
-     BIBTEX
-════════════════════════════════════════════════════════════ -->
-    <section class="section is-white-alt" id="bibtex">
-        <div class="container" style="max-width:780px;">
-            <h2 class="section-heading">BibTeX</h2>
-            <div class="section-divider"></div>
-            <div style="position:relative;">
-                <div class="bibtex-box" id="bibtex-content"></div>
-                <button class="button is-small bibtex-copy-btn" onclick="copyBibtex()" title="Copy BibTeX">
-                    <span class="icon"><i class="fas fa-copy"></i></span>
-                </button>
-            </div>
+    <section class="section" id="coming-soon" style="min-height:60vh; display:flex; align-items:center;">
+        <div class="container" style="max-width:680px; text-align:center;">
+            <div style="font-size:4rem; margin-bottom:1.5rem;">&#127918;</div>
+            <h2 class="title is-3">Coming Soon</h2>
+            <p class="subtitle is-5" style="color:#666; margin-top:0.75rem;">
+                Full-game playthroughs from both human players and AI agents are on their way.
+                Check back for head-to-head comparisons across all GameBoyWorlds titles.
+            </p>
         </div>
     </section>
+
 
     <!-- Left margin hover nav -->
     <div class="left-nav" id="left-nav">
         <div class="left-nav-panel">
             <div class="left-nav-label">On this page</div>
-            <a class="left-nav-link" href="#overview">Overview</a>
-            <a class="left-nav-link" href="#bibtex">BibTeX</a>
+            <a class="left-nav-link" href="#coming-soon">Coming Soon</a>
         </div>
         <div class="left-nav-tab">
             <div class="left-nav-tab-lines">
@@ -1344,14 +1245,13 @@
     <div class="left-nav-drawer-overlay" id="left-drawer-overlay" onclick="closeLeftDrawer()"></div>
     <div class="left-nav-drawer" id="left-nav-drawer">
         <div class="drawer-nav-label">On this page</div>
-            <a class="drawer-nav-link" href="#overview" onclick="closeLeftDrawer()">Overview</a>
-            <a class="drawer-nav-link" href="#bibtex" onclick="closeLeftDrawer()">BibTeX</a>
+            <a class="drawer-nav-link" href="#coming-soon" onclick="closeLeftDrawer()">Coming Soon</a>
     </div>
     <button class="left-nav-mobile-btn" onclick="openLeftDrawer()" aria-label="Page navigation">&#9776;</button>
 
     <script>
         (function () {
-            var ids = ['overview', 'bibtex'];
+            var ids = ['coming-soon'];
             var allLinks = document.querySelectorAll('.left-nav-link, .drawer-nav-link');
             function spyLeftNav() {
                 var active = null;

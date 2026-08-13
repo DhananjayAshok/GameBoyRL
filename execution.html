@@ -161,8 +161,7 @@
         .hero-teaser-wrap {
             position: relative;
             overflow-x: hidden;
-            min-height: 78vh;
-            max-height: 92vh;
+            min-height: 100vh;
             background: #000;
         }
 
@@ -1184,7 +1183,7 @@
     <!-- ============================================================
      NAVBAR
 ============================================================ -->
-    <nav class="navbar navbar-over-video" role="navigation" aria-label="main navigation">
+    <nav class="navbar" role="navigation" aria-label="main navigation">
         <div class="container">
             <div class="navbar-brand">
                 <a class="navbar-item" href="index.html">
@@ -1199,140 +1198,686 @@
             </div>
             <div id="navMenu" class="navbar-menu">
                 <div class="navbar-end">
-                    <a class="navbar-item is-active-page" href="index.html">Main</a>
-                    <a class="navbar-item" href="execution.html">Execution Track</a>
+                    <a class="navbar-item" href="index.html">Main</a>
+                    <a class="navbar-item is-active-page" href="execution.html">Execution Track</a>
                     <a class="navbar-item" href="playthrough.html">Playthrough Track</a>
                 </div>
             </div>
         </div>
     </nav>
 
-    <!-- ════════════════════════════════════════════════════════════
-     HERO – TITLE, AUTHORS & TEASER VIDEO (overlay)
-════════════════════════════════════════════════════════════ -->
-    <section class="hero hero-teaser-wrap" id="hero-video">
-        <video id="teaser-video" class="teaser-video-bg" muted playsinline autoplay loop preload="auto">
-            <source src="assets/GameBoyWorldsTeaser.mp4" type="video/mp4">
-        </video>
-        <div class="teaser-overlay" aria-hidden="true"></div>
-        <button type="button" class="scroll-indicator" id="scroll-indicator-btn" aria-label="Scroll to content">
-            <span class="scroll-indicator-arrow"><i class="fas fa-chevron-down"></i></span>
-            <span>Scroll</span>
-        </button>
+    <section class="hero is-small is-dark" style="padding:3rem 0 2rem;">
         <div class="hero-body">
             <div class="container">
-                <div class="hero-teaser-content">
+                <h1 class="title" style="color:#fff;">Execution Track</h1>
+                <p class="subtitle" style="color:rgba(255,255,255,0.7);">
+                    Benchmark tasks, leaderboard, rollouts and results for autonomous execution agents.
+                </p>
+            </div>
+        </div>
+    </section>
 
-                    <p class="title paper-title">
-                        GameBoyWorlds: Creating Self-Improving Agents in Embodied Environments
-                        <br>
-                        <span style="font-size: 0.6em; color: #cdd6f4;">In Submission</span>
-                    </p>
-
-                    <!-- Authors -->
-                    <p class="author-list">
-                        Dhananjay Ashok<sup>1</sup>&ensp;
-                        [Placeholder]<sup>2</sup>&ensp;
-                        Jonathan May<sup>1</sup>&ensp;
-                        Jesse Thomasson<sup>3</sup>
-                    </p>
-
-                    <!-- Affiliations -->
-                    <p class="affiliation-list">
-                        <sup>1</sup>ISI (USC)&emsp;
-                        <sup>2</sup>USC&emsp;
-                        <sup>3</sup>GTech
-                    </p>
-
-
-                    <!-- Link buttons -->
-                    <div class="link-buttons">
-                        <a class="button is-dark" href="#" target="_blank">
-                            <span class="icon"><i class="ai ai-arxiv"></i></span>
-                            <span>arXiv</span>
-                        </a>
-                        <a class="button is-dark" href="https://github.com/DhananjayAshok/GameBoyRL/" target="_blank">
-                            <span class="icon"><i class="fab fa-github"></i></span>
-                            <span>Code</span>
-                        </a>
-                        <a class="button is-dark" href="https://github.com/DhananjayAshok/GameBoyWorlds"
-                            target="_blank">
-                            <span class="icon"><i class="fab fa-github"></i></span>
-                            <span>GameBoyWorlds</span>
-                        </a>
-                        <a class="button is-success" href="#" target="_blank">
-                            <span class="icon"><i class="fas fa-cube"></i></span>
-                            <span>Model Weights</span>
-                        </a>
-                        <a class="button is-warning" href="#" target="_blank">
-                            <span class="icon"><i class="fas fa-chart-bar"></i></span>
-                            <span>Evals</span>
-                        </a>
-                    </div>
-
+    <!-- ════════════════════════════════════════════════════════════
+     TASK EXPLORER – BENCHMARK BROWSER
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-light-alt" id="gameboyworlds">
+        <div class="container">
+            <h2 class="section-heading">GameBoyWorlds</h2>
+            <div class="section-divider"></div>
+            <p
+                style="text-align:center; color:#555; margin-bottom:1.5rem; max-width:600px; margin-left:auto; margin-right:auto;">
+                Browse the benchmark by game, or see the full test suite on
+                <a href="https://github.com/DhananjayAshok/GameBoyWorlds/tree/main/benchmark/tests"
+                    target="_blank">GitHub</a>.
+            </p>
+            <div class="task-explorer">
+                <nav class="task-explorer-sidebar" id="task-explorer-sidebar" aria-label="Game selector"></nav>
+                <div class="task-explorer-content">
+                    <h3 class="task-explorer-game-title" id="task-explorer-game-title"></h3>
+                    <p class="task-explorer-game-desc" id="task-explorer-game-desc"></p>
+                    <div class="task-explorer-task-list" id="task-explorer-task-list"></div>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- Overview – teaser video (below hero, after scroll) -->
-    <section class="section is-light-alt" id="overview" style="padding: 2rem 1.5rem; max-width: 100%; margin: 0 auto;">
-        <div class="teaser-video-wrap">
-            <h2 class="section-heading">Project Overview</h2>
+    <script src="assets/tasks_data.js"></script>
+    <script>
+        (function () {
+            var data = window.GAMEBOYWORLDS_TASKS || [];
+            var sidebar = document.getElementById('task-explorer-sidebar');
+            var titleEl = document.getElementById('task-explorer-game-title');
+            var descEl = document.getElementById('task-explorer-game-desc');
+            var listEl = document.getElementById('task-explorer-task-list');
+
+            function renderGame(game, series) {
+                titleEl.textContent = game.name;
+                descEl.textContent = series.description;
+                listEl.innerHTML = '';
+                game.tasks.forEach(function (t) {
+                    var row = document.createElement('div');
+                    row.className = 'task-explorer-task-row';
+
+                    var label = document.createElement('span');
+                    label.className = 'task-explorer-task-label';
+                    label.textContent = t.task;
+                    row.appendChild(label);
+
+                    var cats = document.createElement('span');
+                    cats.className = 'task-explorer-task-cats';
+                    t.categories.forEach(function (c) {
+                        var pill = document.createElement('span');
+                        pill.className = 'task-cat-pill';
+                        pill.textContent = c;
+                        cats.appendChild(pill);
+                    });
+                    row.appendChild(cats);
+
+                    listEl.appendChild(row);
+                });
+            }
+
+            function selectGame(btn, game, series) {
+                var prev = sidebar.querySelector('.task-explorer-game-btn.is-active');
+                if (prev) prev.classList.remove('is-active');
+                btn.classList.add('is-active');
+                renderGame(game, series);
+            }
+
+            data.forEach(function (series, seriesIdx) {
+                var heading = document.createElement('div');
+                heading.className = 'task-explorer-series-name';
+                heading.textContent = series.name;
+                sidebar.appendChild(heading);
+
+                series.games.forEach(function (game, gameIdx) {
+                    var btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'task-explorer-game-btn';
+                    btn.textContent = game.name;
+                    btn.addEventListener('click', function () { selectGame(btn, game, series); });
+                    sidebar.appendChild(btn);
+
+                    if (seriesIdx === 0 && gameIdx === 0) {
+                        btn.classList.add('is-active');
+                        renderGame(game, series);
+                    }
+                });
+            });
+        })();
+    </script>
+
+
+    <!-- ════════════════════════════════════════════════════════════
+     LEADERBOARD – TASK SUCCESS RATE BAR CHART
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-white-alt" id="leaderboard">
+        <div class="container">
+            <h2 class="section-heading">Leaderboard</h2>
             <div class="section-divider"></div>
-            <video controls muted playsinline autoplay loop preload="auto"
-                style="width:100%; border-radius:8px; display:block;">
-                <source src="assets/robometer_teaser_video.mp4" type="video/mp4">
-            </video>
-            <br>
-            <h3 class="title is-4" style="color:#1a1a2e;">Specific Contributions</h3>
-            <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
-                <strong>GameBoyWorlds Framework</strong><br />
-                A Gymnasium compatible set of environments that allow agents to play 24 unique GameBoy titles, including
-                releases from classic franchises such as Pok&eacute;mon and Legend of Zelda. Titles include more obscure
-                ROM hacks (i.e. fan made games), which are considerably less exposed to frontier Language Models during
-                their training. With provided harnesses and documentation on how to track customized metrics, create
-                custom tasks etc, we hope GameBoyWorlds will prove a useful resource for work on game playing embodied
-                agents.
-            </div>
-            <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
-                <strong>Task Execution Benchmark</strong><br />
-                A collection of 1200 natural language tasks with reliable success identification, allowing us to
-                benchmark modern agents on game playing. We find that even the most powerful model XXX, YYY
-                (placeholder).
-            </div>
-            <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
-                <strong>Self Improving Agent Pipeline</strong><br />
-                A pipeline for self improving agents that use curiosity based exploration and self assessment to
-                autonomously acquire skills. We show that agents improve their task success rates without any human
-                demonstrations or game-specific reward engineering.
+            <p
+                style="text-align:center; color:#555; margin-bottom:1.5rem; max-width:650px; margin-left:auto; margin-right:auto;">
+                Task success rates (%) for frontier models on the GameBoyWorlds benchmark. Select a game series below,
+                and hover any bar for the exact model, game title, and success rate.
+            </p>
+            <div class="results-chart-wrap">
+                <div class="results-chart-canvas-wrap">
+                    <canvas id="results-chart" height="120"></canvas>
+                </div>
+                <div class="results-series-tabs">
+                    <ul class="tabs is-centered is-toggle is-medium" id="results-series-tab-list"></ul>
+                </div>
             </div>
         </div>
+    </section>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <script src="assets/results_data.js"></script>
+    <script>
+        (function () {
+            var DATA = window.RESULTS_DATA;
+            if (!DATA) return;
+
+            var tabList = document.getElementById('results-series-tab-list');
+            var canvas = document.getElementById('results-chart');
+            var canvasWrap = canvas.parentElement;
+            var chart = null;
+
+            function hexToRgb(hex) {
+                hex = hex.replace('#', '');
+                return {
+                    r: parseInt(hex.substring(0, 2), 16),
+                    g: parseInt(hex.substring(2, 4), 16),
+                    b: parseInt(hex.substring(4, 6), 16)
+                };
+            }
+
+            function shade(hex, ratio) {
+                var c = hexToRgb(hex);
+                var r = Math.round(c.r + (255 - c.r) * ratio);
+                var g = Math.round(c.g + (255 - c.g) * ratio);
+                var b = Math.round(c.b + (255 - c.b) * ratio);
+                return 'rgb(' + r + ',' + g + ',' + b + ')';
+            }
+
+            var TINTS = [0, 0.38, 0.62, 0.8];
+
+            function buildChartData(series) {
+                var labels = DATA.models.map(function (m) { return m.name; });
+                var datasets = series.games.map(function (game, gameIdx) {
+                    var colors = DATA.models.map(function (m) {
+                        var base = DATA.providerColors[m.provider] || '#999999';
+                        return shade(base, TINTS[gameIdx % TINTS.length]);
+                    });
+                    return {
+                        label: game.name,
+                        data: DATA.models.map(function (m) { return series.rates[game.id][m.id]; }),
+                        backgroundColor: colors,
+                        borderRadius: 4,
+                        maxBarThickness: 46
+                    };
+                });
+                return { labels: labels, datasets: datasets };
+            }
+
+            function renderSeries(series) {
+                var chartData = buildChartData(series);
+                if (chart) chart.destroy();
+                canvasWrap.style.opacity = 0;
+                chart = new Chart(canvas, {
+                    type: 'bar',
+                    data: chartData,
+                    options: {
+                        responsive: true,
+                        animation: { duration: 650, easing: 'easeOutQuart' },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 100,
+                                title: { display: true, text: 'Task success rate (%)' }
+                            },
+                            x: {
+                                grid: { display: false }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                                labels: { usePointStyle: true, pointStyle: 'rect' }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    title: function (items) {
+                                        return items[0].label;
+                                    },
+                                    label: function (ctx) {
+                                        return ctx.dataset.label + ': ' + ctx.parsed.y + '% success';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+                requestAnimationFrame(function () {
+                    canvasWrap.style.transition = 'opacity 0.35s ease-out';
+                    canvasWrap.style.opacity = 1;
+                });
+            }
+
+            function selectSeries(li, series) {
+                var prev = tabList.querySelector('li.is-active');
+                if (prev) prev.classList.remove('is-active');
+                li.classList.add('is-active');
+                renderSeries(series);
+            }
+
+            DATA.series.forEach(function (series, idx) {
+                var li = document.createElement('li');
+                if (idx === 0) li.classList.add('is-active');
+                var a = document.createElement('a');
+                a.textContent = series.name;
+                li.appendChild(a);
+                li.addEventListener('click', function () { selectSeries(li, series); });
+                tabList.appendChild(li);
+
+                if (idx === 0) renderSeries(series);
+            });
+        })();
+    </script>
+
+    <!-- ════════════════════════════════════════════════════════════
+     ROLLOUT VIEWER – GEMINI-3-PRO ON POKEMON RED
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-light-alt" id="rollouts">
+        <div class="container">
+            <h2 class="section-heading">Example Rollouts</h2>
+            <div class="section-divider"></div>
+            <p
+                style="text-align:center; color:#555; margin-bottom:1.5rem; max-width:600px; margin-left:auto; margin-right:auto;">
+                Select a Pokemon Red task to watch Gemini-3-Pro attempt it.
+            </p>
+            <div class="rollout-viewer" style="max-width:900px;margin:0 auto 2rem;">
+                <div class="rollout-viewer-controls"
+                    style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:1rem;margin-bottom:1.5rem;padding:1rem;background:#fff;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,.08);">
+                    <label
+                        style="display:flex;align-items:center;gap:0.5rem;font-size:0.9rem;font-weight:600;color:#333;">
+                        Task
+                        <div class="select is-small">
+                            <select id="rollout-task-select"></select>
+                        </div>
+                    </label>
+                    <span id="rollout-task-outcome" class="task-cat-pill"></span>
+                </div>
+                <div class="result-card" style="overflow:hidden;width:60%;margin:0 auto;">
+                    <video id="rollout-video" controls muted playsinline preload="metadata"
+                        style="width:100%;display:block;border-radius:8px 8px 0 0;background:#000;">
+                        <source id="rollout-video-src" src="" type="video/mp4">
+                    </video>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <script>
+        (function () {
+            var TASKS = [
+                { file: 'gemini_success_exit_cave.mp4', label: 'Exit the Cave', outcome: 'success' },
+                { file: 'gemini_fail_catch_pidgey.mp4', label: 'Catch a Pidgey', outcome: 'fail' }
+            ];
+            var BASE = 'assets';
+            var select = document.getElementById('rollout-task-select');
+            var video = document.getElementById('rollout-video');
+            var videoSrc = document.getElementById('rollout-video-src');
+            var outcomePill = document.getElementById('rollout-task-outcome');
+
+            function updateVideo() {
+                var task = TASKS[select.selectedIndex];
+                if (!task) return;
+                videoSrc.src = BASE + '/' + encodeURIComponent(task.file);
+                video.load();
+
+                outcomePill.textContent = task.outcome === 'success' ? 'Success' : 'Failure';
+                outcomePill.style.background = task.outcome === 'success' ? '#effaf3' : '#fff0ee';
+                outcomePill.style.color = task.outcome === 'success' ? '#1f9d55' : '#d1453b';
+                outcomePill.style.borderColor = task.outcome === 'success' ? '#bdeccd' : '#f5c2bc';
+
+                function tryPlay() {
+                    var p = video.play();
+                    if (p && p.catch) p.catch(function () { });
+                }
+                video.addEventListener('canplay', tryPlay, { once: true });
+                if (video.readyState >= 2) tryPlay();
+            }
+
+            TASKS.forEach(function (task, i) {
+                var o = document.createElement('option');
+                o.value = i;
+                o.textContent = task.label;
+                select.appendChild(o);
+            });
+            select.addEventListener('change', updateVideo);
+            updateVideo();
+        })();
+    </script>
+
+    <!-- ════════════════════════════════════════════════════════════
+     SUBMISSIONS — CSV UPLOAD
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-light-alt" id="submissions">
+        <div class="container" style="max-width:640px;">
+            <h2 class="section-heading">Submissions</h2>
+            <div class="section-divider"></div>
+            <p style="text-align:center;color:#555;margin-bottom:2rem;">
+                Upload the CSV generated from the run (<a
+                    href="https://github.com/DhananjayAshok/GameBoyRL/run_benchmark.py"
+                    target="_blank">run_benchmark.py</a>)
+                and we'll update the leaderboard with your information.
+            </p>
+
+            <form id="submission-form" class="result-card" style="padding:2rem;">
+                <!-- Honeypot: hidden from real users, bots tend to fill it in. Web3Forms silently drops the
+                     submission when this is non-empty. -->
+                <input type="checkbox" name="botcheck" style="display:none;" tabindex="-1" autocomplete="off">
+
+                <div class="field">
+                    <label class="label">Name</label>
+                    <div class="control">
+                        <input class="input" type="text" name="name" placeholder="Your name" required>
+                    </div>
+                </div>
+
+                <div class="field">
+                    <label class="label">Email</label>
+                    <div class="control">
+                        <input class="input" type="email" name="email" placeholder="you@example.com" required>
+                    </div>
+                </div>
+
+                <div class="field">
+                    <label class="label">CSV file</label>
+                    <div class="control">
+                        <input class="input" type="file" id="submission-file" name="attachment" accept=".csv" required>
+                    </div>
+                    <p class="help">Must be a .csv file, 5MB max.</p>
+                </div>
+
+                <div class="field">
+                    <label class="label">Solution code (optional)</label>
+                    <div class="control">
+                        <input class="input" type="text" name="solution_code"
+                            placeholder="Link to your code (repo, gist, etc.)">
+                    </div>
+                </div>
+
+                <div class="field" style="margin-top:1.5rem;">
+                    <button type="submit" id="submission-submit-btn" class="button is-link is-fullwidth">
+                        Submit
+                    </button>
+                </div>
+
+                <p id="submission-status" style="text-align:center;margin-top:1rem;font-size:0.9rem;"></p>
+            </form>
+        </div>
+    </section>
+
+    <script>
+        (function () {
+            var WEB3FORMS_ACCESS_KEY = '2d935692-1354-4d08-9d1c-f743d91a8493';
+            var MAX_BYTES = 5 * 1024 * 1024;
+
+            var form = document.getElementById('submission-form');
+            var fileInput = document.getElementById('submission-file');
+            var submitBtn = document.getElementById('submission-submit-btn');
+            var status = document.getElementById('submission-status');
+
+            function setStatus(message, isError) {
+                status.textContent = message;
+                status.style.color = isError ? '#d1453b' : '#1f9d55';
+            }
+
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+                setStatus('', false);
+
+                var file = fileInput.files[0];
+                if (!file) {
+                    setStatus('Please choose a .csv file.', true);
+                    return;
+                }
+                if (!/\.csv$/i.test(file.name)) {
+                    setStatus('File must have a .csv extension.', true);
+                    return;
+                }
+                if (file.size > MAX_BYTES) {
+                    setStatus('File is too large — 5MB max.', true);
+                    return;
+                }
+
+                var formData = new FormData(form);
+                formData.append('access_key', WEB3FORMS_ACCESS_KEY);
+                formData.append('subject', 'New GameBoyWorlds Submission');
+
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Submitting…';
+
+                fetch('https://api.web3forms.com/submit', {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json' },
+                    body: formData
+                })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        if (data.success) {
+                            setStatus('Thanks! Your submission was sent.', false);
+                            form.reset();
+                        } else {
+                            setStatus(data.message || 'Something went wrong. Please try again.', true);
+                        }
+                    })
+                    .catch(function () {
+                        setStatus('Network error — please try again.', true);
+                    })
+                    .finally(function () {
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Submit';
+                    });
+            });
+        })();
+    </script>
+
+
+    <!-- ════════════════════════════════════════════════════════════
+     METHOD
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-white-alt" id="method">
+        <div class="container">
+            <h2 class="section-heading">Method</h2>
+            <div class="section-divider"></div>
+
+            <div style="margin-bottom:2rem;">
+                <div style="display: flex; justify-content: center;">
+                    <img src="assets/method.jpg" alt="Method overview"
+                        style="width:100%; display:block; border-radius:8px;">
+                </div>
+                <h3 class="title is-4" style="color:#1a1a2e; margin-top:1.7rem;">Unstructured Exploration &rarr; Task
+                    Identification &rarr; Task Rehearsal</h3>
+                <div class="columns">
+                    <div class="column">
+                        <div class="highlight-box is-info-light" style="height:100%; margin-bottom:0;">
+                            <strong>Curiosity Based Task Discovery</strong><br />
+                            Uses RL (PPO) with a simple CNN agent to seek out novel experiences in the environment.
+                            The most unique trajectories are ones where "tasks" are potentially being implicitly
+                            executed.
+                        </div>
+                    </div>
+                    <div class="column">
+                        <div class="highlight-box is-warning-light" style="height:100%; margin-bottom:0;">
+                            <strong>Synthetic Annotation</strong><br />
+                            The agent VLM observes the trajectories and infers the task being performed. Similar
+                            trajectories are grouped together and the model attempts to extract insight on how to
+                            properly achieve the specific task.
+                        </div>
+                    </div>
+                    <div class="column">
+                        <div class="highlight-box is-success-light" style="height:100%; margin-bottom:0;">
+                            <strong>Agent Rehearsal</strong><br />
+                            The agent attempts to complete the task from many starting positions, assessing its own
+                            progress and saving the successful rollouts to a separate dataset. Fine-tuning on this
+                            dataset yields a high-quality Vision Language Action model.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
     </section>
 
     <!-- ════════════════════════════════════════════════════════════
-     BIBTEX
+     RESULTS — BASE VS IMPROVED BAR CHART
 ════════════════════════════════════════════════════════════ -->
-    <section class="section is-white-alt" id="bibtex">
-        <div class="container" style="max-width:780px;">
-            <h2 class="section-heading">BibTeX</h2>
+    <section class="section is-light-alt" id="results">
+        <div class="container">
+            <h2 class="section-heading">Results</h2>
             <div class="section-divider"></div>
-            <div style="position:relative;">
-                <div class="bibtex-box" id="bibtex-content"></div>
-                <button class="button is-small bibtex-copy-btn" onclick="copyBibtex()" title="Copy BibTeX">
-                    <span class="icon"><i class="fas fa-copy"></i></span>
-                </button>
+            <p style="text-align:center;color:#555;margin-bottom:1.5rem;max-width:650px;margin-left:auto;margin-right:auto;">
+                Task success rates (%) before and after self-improvement, broken down by game series. Select a series below.
+            </p>
+            <div class="results-chart-wrap">
+                <div class="results-chart-canvas-wrap">
+                    <canvas id="improvement-chart" height="120"></canvas>
+                </div>
+                <div class="results-series-tabs" style="margin-top:1.5rem;">
+                    <ul class="tabs is-centered is-toggle is-medium" id="improvement-tab-list"></ul>
+                </div>
             </div>
         </div>
     </section>
+
+    <script src="assets/improvement_data.js"></script>
+    <script>
+        (function () {
+            var DATA = window.IMPROVEMENT_DATA;
+            if (!DATA) return;
+
+            var tabList = document.getElementById('improvement-tab-list');
+            var canvas = document.getElementById('improvement-chart');
+            var canvasWrap = canvas.parentElement;
+            var chart = null;
+
+            function renderSeries(series) {
+                var labels = series.games.map(function (g) { return g.name; });
+                var chartData = {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Base',
+                            data: series.games.map(function (g) { return g.base; }),
+                            backgroundColor: '#94a3b8',
+                            borderRadius: 4,
+                            maxBarThickness: 52
+                        },
+                        {
+                            label: 'Improved',
+                            data: series.games.map(function (g) { return g.improved; }),
+                            backgroundColor: '#3273dc',
+                            borderRadius: 4,
+                            maxBarThickness: 52
+                        }
+                    ]
+                };
+
+                if (chart) chart.destroy();
+                canvasWrap.style.opacity = 0;
+                chart = new Chart(canvas, {
+                    type: 'bar',
+                    data: chartData,
+                    options: {
+                        responsive: true,
+                        animation: { duration: 650, easing: 'easeOutQuart' },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 100,
+                                title: { display: true, text: 'Task success rate (%)' }
+                            },
+                            x: { grid: { display: false } }
+                        },
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                                labels: { usePointStyle: true, pointStyle: 'rect' }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function (ctx) {
+                                        return ctx.dataset.label + ': ' + ctx.parsed.y + '%';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+                requestAnimationFrame(function () {
+                    canvasWrap.style.transition = 'opacity 0.35s ease-out';
+                    canvasWrap.style.opacity = 1;
+                });
+            }
+
+            function selectSeries(li, series) {
+                var prev = tabList.querySelector('li.is-active');
+                if (prev) prev.classList.remove('is-active');
+                li.classList.add('is-active');
+                renderSeries(series);
+            }
+
+            DATA.forEach(function (series, idx) {
+                var li = document.createElement('li');
+                if (idx === 0) li.classList.add('is-active');
+                var a = document.createElement('a');
+                a.textContent = series.name;
+                li.appendChild(a);
+                li.addEventListener('click', function () { selectSeries(li, series); });
+                tabList.appendChild(li);
+                if (idx === 0) renderSeries(series);
+            });
+        })();
+    </script>
+
+    <!-- ════════════════════════════════════════════════════════════
+     RESULTS ROLLOUT VIEWER
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-white-alt" id="results-rollouts">
+        <div class="container">
+            <h2 class="section-heading">Example Rollouts</h2>
+            <div class="section-divider"></div>
+            <p style="text-align:center;color:#555;margin-bottom:1.5rem;max-width:600px;margin-left:auto;margin-right:auto;">
+                Watch a rollout from the base agent versus the self-improved agent on the same Pokemon Red task.
+            </p>
+            <div class="rollout-viewer" style="max-width:900px;margin:0 auto 2rem;">
+                <div class="rollout-viewer-controls"
+                    style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:1rem;margin-bottom:1.5rem;padding:1rem;background:#f7f9fc;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,.08);">
+                    <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.9rem;font-weight:600;color:#333;">
+                        Agent
+                        <div class="select is-small">
+                            <select id="results-rollout-select"></select>
+                        </div>
+                    </label>
+                </div>
+                <div class="result-card" style="overflow:hidden;width:60%;margin:0 auto;">
+                    <video id="results-rollout-video" controls muted playsinline preload="metadata"
+                        style="width:100%;display:block;border-radius:8px 8px 0 0;background:#000;">
+                        <source id="results-rollout-src" src="" type="video/mp4">
+                    </video>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <script>
+        (function () {
+            var ROLLOUTS = [
+                { file: 'gemini_fail_catch_pidgey.mp4', label: 'Base' },
+                { file: 'gemini_success_exit_cave.mp4', label: 'Improved' }
+            ];
+            var BASE = 'assets';
+            var select = document.getElementById('results-rollout-select');
+            var video = document.getElementById('results-rollout-video');
+            var src = document.getElementById('results-rollout-src');
+
+            function updateVideo() {
+                var r = ROLLOUTS[select.selectedIndex];
+                if (!r) return;
+                src.src = BASE + '/' + encodeURIComponent(r.file);
+                video.load();
+                function tryPlay() {
+                    var p = video.play();
+                    if (p && p.catch) p.catch(function () { });
+                }
+                video.addEventListener('canplay', tryPlay, { once: true });
+                if (video.readyState >= 2) tryPlay();
+            }
+
+            ROLLOUTS.forEach(function (r, i) {
+                var o = document.createElement('option');
+                o.value = i;
+                o.textContent = r.label;
+                select.appendChild(o);
+            });
+            select.addEventListener('change', updateVideo);
+            updateVideo();
+        })();
+    </script>
 
     <!-- Left margin hover nav -->
     <div class="left-nav" id="left-nav">
         <div class="left-nav-panel">
             <div class="left-nav-label">On this page</div>
-            <a class="left-nav-link" href="#overview">Overview</a>
-            <a class="left-nav-link" href="#bibtex">BibTeX</a>
+            <a class="left-nav-link" href="#gameboyworlds">Task Explorer</a>
+            <a class="left-nav-link" href="#leaderboard">Leaderboard</a>
+            <a class="left-nav-link" href="#rollouts">Rollouts</a>
+            <a class="left-nav-link" href="#submissions">Submissions</a>
+            <a class="left-nav-link" href="#method">Method</a>
+            <a class="left-nav-link" href="#results">Results</a>
         </div>
         <div class="left-nav-tab">
             <div class="left-nav-tab-lines">
@@ -1344,14 +1889,18 @@
     <div class="left-nav-drawer-overlay" id="left-drawer-overlay" onclick="closeLeftDrawer()"></div>
     <div class="left-nav-drawer" id="left-nav-drawer">
         <div class="drawer-nav-label">On this page</div>
-            <a class="drawer-nav-link" href="#overview" onclick="closeLeftDrawer()">Overview</a>
-            <a class="drawer-nav-link" href="#bibtex" onclick="closeLeftDrawer()">BibTeX</a>
+            <a class="drawer-nav-link" href="#gameboyworlds" onclick="closeLeftDrawer()">Task Explorer</a>
+            <a class="drawer-nav-link" href="#leaderboard" onclick="closeLeftDrawer()">Leaderboard</a>
+            <a class="drawer-nav-link" href="#rollouts" onclick="closeLeftDrawer()">Rollouts</a>
+            <a class="drawer-nav-link" href="#submissions" onclick="closeLeftDrawer()">Submissions</a>
+            <a class="drawer-nav-link" href="#method" onclick="closeLeftDrawer()">Method</a>
+            <a class="drawer-nav-link" href="#results" onclick="closeLeftDrawer()">Results</a>
     </div>
     <button class="left-nav-mobile-btn" onclick="openLeftDrawer()" aria-label="Page navigation">&#9776;</button>
 
     <script>
         (function () {
-            var ids = ['overview', 'bibtex'];
+            var ids = ['gameboyworlds', 'leaderboard', 'rollouts', 'submissions', 'method', 'results'];
             var allLinks = document.querySelectorAll('.left-nav-link, .drawer-nav-link');
             function spyLeftNav() {
                 var active = null;
