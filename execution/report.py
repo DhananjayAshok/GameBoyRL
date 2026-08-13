@@ -268,9 +268,17 @@ class ExecutorReport:
     :type executor_name: str
     :param game: Name of the game the run took place in.
     :type game: str
-    :param init_kwargs: Subclass-specific keyword arguments captured at
-        ``__init__`` time (excludes ``env``, ``task``, ``max_steps``,
-        ``max_tool_calls``, and ``parameters``).
+    :param init_kwargs: The configuration this run resolved to — the hint it ran under,
+        whether it was allowed to self-terminate, the model, the token budget and the pair
+        of policies — built by
+        :meth:`~execution.executors.Executor._run_config`. Excludes ``env``, ``task``,
+        ``max_steps`` and ``max_tool_calls``, which are fields of their own.
+
+        It used to be whatever was left in ``**kwargs`` after ``__init__`` bound its named
+        parameters, which was **structurally always empty**: everything a caller passes is
+        named. So this recorded nothing, and every reader of it — notably
+        :meth:`SupervisorReport.__str__`, which prints each leg's hint — silently found
+        nothing to print.
     :type init_kwargs: dict
     :param max_steps: Maximum number of environment steps the executor was
         permitted to take.
@@ -680,7 +688,11 @@ class SupervisorReport:
     :param task: The task the supervisor was given.
     :param supervisor_name: ``__class__.__name__`` of the supervisor.
     :param game: Name of the game the run took place in.
-    :param init_kwargs: Supervisor-specific constructor arguments, for reproducing the run.
+    :param init_kwargs: The supervisor's own knobs — leg size, attempt caps, replan budget,
+        models — from :meth:`~execution.supervisors.base.Supervisor._run_config`, for
+        reproducing the run. It used to hold the *executor's* kwargs under this name, which
+        meant nothing that defines an arm's behaviour was recorded anywhere in the archive;
+        those are still here, nested under ``executor_kwargs``.
     :param event_log: Supervisor calls and executor runs, interleaved, in order.
     """
 

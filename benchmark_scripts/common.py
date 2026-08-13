@@ -1,12 +1,12 @@
 """
 Machinery shared by every benchmark arm.
 
-The two arms — baseline and plan — are the same experiment run two ways, and the whole
-point of the comparison is that they differ *only* in what drives the episode. This module
-holds everything that must therefore be identical between them: which tasks get run, where
-results land, how a run resumes, the reset loop, and how each episode's VLM calls are
-archived. An arm supplies one callback and its own extra columns; it does not get to have
-its own opinion about task selection or CSV naming.
+The four arms — baseline, revision, subgoal and info_subgoal — are the same experiment run
+four ways, and the whole point of the comparison is that they differ *only* in what drives
+the episode. This module holds everything that must therefore be identical between them:
+which tasks get run, where results land, how a run resumes, the reset loop, and how each
+episode's VLM calls are archived. An arm supplies one callback and its own extra columns;
+it does not get to have its own opinion about task selection or CSV naming.
 
 Before this existed the arms lived as forked copies of one file and had already drifted:
 the retired hint arm had no ``--n_tasks`` at all, so it could not be pointed at the same
@@ -28,7 +28,7 @@ from tqdm import tqdm
 from gameboy_worlds import get_test_environment
 
 from execution.info_doc import load_document
-from utils import log_error, log_info
+from utils import depathify, log_error, log_info
 
 
 # Columns every arm writes, in this order. Arm-specific columns are appended after these,
@@ -278,7 +278,11 @@ def run_episode(row, play: Callable[[Any], PlayResult], *, arm: str,
     """
     outcome = EpisodeOutcome()
     mission = row["task"]
-    task_str = mission.replace(" ", "_").lower()
+    # depathify, not a bare space-replace: a task carrying a "/" ("Reach the BUY/SELL
+    # choice menu…", "…first stats page (HP/MP)") would otherwise be spliced into the
+    # session path as a directory separator, burying that episode one level deeper than
+    # every other task's.
+    task_str = depathify(mission).lower()
     emulator_kwargs = dict(emulator_kwargs)
     emulator_kwargs["session_name"] += f"/{task_str}/"
     emulator_kwargs["wait_ticks"] = 20

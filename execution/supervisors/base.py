@@ -96,9 +96,30 @@ class Supervisor(ABC):
             task=task,
             supervisor_name=self.__class__.__name__,
             game=game,
-            init_kwargs=dict(executor_kwargs),
+            init_kwargs=self._run_config(),
         )
         self._evaluated = False
+
+    def _run_config(self) -> dict:
+        """The knobs this supervisor is running with, for :attr:`report.init_kwargs`.
+
+        This used to be ``dict(executor_kwargs)`` — the *executor's* arguments, stored under
+        a name that says supervisor. The effect was that none of the settings that actually
+        define an arm's behaviour (``max_leg_steps``, ``max_attempts_per_target``,
+        ``max_replans``, …) appeared anywhere in the archived report, so a saved episode
+        could not be matched to the configuration that produced it.
+
+        Subclasses extend it. Safe to call from ``__init__`` because every subclass sets its
+        own attributes *before* calling ``super().__init__()``.
+        """
+        return {
+            "supervisor_vlm_model": self._supervisor_vlm_model,
+            "supervisor_vlm_kind": self._supervisor_vlm_kind,
+            "max_new_tokens": self._max_new_tokens,
+            "max_steps": self._max_steps,
+            "max_tool_calls": self._max_tool_calls,
+            "executor_kwargs": dict(self._executor_kwargs),
+        }
 
     # ------------------------------------------------------------------
     # Recording
@@ -152,29 +173,52 @@ class Supervisor(ABC):
         :param stage: Which phase of the supervisor's reasoning this call serves.
         :return: Exactly what the VLM returned, unchanged.
         """
+        result, records = self._vlm_infer(stage, **kwargs)
+        self.report.event_log.extend(records)
+        return result
+
+    def _vlm_infer(self, stage: str, **kwargs: Any) -> tuple:
+        """Make the call and *return* its records instead of filing them.
+
+        The half of :meth:`_vlm_call` that can run off the main thread. A worker in a
+        :class:`~concurrent.futures.ThreadPoolExecutor` calls this and hands the records
+        back; the caller appends them once the pool has joined, in whatever order it
+        chooses. :meth:`_vlm_call` is then just this plus the append.
+
+        Split out because the parallel relevance pass in
+        :class:`~execution.supervisors.info_subgoal.InfoSubgoalSupervisor` appended to
+        :attr:`report.event_log` straight from its workers, so the records landed in
+        *completion* order — which made the event log non-reproducible across reruns of the
+        same episode, and undermined the property that the log's ordering is the only
+        per-leg labelling there is.
+
+        :return: ``(result, records)`` — the VLM's output unchanged, and the
+            :class:`~execution.report.SupervisorVLMCallRecord` list it should be filed under.
+        """
         kwargs.setdefault("max_new_tokens", self._max_new_tokens)
         inferred = self._vlm.infer(**kwargs)
         result, meta = inferred["output"], inferred["meta"]
         texts = kwargs.get("texts")
         images = kwargs.get("images") or []
+        records = []
         if isinstance(texts, list):
             responses = result if isinstance(result, list) else [result] * len(texts)
             token_counts = per_prompt_token_counts(meta, len(texts))
             # Per-prompt images when the caller batched them that way, else the shared set.
             for index, (prompt, response) in enumerate(zip(texts, responses)):
                 call_images = images[index] if index < len(images) and isinstance(images[index], list) else images
-                self.report.event_log.append(SupervisorVLMCallRecord(
+                records.append(SupervisorVLMCallRecord(
                     stage=stage, images=call_images, prompt=prompt, response=response,
                     input_tokens=token_counts[index][0],
                     output_tokens=token_counts[index][1],
                 ))
         else:
             # A single prompt is one record, so meta's counts are scalars.
-            self.report.event_log.append(SupervisorVLMCallRecord(
+            records.append(SupervisorVLMCallRecord(
                 stage=stage, images=images, prompt=texts, response=result,
                 input_tokens=meta["input_tokens"], output_tokens=meta["output_tokens"],
             ))
-        return result
+        return result, records
 
     def _vlm_caller(self, stage: str):
         """A recording ``call(**kwargs)`` for helpers that do their own batching.
@@ -225,7 +269,9 @@ class Supervisor(ABC):
         """
         raise NotImplementedError
 
-    def call_executor(self, task: str) -> Any:
+    def call_executor(self, task: str, *, hint: Optional[str] = None,
+                      allow_self_termination: bool = False,
+                      max_steps: Optional[int] = None) -> Any:
         """
         Spin up an executor for the given task, run it to completion, record its report on
         :attr:`report`, then process and return the result.
@@ -233,17 +279,33 @@ class Supervisor(ABC):
         The report is filed into ``event_log`` before :meth:`process_executor_return` runs,
         so the executor's run is on record even if interpreting it raises.
 
+        **The three things that vary per leg are parameters, not state.** They used to be
+        set on the supervisor immediately before this call —
+        ``self._executor_kwargs["hint"] = ...`` and a temporary overwrite of
+        ``self._max_steps``, an attribute that otherwise means the whole episode's budget.
+        Passing them here is what lets the executor record what it actually ran under (see
+        :meth:`~execution.executors.Executor._run_config`), and removes a
+        write-then-restore dance that had to be exception-safe to be correct.
+
         :param task: Natural-language task string passed to the executor.
+        :param hint: Advice for this leg, or ``None`` for an unhinted run.
+        :param allow_self_termination: Whether this leg may end itself by declaring the task
+            complete. Off for any leg whose success is the environment's to signal.
+        :param max_steps: Step budget for this leg. Defaults to the episode's, which is what
+            a supervisor running exactly one leg wants.
         :return: Whatever :meth:`process_executor_return` returns.
         """
+        run_kwargs = dict(self._executor_kwargs)
+        run_kwargs["hint"] = hint
+        run_kwargs["allow_self_termination"] = allow_self_termination
         executor = self._executor_class(
             env=self._env,
             task=task,
             game=self._game,
-            max_steps=self._max_steps,
+            max_steps=self._max_steps if max_steps is None else max_steps,
             max_tool_calls=self._max_tool_calls,
             parameters=self._parameters,
-            **self._executor_kwargs,
+            **run_kwargs,
         )
         self.report.event_log.append(executor.report)
         return self.process_executor_return(executor.report)

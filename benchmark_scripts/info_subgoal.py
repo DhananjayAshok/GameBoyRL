@@ -60,7 +60,13 @@ def _plan_summary(result: dict, report) -> dict:
     step_log = result["step_log"]
     attempts = [a for record in step_log for a in record["attempts"]]
     return {
+        # `n_plan_steps` is the CURRENT plan; `n_slots_attempted` is how many target slots
+        # the loop worked through, and is the denominator `n_steps_cleared` belongs over.
+        # They differ after a replan. `n_original_plan_steps` is the plan as first written.
+        "planned": result["planned"],
         "n_plan_steps": len(result["plan"]),
+        "n_original_plan_steps": len(result["original_plan"]),
+        "n_slots_attempted": len(step_log),
         "n_steps_cleared": sum(1 for r in step_log if r["cleared"]),
         "n_attempts": len(attempts),
         "n_replans": result["n_replans"],
@@ -73,17 +79,14 @@ def _plan_summary(result: dict, report) -> dict:
     }
 
 
-_EMPTY_SUMMARY = {
-    "n_plan_steps": 0, "n_steps_cleared": 0, "n_attempts": 0, "n_replans": 0,
-    "n_insights_candidate": 0, "n_insights_kept": 0, "n_insights_distilled": 0,
-    "n_supervisor_calls": 0,
-}
-
 SUMMARY_COLUMNS = [
-    "n_plan_steps", "n_steps_cleared", "n_attempts", "n_replans",
+    "planned", "n_plan_steps", "n_original_plan_steps", "n_slots_attempted",
+    "n_steps_cleared", "n_attempts", "n_replans",
     "n_insights_candidate", "n_insights_kept", "n_insights_distilled",
     "n_supervisor_calls",
 ]
+
+_EMPTY_SUMMARY = {key: 0 for key in SUMMARY_COLUMNS}
 
 
 @click.command(name="info_subgoal")
@@ -171,8 +174,9 @@ def info_subgoal_cmd(obj, info_docs, mode, parametric_categories,
 
     columns = common.COMMON_COLUMNS + [
         # `hint` holds the [STEP]-joined plan, matching the info arm's column so the two
-        # arms' advice sits in the same place.
+        # arms' advice sits in the same place. `original_plan` is the same, before replans.
         "hint",
+        "original_plan",
         *SUMMARY_COLUMNS,
         "selected_entry_ids", "insights_block", "step_log",
         # The supervisor's prompts and replies are NOT a column any more. They live on the
@@ -221,6 +225,8 @@ def info_subgoal_cmd(obj, info_docs, mode, parametric_categories,
                 report=report,
                 extras={
                     "plan": PLAN_SEPARATOR.join(result["plan"]) if result["plan"] else None,
+                    "original_plan": (PLAN_SEPARATOR.join(result["original_plan"])
+                                      if result["original_plan"] else None),
                     "selected_ids": result["selected_ids"],
                     "summary": _plan_summary(result, report),
                     # The supervisor's decisions. The prompts and replies behind them are on
@@ -245,6 +251,7 @@ def info_subgoal_cmd(obj, info_docs, mode, parametric_categories,
         summary = extras.get("summary", _EMPTY_SUMMARY)
         return common.common_row(row, outcome) + [
             extras.get("plan"),
+            extras.get("original_plan"),
             *[summary[key] for key in SUMMARY_COLUMNS],
             json.dumps(extras.get("selected_ids", [])),
             extras.get("insights_block"),
@@ -264,8 +271,10 @@ def info_subgoal_cmd(obj, info_docs, mode, parametric_categories,
             n_planned += 1
         n_run += 1
         print(f"  -> success={outcome.success}  steps={outcome.n_steps}  "
-              f"plan={summary['n_steps_cleared']}/{summary['n_plan_steps']} steps cleared "
-              f"over {summary['n_attempts']} attempt(s), {summary['n_replans']} replan(s)  "
+              f"plan={summary['n_steps_cleared']}/{summary['n_slots_attempted']} steps "
+              f"cleared over {summary['n_attempts']} attempt(s), "
+              f"{summary['n_replans']} replan(s)"
+              f"{'' if summary['planned'] else '  [UNPLANNED]'}  "
               f"insights={summary['n_insights_kept']}/{summary['n_insights_candidate']}"
               f"->{summary['n_insights_distilled']}  "
               f"{summary['n_supervisor_calls']} supervisor calls")

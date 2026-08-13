@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import os
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, List, Optional
 
 from execution.supervisors.prompts import (DISTILL_INSIGHTS_PROMPT, FILTER_INSIGHTS_PROMPT,
@@ -67,23 +67,44 @@ class InfoSubgoalSupervisor(SubgoalSupervisor):
         self.n_insights_kept = 0
         self.n_insights_distilled = 0
         super().__init__(*args, **kwargs)
+        # Built here rather than on first use. The relevance pass fans out across threads,
+        # and the base class's lazy property is a check-then-set with no lock, so several
+        # workers could pass the `is None` test at once and construct several VLMs. Eager
+        # construction closes that by construction rather than by convention. This class
+        # always reasons, so there is nothing to defer for — and a missing model now fails
+        # at construction rather than part-way into an episode.
+        _ = self._vlm
+
+    def _run_config(self) -> dict:
+        return {**super()._run_config(),
+                "max_concurrency": self._max_concurrency,
+                "n_documents": len(self._documents)}
 
     def _knowledge(self) -> str:
         """The distilled insights, or nothing if selection found none.
 
-        Filtered once in :meth:`_before_targets` and reused verbatim by the planner, the
+        Filtered once in :meth:`_resolve_targets` and reused verbatim by the planner, the
         reviser and the hint writer — deliberately, because re-filtering per call site
         would multiply the arm's VLM cost for a judgement that rarely changes within one
         task.
         """
         return self.insights_block
 
-    def _before_targets(self) -> List[Optional[str]]:
+    def _resolve_targets(self) -> List[Optional[str]]:
         """Select knowledge, then plan from it.
 
-        With nothing selected there is no knowledge to plan from, so the arm degrades to
-        running the task unplanned rather than planning from an empty page — which would
-        make it an unlabelled copy of the subgoal arm.
+        With nothing selected there is no knowledge to plan *from*, but there is still a task
+        to plan for, so this falls through to the ordinary subgoal planner with an empty
+        insights block — :meth:`SubgoalSupervisor.write_plan` already renders that as
+        ``(nothing recorded)``. The episode is then a knowledge-free planned run, which is
+        exactly the ``subgoal`` arm, and ``selected_entry_ids`` is empty on that row to say so.
+
+        It used to return ``[None]`` here and skip planning altogether, on the reasoning that
+        planning from an empty page would make this an unlabelled copy of the subgoal arm.
+        That traded a labelling problem for a much worse one: skipping the planner made it an
+        unlabelled copy of the *baseline* instead, and because the replanner still ran and
+        refilled :attr:`plan` mid-episode, the run looked planned from the outside. Degrading
+        one step, to the arm directly below this one, is the honest fallback.
         """
         self.selection_log = []
         self.selected_ids = []
@@ -93,15 +114,12 @@ class InfoSubgoalSupervisor(SubgoalSupervisor):
         selected = self._select_entries(self._candidates(), screen)
         self.selected_ids = [self.entry_id(entry) for entry in selected]
         if not selected:
-            log_warn("[info] nothing selected from the documents; running the task "
-                     "unplanned.", self._parameters)
-            self.plan = []
-            self.completed_steps = []
-            self.n_replans = 0
-            return [None]
-
-        self.insights_block = self.filter_insights(selected, screen)
-        return super()._before_targets()
+            log_warn("[info] nothing selected from the documents; planning without "
+                     "insights (equivalent to the subgoal arm for this episode).",
+                     self._parameters)
+        else:
+            self.insights_block = self.filter_insights(selected, screen)
+        return super()._resolve_targets()
 
     def _extras(self) -> dict:
         return {**super()._extras(),
@@ -137,7 +155,14 @@ class InfoSubgoalSupervisor(SubgoalSupervisor):
         return Image.open(path).convert("RGB")
 
     def _judge_relevance(self, entry, kind: str, screen) -> tuple:
-        """One yes/no call for a single entry. Returns (is_relevant, reason)."""
+        """One yes/no call for a single entry. Returns (is_relevant, reason, records).
+
+        Runs on a worker thread, so it **files nothing**: it goes through
+        :meth:`~execution.supervisors.base.Supervisor._vlm_infer` and hands its call records
+        back for :meth:`_select_entries` to append once the pool has joined. Appending from
+        the worker put the records into ``event_log`` in completion order, which made the
+        supervisor's own record of an episode differ between two runs of the same episode.
+        """
         images = [screen]
         entry_frame = self._entry_frame(entry)
         if entry_frame is not None:
@@ -170,38 +195,52 @@ class InfoSubgoalSupervisor(SubgoalSupervisor):
             .replace("[EVIDENCE_NOTE]", evidence_note)
         )
 
-        output = self._vlm_call("filter", texts=prompt, images=images)
+        output, records = self._vlm_infer("filter", texts=prompt, images=images)
         verdict = parse_yes_no(output, "Relevant")
         reason = (parse_key_value(output, "Reasoning") or "").strip()
-        return verdict is True, reason
+        return verdict is True, reason, records
 
     def _select_entries(self, candidates, screen) -> List[Any]:
-        """Run the relevance pass over (entry, kind) candidates, in parallel."""
+        """Run the relevance pass over (entry, kind) candidates, in parallel.
+
+        The calls go out concurrently — they are independent — but everything they produce
+        is filed **in candidate order**, after the pool has joined: the call records onto
+        :attr:`report.event_log`, the verdicts onto :attr:`selection_log`, and the survivors
+        onto the returned list. Both were previously written from the workers as results
+        arrived, so two runs of the same episode produced differently-ordered logs and a
+        differently-ordered insights block. The parallelism is unchanged; only where the
+        results land is.
+        """
         if not candidates:
             return []
 
-        selected = []
         with ThreadPoolExecutor(max_workers=self._max_concurrency) as pool:
-            futures = {
-                pool.submit(self._judge_relevance, entry, kind, screen): (entry, kind)
-                for entry, kind in candidates
-            }
-            for future in as_completed(futures):
-                entry, kind = futures[future]
+            futures = [pool.submit(self._judge_relevance, entry, kind, screen)
+                       for entry, kind in candidates]
+            results = []
+            for future in futures:
                 try:
-                    relevant, reason = future.result()
-                except Exception as error:      # a failed judgement must not sink the episode
-                    log_warn(f"relevance call failed for '{entry.category}': {error}")
-                    continue
-                self.selection_log.append({
-                    "category": entry.category,
-                    "kind": kind,
-                    "source": entry.source,
-                    "relevant": relevant,
-                    "reason": reason,
-                })
-                if relevant:
-                    selected.append(entry)
+                    results.append(future.result())
+                except Exception as error:  # a failed judgement must not sink the episode
+                    results.append(error)
+
+        selected = []
+        for (entry, kind), result in zip(candidates, results):
+            if isinstance(result, Exception):
+                log_warn(f"relevance call failed for '{entry.category}': {result}",
+                         self._parameters)
+                continue
+            relevant, reason, records = result
+            self.report.event_log.extend(records)
+            self.selection_log.append({
+                "category": entry.category,
+                "kind": kind,
+                "source": entry.source,
+                "relevant": relevant,
+                "reason": reason,
+            })
+            if relevant:
+                selected.append(entry)
         return selected
 
     def _candidates(self):

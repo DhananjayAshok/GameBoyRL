@@ -19,7 +19,9 @@ For each line (line_number = 0-indexed position in the JSONL):
            env           = env for this init_state,
            ...
        ).evaluate()
-       Collect result dict (success, description, reasoning, vlm_call_log, steps).
+       Collect result dict (report, success, safe_success_point, description, reasoning,
+       termination_reason, n_env_steps, max_steps). The calls and steps behind it are
+       reached through result["report"], not carried as separate keys.
   3. Checkpoint after each group_idx (see below).
 
 CLI options

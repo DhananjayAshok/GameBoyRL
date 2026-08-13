@@ -96,6 +96,17 @@ You are playing a GameBoy game. The current screen is shown in the image.
         """
         return self._action_policy.done_check_reasoning_label
 
+    def _run_config(self, extra_kwargs):
+        """The base configuration plus which pair of policies this arm actually is.
+
+        The arm's name is already on ``report.executor_name`` (``single_actions``), but that
+        is the registry's spelling of the pair; recording the two halves separately means a
+        reader does not have to know the naming convention to answer "what remembered what".
+        """
+        return {**super()._run_config(extra_kwargs),
+                "action_policy": self._action_policy.name,
+                "history_policy": self._history_policy.name}
+
     # ------------------------------------------------------------------
     # Environment
     # ------------------------------------------------------------------
@@ -252,6 +263,15 @@ You are playing a GameBoy game. The current screen is shown in the image.
                     tool_call_message = str(record.result)
                     error_message = None
                     consecutive_invalid = 0
+                    # A tool call costs a step of the budget even though it does not advance
+                    # the emulator. It used to be free here, which meant this loop had no
+                    # bound at all on a tool-heavy run: `max_tool_calls` stops the tool
+                    # being *offered*, but until it is spent the loop could iterate without
+                    # `n_env_steps` ever moving. The supervisor's episode budget is now
+                    # counted the same way (`Supervisor` legs charge every recorded step),
+                    # and the two must agree or the leg and the episode disagree about what
+                    # a step is.
+                    n_env_steps += 1
                     continue
 
             outcome, n_env_steps, consecutive_invalid, error_message = self._run_decision(

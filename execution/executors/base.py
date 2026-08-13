@@ -57,7 +57,16 @@ from execution.report import (ACTION_TAGS, EnvironmentStepRecord, ExecutorReport
                               per_prompt_token_counts)
 from utils import load_parameters, log_error, log_info, ExecutorVLM, parse_key_value
 
-MAX_CONSECUTIVE_INVALID = 10
+#: Consecutive unparseable/unrecognised action replies before the executor gives up with
+#: ``max_invalid``.
+#:
+#: **Must stay below the smallest leg an executor is ever run with.** At 10 it was dead
+#: code in every supervised arm: a supervisor leg is ``--max_leg_steps`` steps (default 5)
+#: and ``consecutive_invalid`` resets with each new executor, so the counter could never
+#: reach 10 before the leg ended. That mattered because it is the only thing that stops a
+#: leg spending its whole budget on replies that never reach the environment, which is the
+#: state the supervisor's own budget accounting used to be blind to.
+MAX_CONSECUTIVE_INVALID = 4
 DEBUG_ON_INVALID = False
 
 
@@ -227,12 +236,43 @@ Reasoning: <why, referring to what is visible in image 2>
         # every step is filed under the call that caused it. None before the first call.
         self._current_call: Optional[ExecutorVLMCallRecord] = None
 
-        self.report = self._make_report(task, kwargs, max_steps, max_tool_calls)
+        self.report = self._make_report(task, self._run_config(kwargs), max_steps,
+                                        max_tool_calls)
 
         outcome = self._execute()
 
         self.report.outcome = outcome
         self.report.final_state = self._get_state()
+
+    def _run_config(self, extra_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """The configuration this run actually resolved to, for :attr:`report.init_kwargs`.
+
+        Built deliberately rather than by forwarding the leftover ``**kwargs``, which is
+        what used to happen and which was **structurally always empty**: every argument a
+        supervisor forwards (``hint``, ``allow_self_termination``, ``vlm_model``,
+        ``vlm_kind``, ``game``, ``parameters``) is a named parameter of
+        :meth:`__init__`, so nothing was ever left over to record. The consequence was that
+        ``SupervisorReport.__str__``'s per-leg ``init_kwargs.get("hint")`` line could never
+        fire, and the archived report — the artifact that exists so an episode can be
+        reconstructed — did not say which hint any leg ran under.
+
+        The model name is read back off :attr:`_parameters` rather than from the
+        constructor argument, so it records the model that was *used* rather than the
+        override that may have been ``None``.
+
+        Subclasses extend it (see
+        :meth:`~execution.executors.executor.PolicyExecutor._run_config`); anything still
+        left in ``**kwargs`` is merged in last so a future argument is recorded even before
+        anyone thinks to name it here.
+        """
+        return {
+            "hint": self._hint,
+            "allow_self_termination": self._allow_self_termination,
+            "vlm_model": self._parameters.get("executor_vlm_model"),
+            "vlm_kind": self._parameters.get("executor_vlm_kind"),
+            "max_new_tokens": self._max_new_tokens,
+            **extra_kwargs,
+        }
 
     def _make_report(
         self,
@@ -655,11 +695,11 @@ Reasoning: <why, referring to what is visible in image 2>
         **Two different counters, deliberately.** *k* counts environment actions actually
         dispatched (``EnvironmentStepRecord``s), because that is what the check costs money
         against — a step the agent burned on an unparseable response produced no new frame
-        for a judge to look at. The step *budget*, though, is spent by invalid steps too:
-        every ``_execute`` loop increments its ``n_env_steps`` on a parse failure and an
-        unrecognised action as well as on a real action. So "is this the last permitted
-        step" can only be answered by the budget counter the loop itself is running on,
-        which is why it is passed in rather than recomputed here.
+        for a judge to look at. The step *budget*, though, is spent by everything the loop
+        records: ``_execute`` increments its ``n_env_steps`` on a parse failure, an
+        unrecognised action and a passive tool call as well as on a real action. So "is this
+        the last permitted step" can only be answered by the budget counter the loop itself
+        is running on, which is why it is passed in rather than recomputed here.
 
         The final permitted step is **always** checked regardless of *k*. Without that, a
         budget that is not a multiple of *k* would end with its last steps unexamined, and

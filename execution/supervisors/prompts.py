@@ -6,8 +6,10 @@ of them is ever overridden: each belongs to exactly one supervisor.  Keeping the
 one module means finding the prompt behind a call does not require knowing which
 convention its author happened to use.
 
-Executor prompts are the opposite case — they *are* overridden, by seven subclasses —
-and so stay as class attributes on the executors that own them.
+Executor prompts stay as class attributes on the executor instead, because they are
+assembled per arm: :class:`~execution.executors.executor.PolicyExecutor` owns one step
+template and the action and history policies fill its named slots. (This used to say
+"overridden by seven subclasses" — that hierarchy is gone; there is one executor class.)
 """
 
 CRITIQUE_SLICE_PROMPT = """You are analysing a segment of a failed attempt to complete a task in a game of [GAME].

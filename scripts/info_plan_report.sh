@@ -124,12 +124,17 @@ base, plan = frames.get("baseline"), frames.get("info subgoal")
 emit("## 2. Per task")
 emit()
 if base is not None and plan is not None:
-    emit("| # | task | base | plan | plan steps | cleared | attempts | replans | steps |")
-    emit("|---:|---|---|---|---:|---:|---:|---:|---:|")
+    # `cleared` counts target SLOTS, so it is shown against `slots`, not against the plan
+    # length — those differ after a replan, and reading one over the other is what produced
+    # rows like "1/0 cleared".
+    emit("| # | task | base | plan | plan steps | slots | cleared | attempts | replans "
+         "| steps |")
+    emit("|---:|---|---|---|---:|---:|---:|---:|---:|---:|")
     for i in range(min(len(base), len(plan))):
         b, p = base.iloc[i], plan.iloc[i]
         emit(f"| {i} | {str(b['task'])[:40]} | {'W' if b['success'] else '.'} | "
-             f"{'W' if p['success'] else '.'} | {p['n_plan_steps']} | {p['n_steps_cleared']} | "
+             f"{'W' if p['success'] else '.'} | {p['n_plan_steps']} | "
+             f"{p['n_slots_attempted']} | {p['n_steps_cleared']} | "
              f"{p['n_attempts']} | {p['n_replans']} | {p['n_steps']} |")
     emit()
 
@@ -258,8 +263,9 @@ if plan is not None:
     for ep in range(len(plan)):
         row = plan.iloc[ep]
         emit(f"**{ep}. {row['task'][:70]}** — success={row['success']}, "
-             f"{row['n_steps_cleared']}/{row['n_plan_steps']} cleared, "
-             f"{row['n_attempts']} attempts, {row['n_replans']} replans")
+             f"{row['n_steps_cleared']}/{row['n_slots_attempted']} cleared, "
+             f"{row['n_attempts']} attempts, {row['n_replans']} replans"
+             f"{'' if row['planned'] else ', UNPLANNED'}")
         emit()
         if isinstance(row["hint"], str):
             for i, step in enumerate(row["hint"].split("[STEP]")):

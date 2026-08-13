@@ -24,17 +24,29 @@ from execution.supervisors import PLAN_SEPARATOR
 
 from benchmark_scripts import common
 
-SUMMARY_COLUMNS = ["n_plan_steps", "n_steps_cleared", "n_attempts", "n_replans",
-                   "n_supervisor_calls"]
+SUMMARY_COLUMNS = ["planned", "n_plan_steps", "n_original_plan_steps", "n_slots_attempted",
+                   "n_steps_cleared", "n_attempts", "n_replans", "n_supervisor_calls"]
 
 _EMPTY_SUMMARY = {key: 0 for key in SUMMARY_COLUMNS}
 
 
 def _summary(result: dict, report) -> dict:
+    """Flat counts for the CSV.
+
+    ``n_plan_steps`` is the *current* plan and ``n_slots_attempted`` is how many target
+    slots the loop actually worked through. They are different numbers after a replan, and
+    reading ``n_steps_cleared`` against the first was how an episode came to report
+    "1/0 steps cleared": ``n_steps_cleared`` counts slots, so ``n_slots_attempted`` is its
+    denominator. ``n_original_plan_steps`` is the plan as first written, so a reader can see
+    what the replans changed.
+    """
     step_log = result["step_log"]
     attempts = [a for record in step_log for a in record["attempts"]]
     return {
+        "planned": result["planned"],
         "n_plan_steps": len(result["plan"]),
+        "n_original_plan_steps": len(result["original_plan"]),
+        "n_slots_attempted": len(step_log),
         "n_steps_cleared": sum(1 for r in step_log if r["cleared"]),
         "n_attempts": len(attempts),
         "n_replans": result["n_replans"],
@@ -73,7 +85,7 @@ def subgoal_cmd(obj, max_leg_steps, max_attempts_per_step, max_replans,
     }
 
     columns = common.COMMON_COLUMNS + [
-        "hint", *SUMMARY_COLUMNS, "step_log", common.SESSION_COLUMN]
+        "hint", "original_plan", *SUMMARY_COLUMNS, "step_log", common.SESSION_COLUMN]
     tasks = common.select_tasks(get_benchmark_tasks(game=game), obj["n_tasks"])
     save_path = common.results_path(
         parameters, game, f"subgoal_{executor}_{model_save_name}", obj["n_tasks"])
@@ -110,6 +122,8 @@ def subgoal_cmd(obj, max_leg_steps, max_attempts_per_step, max_replans,
                 report=report,
                 extras={
                     "plan": PLAN_SEPARATOR.join(result["plan"]) if result["plan"] else None,
+                    "original_plan": (PLAN_SEPARATOR.join(result["original_plan"])
+                                      if result["original_plan"] else None),
                     "summary": _summary(result, report),
                     "step_log": result["step_log"],
                 },
@@ -129,6 +143,7 @@ def subgoal_cmd(obj, max_leg_steps, max_attempts_per_step, max_replans,
         summary = extras.get("summary", _EMPTY_SUMMARY)
         return common.common_row(row, outcome) + [
             extras.get("plan"),
+            extras.get("original_plan"),
             *[summary[key] for key in SUMMARY_COLUMNS],
             json.dumps(extras.get("step_log", []), default=str),
             json.dumps(outcome.session_dirs),
@@ -137,8 +152,10 @@ def subgoal_cmd(obj, max_leg_steps, max_attempts_per_step, max_replans,
     def on_episode(row, outcome):
         summary = outcome.extras.get("summary", _EMPTY_SUMMARY)
         print(f"  -> success={outcome.success}  steps={outcome.n_steps}  "
-              f"plan={summary['n_steps_cleared']}/{summary['n_plan_steps']} steps cleared "
-              f"over {summary['n_attempts']} attempt(s), {summary['n_replans']} replan(s)  "
+              f"plan={summary['n_steps_cleared']}/{summary['n_slots_attempted']} steps "
+              f"cleared over {summary['n_attempts']} attempt(s), "
+              f"{summary['n_replans']} replan(s)"
+              f"{'' if summary['planned'] else '  [UNPLANNED]'}  "
               f"{summary['n_supervisor_calls']} supervisor calls")
 
     common.run_sweep(

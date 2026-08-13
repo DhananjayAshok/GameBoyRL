@@ -2,21 +2,23 @@
 Parsers for structured VLM/LLM responses.
 
 Every function here reads a model's free-text reply and pulls a typed value out of it.
-There are four readers, one per shape of answer:
+There are five readers, one per shape of answer:
 
 ===================  =============================================================
 :func:`parse_list`   a list of items, optionally under a ``Key:`` heading
 :func:`parse_int`    an integer on a ``Key:`` line, optionally range-checked
 :func:`parse_action_line`  the ``Action:`` an executor chose
 :func:`parse_steps`  a ``[STEP]``-separated plan
+:func:`parse_plan`   a ``Plan:`` answer, ``[STEP]``-separated or laid out as a list
 ===================  =============================================================
 
-plus :func:`strip_stop` for the house end-of-response marker, and two more that live in
+plus :func:`strip_stop` for the house end-of-response marker, :func:`key_block` for a value
+that runs past its own line, and two more that live in
 :mod:`utils.lm_inference` because they predate this module and are imported by name
 throughout: :func:`~utils.lm_inference.parse_key_value` and
 :func:`~utils.lm_inference.parse_yes_no`.
 
-These four replace twelve near-duplicates that had accumulated across ``execution/``,
+They replace twelve near-duplicates that had accumulated across ``execution/``,
 ``vlm_scripts/`` and ``debug_scripts/`` — five list readers, three
 integer readers and four action readers, each written for one prompt and none aware of the
 others. The differences between them were accidental rather than intentional, so the
@@ -49,6 +51,18 @@ _ITEM_RE = re.compile(r"^(?:[-*•]|\d+[.)]?)\s+(.*)$")
 # The house "no answer" tokens. Matched exactly, not by prefix, so a real answer opening
 # with the word "None" ("None of the doors opened, but…") is kept.
 _ABSENT = {"NONE", "N/A", "NA"}
+
+
+def depathify(string: str) -> str:
+    """Collapse a free-text string into one path segment.
+
+    Separators are the whole point: a task string like "Reach the BUY/SELL choice menu"
+    used verbatim as a directory name silently becomes two nested directories, so that
+    episode's session sits one level deeper than every other task's and anything walking
+    the tree at a fixed depth skips it. Spaces go too, so the result survives being pasted
+    into a shell without quoting.
+    """
+    return string.replace("/", "_").replace("\\", "_").replace(" ", "_")
 
 
 def strip_stop(text: str) -> str:
@@ -245,3 +259,77 @@ def parse_steps(text: str) -> list[str]:
     if not text:
         return []
     return [part.strip() for part in text.split(PLAN_SEPARATOR) if part.strip()]
+
+
+def key_block(text: str, key: str) -> str:
+    """Everything after ``Key:`` — the rest of its line *and* the lines below it.
+
+    The block counterpart to :func:`~utils.lm_inference.parse_key_value`, which stops at the
+    end of the heading's own line. That line limit is right for a one-line value and wrong
+    for a multi-line one: a model answering
+
+    ::
+
+        Plan:
+        1. open the shop menu until the BUY/SELL choice is on screen
+
+    puts nothing after the colon, so the line reader returns ``None`` and a perfectly good
+    answer reads as "the model returned nothing" — the class of strictness this module
+    exists to remove.
+
+    **Only correct for a key that is the last field of the response format**, because the
+    block runs to the end of the reply rather than stopping at the next heading. Both
+    prompts that use it put ``Plan:`` last.
+
+    :return: The block, cut at ``[STOP]`` and with leading markdown removed, or ``""`` when
+        the key is absent.
+    """
+    body = strip_stop(text or "")
+
+    lowered = body.lower()
+    if lowered.count("response:") == 1:
+        body = body[lowered.index("response:") + len("response:"):]
+
+    lines = body.splitlines()
+    marker = f"{key.lower()}:"
+    index = _heading_index(lines, marker)
+    if index is None:
+        return ""
+
+    head = lines[index]
+    rest = head[head.lower().index(marker) + len(marker):]
+    # A heading written `**Plan:**` leaves its closing `**` at the head of the block.
+    return "\n".join([rest, *lines[index + 1:]]).strip().lstrip("*# \t").strip()
+
+
+def parse_plan(text: str) -> list[str]:
+    """The steps of a ``Plan:`` answer, however the model chose to lay them out.
+
+    :data:`PLAN_SEPARATOR` is what the prompts ask for, but a model that writes the plan as
+    a numbered or bulleted list under the heading has answered the question just as well.
+    Which layout it used is decided from the whole block below the heading rather than from
+    the heading's own line:
+
+    - **Separated** — split on ``[STEP]``. This covers the asked-for single line *and* the
+      variant that breaks the line at each separator, which a line-scoped read truncates to
+      its first step. That truncation is worse than returning nothing, because a one-step
+      plan is not empty and so nothing warns about it.
+    - **Otherwise** — read as a list under the heading, so ``- step`` and ``1. step`` both
+      work and the bullet or numbering comes off.
+
+    Prose under the heading with neither separators nor bullets still gives ``[]``. There is
+    no way to tell a two-sentence step from two one-sentence steps, and guessing would put
+    invented steps in front of the executor; the caller's warning is the honest answer.
+
+    ``NONE`` gives ``[]``, matched by prefix rather than by the exact :data:`_ABSENT` test
+    the other readers use: :data:`PLAN_FLAW_PROMPT` asks for "NONE if not flawed", and a
+    model answering that habitually carries on into a sentence explaining itself.
+
+    :return: The steps, or ``[]`` when the model produced no usable plan.
+    """
+    block = key_block(text, "Plan")
+    if not block or block.upper().startswith("NONE"):
+        return []
+    if PLAN_SEPARATOR in block:
+        return [step for step in parse_steps(block) if not _is_absent(step)]
+    return parse_list(text, "Plan")

@@ -2,13 +2,17 @@
 Judging a finished trajectory.
 
 :class:`AttemptCheckerSupervisor` runs an executor once and decides whether it
-succeeded.  The two module-level functions implement the slice-then-consolidate
+succeeded.  The module-level functions implement the slice-then-consolidate
 pattern it uses to read a long trajectory: describe each segment separately, then
 consolidate those descriptions into one verdict or hint.
 
 They live here rather than in a utility module because they exist to serve that
 pattern, and ``derive_critique_hint`` is imported alongside the class by
-``vlm_scripts.attempt_tasks``.
+``vlm_scripts.attempt_tasks``.  :func:`window_trajectory` and
+:func:`summarise_trajectory_segments` are also used by the benchmark arms
+(:mod:`execution.supervisors.revising`), so this module is on the benchmark path
+despite the class in it not being an arm — an accepted dependency rather than an
+oversight.
 """
 
 from __future__ import annotations
@@ -36,11 +40,13 @@ class AttemptCheckerSupervisor(Supervisor):
     judge whether the task was completed.
 
     **Not a benchmark supervisor.** The benchmark arms are
-    :class:`~execution.supervisors.dummy.DummySupervisor` and
-    :class:`~execution.supervisors.info_subgoal.InfoSubgoalSupervisor`; this class is used only by
-    ``vlm_scripts.attempt_tasks``, to label attempted tasks during data generation. Its
-    ``success`` is a VLM judgement, not the environment's ground-truth verdict, so it must
-    not be read as a benchmark result.
+    :class:`~execution.supervisors.dummy.DummySupervisor`,
+    :class:`~execution.supervisors.revising.RevisingSupervisor`,
+    :class:`~execution.supervisors.subgoal.SubgoalSupervisor` and
+    :class:`~execution.supervisors.info_subgoal.InfoSubgoalSupervisor`; this class is used
+    only by ``vlm_scripts.attempt_tasks``, to label attempted tasks during data generation.
+    Its ``success`` is a VLM judgement, not the environment's ground-truth verdict, so it
+    must not be read as a benchmark result.
 
     Stage 1 — DESCRIBE: inspects the last ``evaluation_lookback`` env-step
     frames *without* task context and produces a description of what happened.
@@ -82,16 +88,32 @@ class AttemptCheckerSupervisor(Supervisor):
     ) -> None:
         self._evaluation_lookback = evaluation_lookback
         self._hint = hint
-        if hint is not None:
-            executor_kwargs["hint"] = hint
-        executor_kwargs["allow_self_termination"] = allow_self_termination
-        super().__init__(task, executor_class, env, game, max_steps, max_tool_calls,
-                         supervisor_vlm_model, supervisor_vlm_kind, max_new_tokens,
-                         parameters, **executor_kwargs)
+        self._allow_self_termination = allow_self_termination
+        # Keyword arguments, not positional: this used to pass ten in a row, so reordering
+        # the base signature would have rebound them silently rather than raising.
+        super().__init__(
+            task=task,
+            executor_class=executor_class,
+            env=env,
+            game=game,
+            max_steps=max_steps,
+            max_tool_calls=max_tool_calls,
+            supervisor_vlm_model=supervisor_vlm_model,
+            supervisor_vlm_kind=supervisor_vlm_kind,
+            max_new_tokens=max_new_tokens,
+            parameters=parameters,
+            **executor_kwargs,
+        )
 
     def _evaluate(self) -> dict:
-        """Run the executor on the stored task and return the checker's verdict."""
-        return self.call_executor(self._task)
+        """Run the executor on the stored task and return the checker's verdict.
+
+        The hint and the self-termination flag are passed per call rather than stashed in
+        ``executor_kwargs``, which is how every other supervisor now runs a leg — and what
+        lets the executor record what it actually ran under.
+        """
+        return self.call_executor(self._task, hint=self._hint,
+                                  allow_self_termination=self._allow_self_termination)
 
     _DESCRIBE_SLICE_SIZE = 10
 
@@ -156,13 +178,16 @@ class AttemptCheckerSupervisor(Supervisor):
         }
 
         if k == 0:
+            # Same keys as the judged path below. This used to also carry `vlm_call_log`
+            # and `steps`, which that path deliberately dropped as "the same data under two
+            # names" — reachable through the SupervisorReport either way. Two shapes from
+            # one method meant a consumer reading those keys worked on empty trajectories
+            # and raised KeyError on real ones.
             return {
                 "success": False,
+                "safe_success_point": None,
                 "description": "",
                 "reasoning": "No environment steps were taken.",
-                "safe_success_point": None,
-                "vlm_call_log": report.vlm_call_log,
-                "steps": report.steps,
                 **run_meta,
             }
 

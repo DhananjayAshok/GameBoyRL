@@ -149,11 +149,11 @@ def generate_parametric_document(
 ) -> InfoDocument:
     """Ask *vlm* to write a document for *game* from its own knowledge.
 
-    One call. The reply is parsed strictly and a document that comes back empty stays empty
-    — :meth:`InfoSubgoalSupervisor.write_plan` already degrades to running the task unplanned
-    when nothing is selected, and that is the honest behaviour for a game the model does not
-    know. Inventing entries to avoid an empty document would be exactly the failure this
-    control exists to detect.
+    One call. The reply is parsed strictly and a document that comes back empty stays empty:
+    inventing entries to avoid an empty document would be exactly the failure this control
+    exists to detect. An empty document is not an error — it is the honest answer for a game
+    the model has never seen, and a run against one degrades to planning without insights.
+    It is written to disk either way, so what the model actually said stays auditable.
 
     :param game: The game identifier, as the benchmark names it.
     :param vlm: The model to ask. Not a supervisor call — no episode is running yet, so
@@ -197,6 +197,39 @@ def generate_parametric_document(
     return document
 
 
+def _warn_if_empty(document: InfoDocument, game: str, path: str, cached: bool,
+                   parameters: Optional[dict]) -> None:
+    """Say loudly that the parametric document carries no task entries.
+
+    An empty document is a truthful answer about the model's priors — it does not know this
+    game — and running on one is allowed: selection finds nothing, so the arm plans with no
+    insights, which is the knowledge-free ``subgoal`` behaviour. What it is *not* is a
+    parametric result, so this has to be visible when reading the CSV afterwards. The
+    machine-readable version of the same fact is the ``selected_entry_ids`` column, which is
+    empty on every row of such a run.
+
+    Warned rather than raised: an empty document is a legitimate configuration, not a
+    misconfiguration. It stays a warning only because the degraded behaviour is now the
+    honest one — before, an empty document silently produced an *unplanned* run, which is
+    the baseline wearing this arm's name.
+    """
+    if document.task_entries:
+        return
+    source = "the cached document" if cached else "the model's reply"
+    remedy = ("Delete it and rerun to ask again, or pass --regenerate."
+              if cached else
+              f"'{game}' is not in this model's priors. Use --mode retrieval if you need "
+              f"knowledge for this game.")
+    log_warn(
+        f"[parametric] the document for '{game}' has NO task entries — {source} produced no "
+        f"usable knowledge about this game. Every episode will plan WITHOUT insights, which "
+        f"makes this run equivalent to the knowledge-free subgoal arm; it is not a "
+        f"parametric result even though the CSV is named like one. {remedy} "
+        f"The document is at {path}.",
+        parameters,
+    )
+
+
 def load_or_generate_parametric_document(
     game: str,
     path: str,
@@ -218,12 +251,15 @@ def load_or_generate_parametric_document(
     in exactly the fields a reader forgets to check.
 
     :param path: Where the document is cached, from ``Paths.parametric_doc()``.
-    :param regenerate: Overwrite an existing cached document instead of reusing it.
+    :param regenerate: Overwrite an existing cached document instead of reusing it. The new
+        document replaces the old one whatever it says, empty included — a regeneration that
+        kept the previous document under some conditions would not be a regeneration.
     """
     if os.path.exists(path) and not regenerate:
         document = load_document(path, parameters=parameters)
         log_info(f"[parametric] reusing cached document for '{game}' — "
                  f"{len(document.task_entries)} task entries ({path})")
+        _warn_if_empty(document, game=game, path=path, cached=True, parameters=parameters)
         return document
 
     log_info(f"[parametric] generating a document for '{game}' from model priors...")
@@ -231,11 +267,12 @@ def load_or_generate_parametric_document(
         game, vlm, n_categories=n_categories, max_new_tokens=max_new_tokens,
         parameters=parameters,
     )
+
+    # Written even when empty: the reply is the evidence for why a run planned without
+    # insights, and regenerating it to look at would cost another call and might not
+    # reproduce.
     dump_document(document, path)
     log_info(f"[parametric] wrote {len(document.task_entries)} task entries to {path}")
 
-    if not document.task_entries:
-        log_warn(f"[parametric] the document for '{game}' is EMPTY — the model produced no "
-                 f"usable knowledge about this game. Every episode will run unplanned, which "
-                 f"is the baseline with extra steps. Check {path}.", parameters)
+    _warn_if_empty(document, game=game, path=path, cached=False, parameters=parameters)
     return load_document(path, parameters=parameters)
