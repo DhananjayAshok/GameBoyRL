@@ -262,7 +262,7 @@ def run_episode(row, play: Callable[[Any], PlayResult], *, arm: str,
     --max_replans) are unaffected: those stay inside one session.
 
     An exception anywhere leaves ``error=True`` and whatever was accumulated up to that
-    point: the sweep records the failure and moves on rather than losing the rest of the run.
+    point: the sweep stops on first error. 
     """
     outcome = EpisodeOutcome()
     mission = row["task"]
@@ -342,7 +342,7 @@ def common_row(row, outcome: EpisodeOutcome) -> list:
 
 
 def run_sweep(tasks: pd.DataFrame, *, columns: list, save_path: str, results: list,
-              n_completed: int, override_index: Optional[int],
+              n_completed: int,
               run_one: Callable[[Any], EpisodeOutcome],
               build_row: Callable[[Any, EpisodeOutcome], list],
               on_episode: Optional[Callable[[Any, EpisodeOutcome], None]] = None) -> list:
@@ -354,12 +354,6 @@ def run_sweep(tasks: pd.DataFrame, *, columns: list, save_path: str, results: li
     for i, row in tqdm(tasks.iterrows(), total=len(tasks)):
         if i < n_completed:
             continue
-        if override_index is not None and i != override_index:
-            continue
-        if override_index is not None:
-            print(f"Running override index {override_index} on row:")
-            for column in row.index:
-                print(f"  {column}: {row[column]}")
 
         outcome = run_one(row)
         if outcome.error:

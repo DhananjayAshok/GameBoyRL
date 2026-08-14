@@ -78,7 +78,7 @@ from gameboy_worlds import get_environment
 from execution.registry import AVAILABLE_EXECUTORS
 from execution.report import EnvironmentStepRecord
 from execution.supervisors import AttemptCheckerSupervisor, derive_critique_hint
-from utils import log_info, log_warn, log_error, VLM, HuggingFaceModel
+from utils import log_info, log_warn, log_error, sum_optional, VLM, HuggingFaceModel
 
 
 # The critique prompts and the slice-then-consolidate implementation live in
@@ -135,6 +135,8 @@ def _attempt_task(
     hint = ""
     result = None
     trajectory = None
+    critique_input_tokens = 0
+    critique_output_tokens = 0
 
     try:
         for attempt in range(max_attempts):
@@ -178,9 +180,15 @@ def _attempt_task(
                 break
 
             if attempt < max_attempts - 1:
-                hint = derive_critique_hint(
+                hint, input_tokens, output_tokens = derive_critique_hint(
                     env_steps, task_str, game, critique_vlm, max_new_tokens, hint
                 )
+                # sum_optional, not +=: a backend that does not report usage yields None,
+                # and None must propagate rather than being counted as zero.
+                critique_input_tokens = sum_optional(
+                    [critique_input_tokens, input_tokens])
+                critique_output_tokens = sum_optional(
+                    [critique_output_tokens, output_tokens])
                 if verbose:
                     print(f"  Derived hint: {hint}")
     finally:
@@ -206,6 +214,10 @@ def _attempt_task(
         "termination_reason": result.get("termination_reason"),
         "n_env_steps": result.get("n_env_steps"),
         "max_steps": result.get("max_steps"),
+        # What hint derivation cost across every attempt. Nothing else records it: these
+        # calls are made outside any supervisor, so they land on no SupervisorReport.
+        "critique_input_tokens": critique_input_tokens,
+        "critique_output_tokens": critique_output_tokens,
     }
     return result_record, trajectory
 
@@ -417,6 +429,9 @@ def attempt_tasks_cmd(
             "termination_reason": res.get("termination_reason"),
             "n_env_steps": res.get("n_env_steps"),
             "max_steps": res.get("max_steps"),
+            # .get for the same legacy-checkpoint reason as final_hint above.
+            "critique_input_tokens": res.get("critique_input_tokens"),
+            "critique_output_tokens": res.get("critique_output_tokens"),
         }
         for group_idx, res in results.items()
     ]).to_csv(csv_path, index=False)

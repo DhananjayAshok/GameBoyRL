@@ -42,8 +42,15 @@ from utils import load_parameters
 @click.option("--controller_variant", default="low_level", type=str)
 @click.option("--executor", default="single_none",
               type=click.Choice(list(AVAILABLE_EXECUTORS.keys())))
-@click.option("--executor_vlm_model", default=None, type=str)
-@click.option("--executor_vlm_kind", default=None, type=str)
+@click.option("--executor_vlm_model", required=True, type=str,
+              help="The model that plays. Required rather than falling back to the config's "
+                   "executor_vlm_model: the supervisor's model defaults to THIS value, not to "
+                   "the config, so an omitted flag left every supervised arm with no model at "
+                   "all — and failed at the first supervisor call, after the emulator was up "
+                   "and the CSV had been named from the config, which reads as a model "
+                   "mismatch rather than a missing flag.")
+@click.option("--executor_vlm_kind", required=True, type=str,
+              help="VLM kind for --executor_vlm_model. Required for the same reason.")
 @click.option("--supervisor_vlm_model", default=None, type=str,
               help="The one model every supervisor reasons with — selection, planning, "
                    "judging, hinting. Defaults to the executor's. A group option because "
@@ -60,7 +67,6 @@ from utils import load_parameters
 @click.option("--max_steps", default=200, type=int,
               help="Emulator steps for the WHOLE episode, every internal retry included.")
 @click.option("--max_tool_calls", default=0, type=int)
-@click.option("--override_index", default=None, type=int, required=False)
 @click.option("--n_tasks", type=int, default=None,
               help="Run the FIRST n tasks in benchmark order. A prefix rather than a "
                    "sample, so --n_tasks 5 is a subset of --n_tasks 10 and both are a "
@@ -71,11 +77,10 @@ from utils import load_parameters
 @click.pass_context
 def main(ctx, game, controller_variant, executor, executor_vlm_model, executor_vlm_kind,
          supervisor_vlm_model, supervisor_vlm_kind, supervisor_max_new_tokens,
-         save_video, max_steps, max_tool_calls, override_index, n_tasks,
+         save_video, max_steps, max_tool_calls, n_tasks,
          verbose, regenerate):
     """Benchmark a frozen VLM on a game, with or without prebuilt knowledge."""
     parameters = load_parameters()
-    vlm_name = executor_vlm_model or parameters["executor_vlm_model"]
     ctx.obj = dict(
         parameters=parameters,
         game=game,
@@ -83,19 +88,18 @@ def main(ctx, game, controller_variant, executor, executor_vlm_model, executor_v
         executor=executor,
         executor_vlm_model=executor_vlm_model,
         executor_vlm_kind=executor_vlm_kind,
-        # Falls back to the executor's model, which is what every caller passed explicitly
-        # before this was a flag. Resolved here rather than in each arm so the two arms
-        # cannot disagree about what "unset" means.
+        # Falls back to the executor's, which is now guaranteed to be a real model rather
+        # than None. Resolved here rather than in each arm so the two arms cannot disagree
+        # about what "unset" means.
         supervisor_vlm_model=supervisor_vlm_model or executor_vlm_model,
         supervisor_vlm_kind=supervisor_vlm_kind or executor_vlm_kind,
         supervisor_max_new_tokens=supervisor_max_new_tokens,
         # Names the CSV and the emulator session directory. Derived once here so both arms
         # agree on it — they write beside each other and a mismatch would be silent.
-        model_save_name=vlm_name.split("/")[-1].lower(),
+        model_save_name=executor_vlm_model.split("/")[-1].lower(),
         save_video=save_video,
         max_steps=max_steps,
         max_tool_calls=max_tool_calls,
-        override_index=override_index,
         n_tasks=n_tasks,
         verbose=verbose,
         regenerate=regenerate,

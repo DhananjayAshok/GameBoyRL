@@ -4,7 +4,7 @@ Judging a finished trajectory.
 
 from __future__ import annotations
 
-from typing import Any, Callable, List, Optional, Type
+from typing import Any, Callable, List, Optional, Tuple, Type
 
 from gameboy_worlds.interface import Environment
 
@@ -18,7 +18,7 @@ from execution.supervisors.prompts import (
     DESCRIBE_SLICE_PROMPT,
     JUDGE_BINARY_PROMPT,
 )
-from utils import parse_int, parse_key_value, parse_yes_no, VLM
+from utils import parse_int, parse_key_value, parse_yes_no, sum_meta, zero_meta, VLM
 
 
 class AttemptCheckerSupervisor(Supervisor):
@@ -321,7 +321,7 @@ def derive_critique_hint(
     max_new_tokens: int,
     previous_hint: str = "",
     max_frames_per_slice: int = 8,
-) -> str:
+) -> Tuple[str, Optional[int], Optional[int]]:
     """Slice the failed trajectory into fixed-size windows, critique each with images,
     then consolidate into a single hint with a text-only call.
 
@@ -332,17 +332,36 @@ def derive_critique_hint(
     Not a supervisor method, so its calls go to the VLM unrecorded: the caller is a plain
     script, not something holding a
     :class:`~execution.report.SupervisorReport`. It takes a ``vlm`` and adapts it to the
-    ``call`` the windowing helper wants.
+    ``call`` the windowing helper wants — which means unwrapping ``VLM.infer``'s
+    ``{"output": ..., "meta": ...}``, since the helper zips its return against the window
+    list and a dict there iterates as its *keys*.
+
+    Because nothing records these calls, the token counts are returned rather than filed:
+    they are otherwise the one part of a run's cost that nothing on disk accounts for.
+
+    :return: ``(hint, input_tokens, output_tokens)``. The counts cover every call made
+        here, and are ``None`` where the backend did not report usage — distinct from the
+        ``0`` returned on the paths that make no calls at all. The hint falls back to
+        *previous_hint* when there was nothing to critique.
     """
     if not env_steps:
-        return previous_hint
+        empty = zero_meta()
+        return previous_hint, empty["input_tokens"], empty["output_tokens"]
+
+    metas = []
+
+    def call(**kwargs: Any) -> Any:
+        result = vlm.infer(**kwargs)
+        metas.append(result["meta"])
+        return result["output"]
 
     segment_summaries = summarise_trajectory_segments(
         env_steps, CRITIQUE_SLICE_PROMPT, game, task,
-        lambda **kwargs: vlm.infer(**kwargs), max_new_tokens, max_frames_per_slice
+        call, max_new_tokens, max_frames_per_slice
     )
     if not segment_summaries:
-        return previous_hint
+        total = sum_meta(*metas)
+        return previous_hint, total["input_tokens"], total["output_tokens"]
 
     prior_block = (
         f'Previous hint (refine or build on this):\n"{previous_hint}"\n\n'
@@ -355,7 +374,9 @@ def derive_critique_hint(
         .replace("[SEGMENT_SUMMARIES]", "\n".join(segment_summaries))
         .replace("[PRIOR_HINT_BLOCK]", prior_block)
     )
-    output = vlm.infer(texts=consolidate_prompt, max_new_tokens=max_new_tokens)
-    return parse_key_value(output, "hint") or output.strip()
+    output = call(texts=consolidate_prompt, max_new_tokens=max_new_tokens)
+    total = sum_meta(*metas)
+    return (parse_key_value(output, "hint") or output.strip(),
+            total["input_tokens"], total["output_tokens"])
 
 

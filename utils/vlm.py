@@ -310,7 +310,7 @@ def object_detection(
 def identify_matches(
     description: str,
     screens: List[np.ndarray],
-    reference: Image.Image,
+    reference: np.ndarray,
     text_prompt: str = None,
     model: VLM = None,
     parameters: dict = None,
@@ -325,7 +325,8 @@ def identify_matches(
     Args:
         description: A textual description of the target object.
         screens: A list of screen images in numpy array format (H x W x C).
-        reference: A PIL Image of the reference object.
+        reference: The reference object's frame, as a greyscale numpy array. Converted to
+            PIL here, so passing a PIL Image raises AttributeError.
         text_prompt: Optional prompt to guide the VLM that requests an `Answer: <yes or no>` line.
         model: Optional VLM instance to use for inference. If None, uses the object detection VLM.
 

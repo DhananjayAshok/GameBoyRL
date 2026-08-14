@@ -99,10 +99,11 @@ def _paired_index(a: pd.DataFrame, label_a: str, b: pd.DataFrame, label_b: str,
     prefix of a long one. That is what makes ``--n_tasks 5`` comparable to a full sweep.
 
     The task strings are checked at every shared position and a mismatch is fatal rather than
-    dropped. It means the two CSVs are not prefixes of one benchmark table — an edited table,
-    two different games, or a ``--override_index`` run, which appends its single row at the
-    resume position rather than at its own — and pairing them anyway would put two different
-    episodes side by side and call the difference a result.
+    dropped. It means the two CSVs are not prefixes of one benchmark table — an edited table
+    or two different games — and pairing them anyway would put two different episodes side by
+    side and call the difference a result. (It also used to catch ``--override_index`` runs,
+    which appended their single row at the resume position rather than at their own; that
+    flag has been removed, and with it the only in-tree way to write a row out of order.)
     """
     n = min(len(a), len(b))
     if n == 0:
@@ -350,7 +351,7 @@ def _episode_section(index: int, row, report, model, report_dir,
 
     blocks = [
         # The row number disambiguates the episodes that share a task string; it is also the
-        # benchmark table's own row, so it is what --override_index takes.
+        # benchmark table's own row.
         md.h2(f"[{index}] {task}"),
         md.bullets([
             f"success: **{row['success']}**",

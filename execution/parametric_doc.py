@@ -190,7 +190,7 @@ def _warn_if_empty(document: InfoDocument, game: str, path: str, cached: bool,
     if document.task_entries:
         return
     source = "the cached document" if cached else "the model's reply"
-    remedy = ("Delete it and rerun to ask again, or pass --regenerate."
+    remedy = ("Delete it and rerun to ask again."
               if cached else
               f"'{game}' is not in this model's priors. Use --mode retrieval if you need "
               f"knowledge for this game.")
@@ -210,18 +210,13 @@ def load_or_generate_parametric_document(
     vlm: VLM,
     n_categories: int = 10,
     max_new_tokens: int = 4000,
-    regenerate: bool = False,
     parameters: Optional[dict] = None,
 ) -> InfoDocument:
     """Return the cached document at *path*, generating and writing it if absent.
 
-
     :param path: Where the document is cached, from ``Paths.parametric_doc()``.
-    :param regenerate: Overwrite an existing cached document instead of reusing it. The new
-        document replaces the old one whatever it says, empty included — a regeneration that
-        kept the previous document under some conditions would not be a regeneration.
     """
-    if os.path.exists(path) and not regenerate:
+    if os.path.exists(path):
         document = load_document(path, parameters=parameters)
         log_info(f"[parametric] reusing cached document for '{game}' — "
                  f"{len(document.task_entries)} task entries ({path})")

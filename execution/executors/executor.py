@@ -246,6 +246,9 @@ You are playing a GameBoy game. The current screen is shown in the image.
         aborted = False
 
         for action_str in decision.actions:
+            if n_env_steps >= self._max_steps:
+                break
+
             if self._tools_offered(self._n_tool_calls >= self._max_tool_calls):
                 tool_result = self._try_parse_tool_call(action_str)
                 if tool_result is not None:

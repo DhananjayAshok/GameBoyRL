@@ -440,34 +440,6 @@ def says_complete(response: str) -> bool:
     return parse_completion(response) is True
 
 
-@dataclass
-class SimpleReport(ExecutorReport):
-    """
-    Report produced by :class:`~execution.executors.executor.PolicyExecutor`, and so by
-    every arm.
-    """
-
-    @property
-    def n_env_steps(self) -> int:
-        """Number of environment steps taken."""
-        return sum(1 for s in self.steps if isinstance(s, EnvironmentStepRecord))
-
-    @property
-    def n_tool_calls(self) -> int:
-        """Number of tool calls made."""
-        return sum(1 for s in self.steps if isinstance(s, ExecutorToolCallRecord))
-
-    @property
-    def env_step_records(self) -> List[EnvironmentStepRecord]:
-        """Ordered list of environment step records."""
-        return [s for s in self.steps if isinstance(s, EnvironmentStepRecord)]
-
-    @property
-    def tool_call_records(self) -> List[ExecutorToolCallRecord]:
-        """Ordered list of tool call records."""
-        return [s for s in self.steps if isinstance(s, ExecutorToolCallRecord)]
-
-
 # ---------------------------------------------------------------------------
 # Supervisor side
 # ---------------------------------------------------------------------------

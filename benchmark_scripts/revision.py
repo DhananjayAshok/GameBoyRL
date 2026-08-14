@@ -116,7 +116,6 @@ def revision_cmd(obj, max_leg_steps, max_frames_per_slice):
         save_path=save_path,
         results=results,
         n_completed=n_completed,
-        override_index=obj["override_index"],
         run_one=run_one,
         build_row=build_row,
         on_episode=on_episode,

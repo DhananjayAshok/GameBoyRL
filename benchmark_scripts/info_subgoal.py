@@ -115,10 +115,9 @@ def info_subgoal_cmd(obj, info_docs, mode, parametric_categories,
         documents = common.load_documents(info_docs, parameters)
     else:
         # Generated once and cached, so a rerun of the same command plans from the same
-        # document. Written by the supervisor's own model — there is deliberately no
-        # separate generator flag — and keyed on it rather than on the executor's: a
-        # different model has different priors, and reusing one's document under another's
-        # name would attribute knowledge to a model that never wrote it.
+        # document. Keyed on the supervisor's model rather than the executor's: a different
+        # model has different priors, and reusing one's document under another's name would
+        # attribute knowledge to a model that never wrote it. Delete the file to rebuild it.
         doc_path = Paths(parameters=parameters, game=game,
                          model_name=knowledge_model).parametric_doc()
         documents = [load_or_generate_parametric_document(
@@ -127,7 +126,6 @@ def info_subgoal_cmd(obj, info_docs, mode, parametric_categories,
             vlm=VLM(knowledge_model, knowledge_kind),
             n_categories=parametric_categories,
             max_new_tokens=obj["supervisor_max_new_tokens"],
-            regenerate=obj["regenerate"],
             parameters=parameters,
         )]
 
@@ -139,8 +137,6 @@ def info_subgoal_cmd(obj, info_docs, mode, parametric_categories,
     }
 
     columns = common.COMMON_COLUMNS + [
-        # `hint` holds the [STEP]-joined plan, matching the info arm's column so the two
-        # arms' advice sits in the same place. `original_plan` is the same, before replans.
         "hint",
         "original_plan",
         *SUMMARY_COLUMNS,
@@ -251,7 +247,6 @@ def info_subgoal_cmd(obj, info_docs, mode, parametric_categories,
         save_path=save_path,
         results=results,
         n_completed=n_completed,
-        override_index=obj["override_index"],
         run_one=run_one,
         build_row=build_row,
         on_episode=on_episode,
