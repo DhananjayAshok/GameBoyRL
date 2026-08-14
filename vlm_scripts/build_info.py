@@ -15,7 +15,7 @@ Called by scripts/vlm/build_info.sh (via vlm.py build_info). Use --help for CLI 
 #   <trajectory_path>.pkl   -> {group_idx: trajectory | [trajectory, ...]}
 #
 # Output — everything under ONE directory beside the input stem, nothing in CWD:
-#   <dirname(trajectory_path)>/info_<model_save_name>/
+#   <dirname(trajectory_path)>/info_docs/
 #     insights.jsonl                                stage A leaves (one row per pair)
 #     frames/<group_idx>_{task,image}.png           representative frames, for visual matching
 #     merge/round_<r>/<i>.{json,matches.json,meta.json} every merge node, kept as the debug trail
@@ -35,6 +35,7 @@ import click
 from tqdm import tqdm
 
 from debug_scripts.frames import sample_indices, to_pil
+from execution.registry import AVAILABLE_EXECUTORS
 from execution.info_doc import (
     IMAGE_SECTION,
     TASK_SECTION,
@@ -555,11 +556,10 @@ def run_stage_b(leaves, out_dir, vlm, game, max_new_tokens, max_concurrency, ver
 @click.option("--overwrite_from_round", default=None, type=int,
               help="Rebuild the merge tree from this round onward, reusing earlier rounds. "
                    "The useful flag when iterating on the match/combine prompts.")
-@click.option("--executor", default="history", show_default=True,
-              help="Executor whose trajectories this document is distilled from. Names the "
-                   "output dir (info_<model>_<executor>) so documents from different "
-                   "executors cannot overwrite each other — the curiosity stem carries no "
-                   "executor of its own.")
+@click.option("--executor", default="single_actions", show_default=True,
+              type=click.Choice(list(AVAILABLE_EXECUTORS.keys())),
+              help="Executor whose trajectories this document is distilled from. Recorded in "
+                   "the document's provenance.")
 @click.option("--source", required=True, type=click.Choice(["curiosity", "zeroshot"]),
               help="The vertical these trajectories came from. Recorded in the document's "
                    "provenance. Required, and never inferred: readers used to reconstruct "
@@ -597,12 +597,8 @@ def build_info_cmd(obj, trajectory_path, n_frames, max_concurrency, stage, overw
             log_error(f"trajectory annotation {kind} not found at {path}.", parameters)
 
     # Output goes next to the input stem — the script never reconstructs a path from
-    # --game/--run_name, exactly like the stages that produce its input. The executor is in the dir name
-    # because it is the identity of the trajectories distilled: the zeroshot stem already
-    # encodes it, but the curiosity stem does not, so without it two executors' curiosity
-    # documents land on the same path and the second silently overwrites the first.
-    out_dir = paths.info_dir_from_stem(trajectory_path, model_name=model_name,
-                                       executor=executor)
+    # --game/--run_name, exactly like the stages that produce its input.
+    out_dir = paths.info_dir_from_stem(trajectory_path)
     os.makedirs(out_dir, exist_ok=True)
     final_path = os.path.join(out_dir, INFO_DOC_FILENAME)
 

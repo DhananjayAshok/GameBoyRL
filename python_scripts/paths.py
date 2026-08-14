@@ -48,6 +48,7 @@ PRODUCERS = {
 }
 
 GROUPED_FILENAME = "grouped_global_high_reward_trajectories.pkl"
+INFO_DIR_NAME = "info_docs"
 INFO_DOC_FILENAME = "info.json"
 INSIGHTS_FILENAME = "insights.jsonl"
 TASKS_FILENAME = "zeroshot_tasks.jsonl"
@@ -132,7 +133,7 @@ def source_label(artifact_dir: str) -> str:
     The **inverse** of the scheme this module builds, which is why it lives beside it. The two
     verticals lay their directories out differently::
 
-        curiosity  .../curiosity/<run_name>/info_<model>_<executor>    -> "curiosity"
+        curiosity  .../curiosity/<run_name>/info_docs                  -> "curiosity"
         zeroshot   .../zeroshot/zeroshot_tasks_<executor>_attempts/... -> "zeroshot"
 
     Prefer a *recorded* label where one exists — an info document carries its own provenance
@@ -293,16 +294,10 @@ def info_source_stem(parameters=None, *, game: str, model_name: str, run_name: s
                                      executor=executor)
 
 
-def info_dir_from_stem(trajectory_path: str, *, model_name: str, executor: str) -> str:
+def info_dir_from_stem(trajectory_path: str) -> str:
     """Where ``build_info.py`` puts everything, given the ``--trajectory_path`` it was handed.
-
-    The executor is in the name because it is the identity of the trajectories the document was
-    distilled from. The zeroshot stem already encodes it
-    (``zeroshot_tasks_<executor>_attempts``), but the curiosity stem does not — so without it a
-    curiosity document built from one executor's annotations silently overwrites another's.
     """
-    return os.path.join(os.path.dirname(trajectory_path),
-                        f"info_{model_save_name(model_name)}_{executor}")
+    return os.path.join(os.path.dirname(trajectory_path), INFO_DIR_NAME)
 
 
 def source_info_dir(parameters=None, *, game: str, model_name: str, run_name: str,
@@ -310,8 +305,7 @@ def source_info_dir(parameters=None, *, game: str, model_name: str, run_name: st
     """Info dir for a named source. ``source`` is 'attempt' (aka 'zeroshot') or 'curiosity'."""
     return info_dir_from_stem(
         info_source_stem(parameters, game=game, model_name=model_name, run_name=run_name,
-                         executor=executor, source=source),
-        model_name=model_name, executor=executor)
+                         executor=executor, source=source))
 
 
 def info_dir(parameters=None, *, game: str, model_name: str, run_name: str,

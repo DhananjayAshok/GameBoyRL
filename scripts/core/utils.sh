@@ -325,9 +325,8 @@ populate_dict VLM_DEFAULTS BUILD_INFO_DEFAULTS
 BUILD_INFO_DEFAULTS["n_frames"]=8
 BUILD_INFO_DEFAULTS["max_concurrency"]=16
 BUILD_INFO_DEFAULTS["stage"]="all"
-# Names the output dir (info_<model>_<executor>), so documents distilled from one executor's
-# trajectories never overwrite another's. The curiosity stem carries no executor of its own,
-# so without this the two verticals would collide on the same path.
+# Recorded in the document's provenance. Names no path: the output dir is info_docs beside
+# the input stem, whose parents already carry the model and (for zeroshot) the executor.
 BUILD_INFO_DEFAULTS["executor"]="single_actions"
 BUILD_INFO_DEFAULTS["overwrite_from_round"]=none
 # Override the shared VLM default of 1000: stage A emits six labelled fields plus a bullet
@@ -528,3 +527,57 @@ function debug_group_flags() {
     fi
     echo "$result"
 }
+
+# run_benchmark: every option run_benchmark.py declares, group and arm alike.
+RUN_BENCHMARK_ESSENTIALS=()
+populate_array ESSENTIAL_ARGS RUN_BENCHMARK_ESSENTIALS
+
+declare -A RUN_BENCHMARK_DEFAULTS=(
+    ["supervisor"]="dummy"
+    ["controller_variant"]="low_level"
+    ["executor"]="single_none"
+    ["executor_vlm_model"]="Qwen/Qwen3-VL-8B-Instruct"
+    ["executor_vlm_kind"]="huggingface"
+    ["supervisor_vlm_model"]=none
+    ["supervisor_vlm_kind"]=none
+    ["supervisor_max_new_tokens"]=5000
+    ["save_video"]=true
+    ["max_steps"]=175
+    ["max_tool_calls"]=0
+    ["n_tasks"]=none
+    ["verbose"]=false
+    ["regenerate"]=false
+    ["max_leg_steps"]=5
+    ["max_attempts_per_step"]=3
+    ["max_replans"]=2
+    ["max_frames_per_slice"]=8
+    ["info_docs"]=none
+    ["parametric_categories"]=10
+    ["max_concurrency"]=8
+    ["executor_max_new_tokens"]=8000
+)
+
+RUN_BENCHMARK_ARG_KEYS=("${RUN_BENCHMARK_ESSENTIALS[@]}" "${!RUN_BENCHMARK_DEFAULTS[@]}")
+
+# run_benchmark_info_retrieval: run_benchmark's info_subgoal_retrieval arm with --info_docs
+# discovered from disk instead of typed by hand.
+RUN_BENCHMARK_INFO_RETRIEVAL_ESSENTIALS=()
+populate_array RUN_BENCHMARK_ESSENTIALS RUN_BENCHMARK_INFO_RETRIEVAL_ESSENTIALS
+
+declare -A RUN_BENCHMARK_INFO_RETRIEVAL_DEFAULTS
+populate_dict RUN_BENCHMARK_DEFAULTS RUN_BENCHMARK_INFO_RETRIEVAL_DEFAULTS
+# Both are derived, not settable: the arm is pinned by the script's identity, and the document
+# list is what the script exists to look up.
+unset RUN_BENCHMARK_INFO_RETRIEVAL_DEFAULTS["supervisor"]
+unset RUN_BENCHMARK_INFO_RETRIEVAL_DEFAULTS["info_docs"]
+# Which documents to read, NOT which model is benchmarked (that is executor_vlm_model).
+# docs_mode picks the legs (same vocabulary as info_mode_sources).
+# docs_run_name selects the CURIOSITY leg's input (curiosity/<run_name>/trajectory_annotation).
+# docs_executor selects the ZEROSHOT leg's input (zeroshot_tasks_<executor>_attempts) and
+# nothing else — the curiosity leg is executor-independent.
+RUN_BENCHMARK_INFO_RETRIEVAL_DEFAULTS["docs_model"]="google/gemma-4-31b-it"
+RUN_BENCHMARK_INFO_RETRIEVAL_DEFAULTS["docs_mode"]="both"
+RUN_BENCHMARK_INFO_RETRIEVAL_DEFAULTS["docs_run_name"]="my_run"
+RUN_BENCHMARK_INFO_RETRIEVAL_DEFAULTS["docs_executor"]="single_actions"
+
+RUN_BENCHMARK_INFO_RETRIEVAL_ARG_KEYS=("${RUN_BENCHMARK_INFO_RETRIEVAL_ESSENTIALS[@]}" "${!RUN_BENCHMARK_INFO_RETRIEVAL_DEFAULTS[@]}")

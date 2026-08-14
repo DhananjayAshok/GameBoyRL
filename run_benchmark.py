@@ -1,15 +1,21 @@
 """
 Entry point for the benchmark_scripts package. Use --help for CLI options.
 
-Four arms, one group, each adding one capability to the one before it::
+Five arms, one group, each adding one capability to the one before it::
 
-    run_benchmark.py --game X baseline       no supervisor reasoning at all
-    run_benchmark.py --game X revision       short legs, hint revised between them
-    run_benchmark.py --game X subgoal        a plan from the task alone, driven step by step
-    run_benchmark.py --game X info_subgoal   the same, planned from a retrieved document
+    run_benchmark.py --game X baseline                  no supervisor reasoning at all
+    run_benchmark.py --game X revision                  short legs, hint revised between them
+    run_benchmark.py --game X subgoal                   a plan from the task alone
+    run_benchmark.py --game X info_subgoal_parametric   planned from the model's own priors
+    run_benchmark.py --game X info_subgoal_retrieval    planned from a distilled document
 
-Called by scripts/benchmark.sh, scripts/benchmark_plan.sh,
-scripts/pipeline/benchmark_info_all.sh and run.sh.
+The subcommand word IS the supervisor's registry key (execution.registry.AVAILABLE_SUPERVISORS)
+and the CSV stem, with the one exception that the control arm's key is ``dummy``. The two
+info arms are separate commands rather than one command with a --mode flag, because they are
+separate experiments with different inputs: --info_docs is required by one and rejected by
+the other, which a shared command could not express.
+
+Called by scripts/run_benchmark.sh.
 
 There used to be an ``info`` arm, which spent retrieved knowledge on a single hint written
 once at the opening frame. It has been retired along with ``InfoHintSupervisor``, and its
@@ -32,7 +38,13 @@ import click
 
 from gameboy_worlds import AVAILABLE_GAMES
 
-from benchmark_scripts import baseline, info_subgoal, revision, subgoal
+from benchmark_scripts import (
+    baseline,
+    info_subgoal_parametric,
+    info_subgoal_retrieval,
+    revision,
+    subgoal,
+)
 from execution.registry import AVAILABLE_EXECUTORS
 from utils import load_parameters
 from python_scripts.paths import model_save_name
@@ -110,7 +122,8 @@ def main(ctx, game, controller_variant, executor, executor_vlm_model, executor_v
 main.add_command(baseline, name="baseline")
 main.add_command(revision, name="revision")
 main.add_command(subgoal, name="subgoal")
-main.add_command(info_subgoal, name="info_subgoal")
+main.add_command(info_subgoal_retrieval, name="info_subgoal_retrieval")
+main.add_command(info_subgoal_parametric, name="info_subgoal_parametric")
 
 
 if __name__ == "__main__":

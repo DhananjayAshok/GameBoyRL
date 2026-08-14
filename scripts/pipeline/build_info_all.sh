@@ -10,7 +10,7 @@
 #
 # Assumes a VLM server is already serving --model_name (does NOT start one), matching full.sh.
 #
-# Output per source, under <dirname(stem)>/info_<model_save_name>/:
+# Output per source, under <dirname(stem)>/info_docs/:
 #   insights.jsonl   stage A leaves — the merge tree's input, and what debug.py info reports
 #                    on. No benchmark mode reads it directly any more.
 #   frames/          representative frames, for visual matching

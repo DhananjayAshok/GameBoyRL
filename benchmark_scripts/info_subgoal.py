@@ -14,7 +14,7 @@ from gameboy_worlds import get_benchmark_tasks
 from execution.parametric_doc import load_or_generate_parametric_document
 from execution.registry import AVAILABLE_EXECUTORS, AVAILABLE_SUPERVISORS
 from execution.supervisors import PLAN_SEPARATOR, InfoSubgoalSupervisor
-from utils import VLM, log_error, log_info
+from utils import VLM, log_info
 from python_scripts import paths
 from python_scripts.paths import Paths
 
@@ -56,41 +56,58 @@ SUMMARY_COLUMNS = [
 _EMPTY_SUMMARY = {key: 0 for key in SUMMARY_COLUMNS}
 
 
-@click.command(name="info_subgoal")
-@click.option("--info_docs", default=None, type=str,
-              help="Comma-separated info.json path(s). Required for --mode retrieval.")
-@click.option("--mode", default="retrieval", type=click.Choice(["retrieval", "parametric"]),
-              help="Where the planner's knowledge comes from: documents distilled from real "
-                   "trajectories (retrieval), or one the model writes from its own priors "
-                   "given only the game's name (parametric). Everything downstream is "
-                   "identical, so the pair isolates what distillation actually bought.")
+def _shared_options(command):
+    options = [
+        click.option("--max_concurrency", default=8, show_default=True, type=int,
+                     help="Parallel relevance calls during selection; they are independent."),
+        click.option("--max_leg_steps", default=5, show_default=True, type=int,
+                     help="Env-step cap for ONE executor attempt. Internal to the supervisor: "
+                          "it decides how often the supervisor gets to look, not the episode "
+                          "budget."),
+        click.option("--max_attempts_per_step", default=3, show_default=True, type=int,
+                     help="Failed attempts at one step before the supervisor moves on. The "
+                          "final step ignores it."),
+        click.option("--max_replans", default=2, show_default=True, type=int,
+                     help="Times the plan may be rewritten in one episode. Bounds both cost "
+                          "and the risk of thrashing between two readings of the same screen."),
+        click.option("--max_frames_per_slice", default=8, show_default=True, type=int,
+                     help="Trajectory frames per judging call."),
+        click.option("--executor_max_new_tokens", default=8000, show_default=True, type=int,
+                     help="Token budget per executor action call. Overrides the project-wide "
+                          "executor_vlm_max_new_tokens for this process only."),
+    ]
+    for option in reversed(options):
+        command = option(command)
+    return command
+
+
+@click.command(name="info_subgoal_retrieval")
+@click.option("--info_docs", required=True, type=str,
+              help="Comma-separated info.json path(s) to plan from.")
+@_shared_options
+@click.pass_obj
+def info_subgoal_retrieval_cmd(obj, info_docs, **kwargs):
+    """Plan from documents distilled out of real trajectories."""
+    _run(obj, mode="retrieval", info_docs=info_docs, parametric_categories=None, **kwargs)
+
+
+@click.command(name="info_subgoal_parametric")
 @click.option("--parametric_categories", default=10, show_default=True, type=int,
               help="Upper bound on task categories requested when generating a parametric "
-                   "document. Ignored under --mode retrieval. The generation call uses "
-                   "--supervisor_max_new_tokens like every other call on that model; the "
-                   "whole document comes back in one reply, so ask for fewer categories "
-                   "rather than lowering that budget.")
-@click.option("--max_concurrency", default=8, show_default=True, type=int,
-              help="Parallel relevance calls during selection; they are independent.")
-@click.option("--max_leg_steps", default=5, show_default=True, type=int,
-              help="Env-step cap for ONE executor attempt. Internal to the supervisor: it "
-                   "decides how often the supervisor gets to look, not the episode budget.")
-@click.option("--max_attempts_per_step", default=3, show_default=True, type=int,
-              help="Failed attempts at one step before the supervisor moves on. The final "
-                   "step ignores it.")
-@click.option("--max_replans", default=2, show_default=True, type=int,
-              help="Times the plan may be rewritten in one episode. Bounds both cost and "
-                   "the risk of thrashing between two readings of the same screen.")
-@click.option("--max_frames_per_slice", default=8, show_default=True, type=int,
-              help="Trajectory frames per judging call.")
-@click.option("--executor_max_new_tokens", default=8000, show_default=True, type=int,
-              help="Token budget per executor action call. Overrides the project-wide "
-                   "executor_vlm_max_new_tokens for this process only.")
+                   "document. The generation call uses --supervisor_max_new_tokens like every "
+                   "other call on that model; the whole document comes back in one reply, so "
+                   "ask for fewer categories rather than lowering that budget.")
+@_shared_options
 @click.pass_obj
-def info_subgoal_cmd(obj, info_docs, mode, parametric_categories,
-                      max_concurrency, max_leg_steps, max_attempts_per_step, max_replans,
-                      max_frames_per_slice, executor_max_new_tokens):
-    """Benchmark with a plan written from the document and supervised step by step."""
+def info_subgoal_parametric_cmd(obj, parametric_categories, **kwargs):
+    """Plan from a document the model writes from its own priors, given the game's name."""
+    _run(obj, mode="parametric", info_docs=None,
+         parametric_categories=parametric_categories, **kwargs)
+
+
+def _run(obj, *, mode, info_docs, parametric_categories,
+         max_concurrency, max_leg_steps, max_attempts_per_step, max_replans,
+         max_frames_per_slice, executor_max_new_tokens):
     parameters = obj["parameters"]
     game = obj["game"]
     executor = obj["executor"]
@@ -111,8 +128,6 @@ def info_subgoal_cmd(obj, info_docs, mode, parametric_categories,
     knowledge_kind = obj["supervisor_vlm_kind"]
 
     if mode == "retrieval":
-        if not info_docs:
-            log_error("--mode retrieval requires --info_docs.", parameters)
         documents = common.load_documents(info_docs, parameters)
     else:
         # Generated once and cached, so a rerun of the same command plans from the same
@@ -132,7 +147,8 @@ def info_subgoal_cmd(obj, info_docs, mode, parametric_categories,
 
     # The knowledge mode is part of the supervisor's identity, not a parameter beside it:
     # AVAILABLE_SUPERVISORS has a real subclass per mode, because two modes are different
-    # experiments and must not share a CSV or a session tree.
+    # experiments and must not share a CSV or a session tree. It is the subcommand word too,
+    # so this name is the one the caller typed.
     supervisor_name = f"info_subgoal_{mode}"
     supervisor_class = AVAILABLE_SUPERVISORS[supervisor_name]
 

@@ -27,7 +27,7 @@ For each line (line_number = 0-indexed position in the JSONL):
 CLI options
 -----------
   --tasks_path        Path to the input JSONL file (required)
-  --executor          Short name of the executor class (default: simple)
+  --executor          Short name of the executor class (default: single_actions)
   --max_steps         Env-step budget per task attempt (default: 50)
   --max_tool_calls    Tool-call budget per task attempt (default: 10)
   --lookback          Frames passed to checker VLM (default: 8)
@@ -232,7 +232,7 @@ def _attempt_task(
 @click.option(
     "--executor",
     "executor_name",
-    default="simple",
+    default="single_actions",
     show_default=True,
     type=click.Choice(list(AVAILABLE_EXECUTORS.keys())),
     help="Executor class to use for task attempts.",
