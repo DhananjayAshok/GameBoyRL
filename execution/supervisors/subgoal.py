@@ -238,8 +238,7 @@ class SubgoalSupervisor(RevisingSupervisor):
         replacement = parse_plan(output)
         if not replacement:
             # Said flawed and produced nothing to replace it with — including the "NONE"
-            # the prompt offers, which :func:`parse_plan` reads as no plan. Hinting the
-            # existing step is a worse plan than no plan, but it is a plan.
+            # This shouldn't be happening, but avoid a crash. 
             log_warn("[subgoal] plan judged flawed but no replacement was produced; "
                      "continuing with the current step.", self._parameters)
             return None

@@ -44,7 +44,7 @@ from execution.info_doc import (
     dump_document,
 )
 from utils import (HuggingFaceModel, VLM, log_error, log_info, log_warn, parse_key_value,
-                   parse_list, strip_stop)
+                   parse_list)
 
 INSIGHTS_FILENAME = "insights.jsonl"
 INFO_DOC_FILENAME = "info.json"
@@ -141,7 +141,7 @@ def _is_none(value: str | None) -> bool:
 
 def _parse_extraction(text: str) -> dict | None:
     """Parse EXTRACT_INSIGHTS_PROMPT output into task/image entry fields."""
-    body = strip_stop(text)
+    body = text
     insights = parse_list(body, "Insights")
     if not insights:
         return None
@@ -167,7 +167,7 @@ def _parse_extraction(text: str) -> dict | None:
 
 def _parse_match(text: str, n_existing: int) -> tuple[int | None, str]:
     """Parse MATCH_PROMPT output to a 0-based index into the existing entries, or None."""
-    body = strip_stop(text)
+    body = text
     reason = (parse_key_value(body, "Reasoning") or "").strip()
     raw = parse_key_value(body, "Match")
     if _is_none(raw):

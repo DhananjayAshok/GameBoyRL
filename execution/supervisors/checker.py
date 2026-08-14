@@ -367,9 +367,6 @@ def summarise_trajectory_segments(
 
     segment_summaries = []
     for (start, end), output in windows:
-        stop_idx = output.lower().find("[stop]")
-        if stop_idx != -1:
-            output = output[:stop_idx]
         for line in output.splitlines():
             if line.strip().lower().startswith("segment summary:"):
                 summary = line.strip()[len("segment summary:"):].strip()

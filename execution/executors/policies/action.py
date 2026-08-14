@@ -224,7 +224,7 @@ class SequenceActionPolicy:
             stripped = line.strip()
             if not stripped.lower().startswith("action:"):
                 continue
-            body = stripped[len("action:"):].replace("[STOP]", "").strip()
+            body = stripped[len("action:"):].strip()
             actions = [part.strip() for part in body.split(",") if part.strip()]
             if not actions:
                 return None

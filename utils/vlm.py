@@ -92,21 +92,6 @@ class VLM:
         """
         Performs inference using the VLM.
 
-        Returns ``{"output": ..., "meta": ...}`` — the same shape every entry point in
-        :mod:`utils.lm_inference` returns, passed through unchanged. Callers that only
-        want the text read ``["output"]``; callers that must account for what the call
-        cost read ``["meta"]``.
-
-        ``output`` follows the input shape. If a single string is passed and n_outputs==1,
-        a single string. If a list is passed and n_outputs==1, a list. If n_outputs > 1 and
-        texts is a single string, a list of n_outputs strings. If n_outputs > 1 and texts
-        is a list, a list of n_outputs lists.
-
-        ``meta`` is ``{"input_tokens": ..., "output_tokens": ...}`` with one entry **per
-        record** — scalars if ``texts`` was a string, otherwise lists of length
-        ``len(texts)``. It never gains an ``n_outputs`` dimension. Either count is ``None``
-        where the backend did not report it, which propagates through sums rather than
-        degrading to a partial total.
 
         :param texts: A single text prompt or a list of text prompts.
         :type texts: str or list[str]
@@ -167,8 +152,6 @@ class ObjectDetectionVLM(NamedVLM):
 def merge_ocr_strings(strings, min_overlap=3):
     """
     Merges a list of strings by removing subsets and combining overlapping fragments.
-
-    Written by Gemini3 Pro, but it seems to work.
 
     Args:
         strings (list): List of strings from OCR.

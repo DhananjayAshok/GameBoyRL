@@ -21,9 +21,9 @@ We never use this main file, so delete it. This will create a project with the n
 
 You can now add pip packages with:
 ```console
-uv add click huggingface_hub seaborn
+uv add click huggingface_hub
 ```
-These three packages are required for this codebase to run, but you can remove the `huggingface_hub` dependency by removing [`sync_data.py`](../sync_data.py) and remove the `seaborn` dependency by removing [Plotter](../utils/plot_handling.py).
+These two packages are required for this codebase to run, but you can remove the `huggingface_hub` dependency by removing [`sync_data.py`](../sync_data.py).
 
 This creates a uv.lock file, that must be committed to version control. This will also create the environment. Source it with (from root):
 

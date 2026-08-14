@@ -187,15 +187,12 @@ In one short sentence, say what changed between the two screens as a result of t
 
 
 def _first_sentence(response: str) -> str:
-    """The description, without the model's preamble or its ``[STOP]``.
+    """The description, without the model's preamble.
 
     Kept to one line because the block holds *k* of these and a paragraph each would crowd
     out the screen the model is supposed to be looking at.
     """
     text = (response or "").strip()
-    stop = text.lower().find("[stop]")
-    if stop != -1:
-        text = text[:stop].strip()
     for line in text.splitlines():
         stripped = line.strip()
         if stripped:

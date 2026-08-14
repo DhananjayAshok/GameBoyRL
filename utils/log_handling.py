@@ -17,7 +17,7 @@ def log_error(message: str, parameters: Optional[dict[str, Any]] = None) -> None
     parameters = load_parameters(parameters)
     logger = parameters["logger"]
     logger.error(message, stacklevel=2)
-    raise RuntimeError()
+    raise RuntimeError(f"{message}")
 
 
 def log_warn(message: str, parameters: Optional[dict[str, Any]] = None) -> None:

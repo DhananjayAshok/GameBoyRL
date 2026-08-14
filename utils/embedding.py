@@ -1,24 +1,5 @@
 """
 Embedding models and in-memory vector indices.
-
-Three layers, each usable on its own:
-
-``HuggingFaceEmbeddingEngine``
-    Loads and caches a backend model, keyed by model name in a process-wide registry so
-    repeated construction is free. Text and image subclasses each dispatch on a
-    ``model_kind`` string.
-
-``EmbeddingModel`` / ``TextEmbeddingModel`` / ``ImageEmbeddingModel``
-    The user-facing wrapper: ``embed`` a batch, ``compare`` two batches by cosine
-    similarity, or ``embed_compare`` one item against an existing index. The text and
-    image subclasses read their default model from project parameters.
-
-``Index``
-    A growable tensor of embeddings with add-and-compare semantics.
-
-Everything here is in-memory; nothing persists to disk.
-
-Not currently called from anywhere — this is a library kept for future use.
 """
 
 from abc import ABC, abstractmethod

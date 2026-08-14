@@ -19,7 +19,7 @@ def parse_key_value(text: str, key: str) -> Optional[str]:
     Return the value following ``"Key:"`` on the matching line of ``text``.
 
     The key is matched case-insensitively; the returned value preserves its
-    original case. A trailing ``[STOP]``/``[stop]`` marker is stripped.
+    original case.
 
     If ``text`` contains exactly one ``"response:"`` occurrence, only the text
     after it is searched (avoids matching mentions of ``key`` in a preceding
@@ -38,10 +38,6 @@ def parse_key_value(text: str, key: str) -> Optional[str]:
     marker = f"{key_lower}:"
 
     def clean(value: str) -> Optional[str]:
-        value = value.strip()
-        stop_idx = value.lower().find("[stop]")
-        if stop_idx != -1:
-            value = value[:stop_idx]
         value = value.strip()
         return value or None
 
@@ -68,24 +64,6 @@ def parse_yes_no(text: str, key: str) -> Optional[bool]:
     """
     Return the yes/no verdict on the ``"Key:"`` line of ``text``.
 
-    The single parser for every yes/no answer a model gives us. Built on
-    :func:`parse_key_value`, so it inherits the ``[STOP]`` stripping, the
-    ``response:`` disambiguation and the bare-key fallback.
-
-    **Only an explicit "yes" is yes.** ``y``, ``yep`` and ``true`` are *not*
-    accepted: a model answering those did not follow the format it was given, and
-    quietly rewarding near-misses is what lets prompt drift go unnoticed. Every
-    prompt in this codebase asks for ``<yes or no>``.
-
-    **Three-valued on purpose.** ``None`` means the model did not answer at all —
-    the key was missing, or present with an empty value. That is a different event
-    from an answer of "no", and callers treat it differently: some log it, some
-    warn loudly (a truncated reply that loses its verdict is a common and
-    confusing failure), and some ignore it. Collapsing it to ``False`` here would
-    force every caller to re-derive it, which is precisely how six near-identical
-    copies of this logic came to exist. Callers that only want the boolean should
-    say ``parse_yes_no(...) is True``.
-
     :param text: The model response to search.
     :type text: str
     :param key: The verdict key, e.g. ``"Complete"``, ``"Relevant"``, ``"Flawed"``.
@@ -102,8 +80,7 @@ def parse_yes_no(text: str, key: str) -> Optional[bool]:
 
 MIN_QUERIES_PER_MINUTE = 1
 
-# Placeholder per-model rate limits (queries per minute). All currently set to
-# the previous global default of 60; tune per-model as needed.
+# Placeholder per-model rate limits (queries per minute). 
 _RATE_LIMITS: dict[str, int] = {
     "gpt-4o-mini": 60,
     "gpt-4o": 60,
@@ -190,16 +167,6 @@ def sum_meta(*metas: dict[str, Any]) -> dict[str, Optional[int]]:
     """
     Add ``meta`` dicts together, flattening list-valued entries.
 
-    Callers that make several inference calls and have to report one total — the document
-    builders, ``derive_critique_hint`` — accumulate a list of ``meta`` dicts and collapse
-    it here. The shapes are deliberately mixed: a batched call yields **per-record lists**
-    while a single call yields **scalars**, and both land in the same sum. Flattening is
-    therefore not a convenience, it is the whole job; adding the shapes without it would
-    raise on the first batched entry.
-
-    ``None`` propagates exactly as in :func:`sum_optional` — one unreported count makes the
-    total unknown rather than a partial sum.
-
     :param metas: Any number of ``{"input_tokens": ..., "output_tokens": ...}`` dicts,
         whose values may be ints, None, or lists of either.
     :return: One ``{"input_tokens": ..., "output_tokens": ...}`` with scalar values.
@@ -222,9 +189,8 @@ def zero_meta() -> dict[str, int]:
     """
     The ``meta`` of a code path that made no inference calls at all.
 
-    Zero rather than None: "made no calls" is a known quantity, and collapsing it to
-    "unknown" would poison every total it is summed into. Used by the early returns of
-    helpers that may legitimately do no work.
+    :return: ``{"input_tokens": 0, "output_tokens": 0}``
+    :rtype: dict[str, int]
     """
     return {"input_tokens": 0, "output_tokens": 0}
 
@@ -440,14 +406,16 @@ class InferenceModel(ABC):
 
     def get_output_final(self, output_text: str) -> str:
         """
-        Post-process a single output text by truncating at the ``[STOP]`` token and stripping whitespace.
+        Post-process a single output text by truncating at the ``[STOP]`` token (case-insensitive) and stripping whitespace.
 
         :param output_text: Raw output string from the model.
         :type output_text: str
         :return: Cleaned output string with content after ``[STOP]`` removed.
         :rtype: str
         """
-        output_text = output_text.split("[STOP]")[0]
+        stop_idx = output_text.lower().find("[stop]")
+        if stop_idx != -1:
+            output_text = output_text[:stop_idx]
         return output_text.strip()
 
     def _standardize_format(

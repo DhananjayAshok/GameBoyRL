@@ -153,7 +153,6 @@ done
 
 # The no-knowledge run on the SAME executor and model. Without it the plan numbers above are
 # just success counts with nothing to be better than, which is the whole question this arm
-# asks. Same CSV shape, different filename, so viz.py reads them side by side.
 if [[ "${ARGS["baseline"]}" == "true" ]]; then
     echo ""
     echo "=== Benchmark: no-knowledge baseline ==="

@@ -145,7 +145,7 @@ Task: <single distilled imperative task string>
 """
 
 # ---------------------------------------------------------------------------
-# Parse helper: extract "Key: value" from VLM output, strip [STOP]
+# Parse helper: extract "Key: value" from VLM output
 # ---------------------------------------------------------------------------
 
 
@@ -157,9 +157,6 @@ def _parse_infer_block(
     Returns a dict with keys: task, start, end as absolute obs array indices, or None if no Task found or task is NO TASK.
     """
     text = text.lower()
-    stop_idx = text.find("[stop]")
-    if stop_idx != -1:
-        text = text[:stop_idx]
 
     task = parse_key_value(text, "Task")
     if task is None or "no task" in task:

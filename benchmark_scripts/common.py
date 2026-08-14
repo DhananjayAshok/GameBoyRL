@@ -33,7 +33,6 @@ from utils import depathify, log_error, log_info
 
 # Columns every arm writes, in this order. Arm-specific columns are appended after these,
 # and SESSION_COLUMN last, so a positional reader of the common prefix works on any arm's
-# CSV — which is what lets viz.py and the debug comparators treat the arms alike.
 COMMON_COLUMNS = [
     "game",
     "task",

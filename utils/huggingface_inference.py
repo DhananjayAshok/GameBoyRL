@@ -187,9 +187,10 @@ class HuggingFaceModel(HuggingFaceModelBase, InferenceModel):
         final_texts = []
         for text in output_texts:
             # HF includes the stop string in the output; strip at the earliest hit.
+            lowered = text.lower()
             earliest = len(text)
             for stop in final_stop:
-                idx = text.find(stop)
+                idx = lowered.find(stop.lower())
                 if idx != -1 and idx < earliest:
                     earliest = idx
             if earliest < len(text):
