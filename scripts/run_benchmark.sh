@@ -121,4 +121,4 @@ esac
 command="python run_benchmark.py $group_flags $subcommand $arm_flags"
 
 echo "$command"
-#$command
+$command
