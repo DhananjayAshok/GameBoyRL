@@ -9,7 +9,7 @@ from typing import Callable, List, Optional, Protocol
 from gameboy_worlds.interface.action import LowLevelAction
 
 from execution.report import (EnvironmentStepRecord, ExecutorToolCallRecord,
-                              StepRecord)
+                              StepRecord, tool_call_string)
 
 #: Recent steps rendered into the prompt. Applies to every policy that keeps a list: a
 #: visual description is much longer per entry than an action name, so an untruncated
@@ -54,16 +54,11 @@ class NoHistoryPolicy:
         return ""
 
 
-def _tool_call_string(record: ExecutorToolCallRecord) -> str:
-    args = ", ".join(f"{key}={value}" for key, value in record.kwargs.items())
-    return f"{record.executor_action_class.__name__}({args})"
-
-
 def _action_line(record: StepRecord) -> str:
     """One past action, tagged with whether it did anything.
     """
     if isinstance(record, ExecutorToolCallRecord):
-        return f"  {_tool_call_string(record)} -> {record.result}"
+        return f"  {tool_call_string(record)} -> {record.result}"
     action_str = record.action_class.get_action_name(**record.kwargs)
     changed = record.frame_changed
     if issubclass(record.action_class, LowLevelAction):
@@ -146,7 +141,7 @@ In one short sentence, say what changed between the two screens as a result of t
         prompts, images = [], []
         for record in steps:
             if isinstance(record, ExecutorToolCallRecord):
-                pending.append([_tool_call_string(record), str(record.result)])
+                pending.append([tool_call_string(record), str(record.result)])
                 continue
             # frame_after is the screen the *next* step starts from, so a pair is always
             # (before, after) of one action rather than two consecutive observations.

@@ -1,18 +1,5 @@
 """
 Judging a finished trajectory.
-
-:class:`AttemptCheckerSupervisor` runs an executor once and decides whether it
-succeeded.  The module-level functions implement the slice-then-consolidate
-pattern it uses to read a long trajectory: describe each segment separately, then
-consolidate those descriptions into one verdict or hint.
-
-They live here rather than in a utility module because they exist to serve that
-pattern, and ``derive_critique_hint`` is imported alongside the class by
-``vlm_scripts.attempt_tasks``.  :func:`window_trajectory` and
-:func:`summarise_trajectory_segments` are also used by the benchmark arms
-(:mod:`execution.supervisors.revising`), so this module is on the benchmark path
-despite the class in it not being an arm — an accepted dependency rather than an
-oversight.
 """
 
 from __future__ import annotations
@@ -39,20 +26,7 @@ class AttemptCheckerSupervisor(Supervisor):
     Runs the executor on a fixed task, then uses a two-stage VLM pipeline to
     judge whether the task was completed.
 
-    **Not a benchmark supervisor.** The benchmark arms are
-    :class:`~execution.supervisors.dummy.DummySupervisor`,
-    :class:`~execution.supervisors.revising.RevisingSupervisor`,
-    :class:`~execution.supervisors.subgoal.SubgoalSupervisor` and
-    :class:`~execution.supervisors.info_subgoal.InfoSubgoalSupervisor`; this class is used
-    only by ``vlm_scripts.attempt_tasks``, to label attempted tasks during data generation.
-    Its ``success`` is a VLM judgement, not the environment's ground-truth verdict, so it
-    must not be read as a benchmark result.
-
-    Stage 1 — DESCRIBE: inspects the last ``evaluation_lookback`` env-step
-    frames *without* task context and produces a description of what happened.
-
-    Stage 2 — JUDGE: given the task, the description, and the same frames,
-    produces a binary success/fail verdict.
+    **Not a benchmark supervisor.**; this class is used only by ``vlm_scripts.attempt_tasks``, to label attempted tasks during data generation.
 
     :param task: Natural-language task the executor should attempt.
     :param executor_class: :class:`~execution.executors.Executor` subclass to use.
@@ -122,10 +96,6 @@ class AttemptCheckerSupervisor(Supervisor):
         total = len(all_frames)
         slice_size = self._DESCRIBE_SLICE_SIZE
 
-        # One call rather than two when the whole trajectory fits in a single window:
-        # there is nothing to consolidate, and the description is already the answer.
-        # Kept here rather than pushed into window_trajectory because skipping the
-        # consolidate step is this caller's judgement, not a property of the windowing.
         if total <= slice_size:
             output = self._vlm_call(
                 "describe_slice",
@@ -165,12 +135,6 @@ class AttemptCheckerSupervisor(Supervisor):
         env_steps = [s for s in report.steps if isinstance(s, EnvironmentStepRecord)]
         k = min(self._evaluation_lookback, len(env_steps))
 
-        # How the executor stopped, and how much of its budget it left behind. Carried out
-        # alongside the judge's verdict because the pair is what makes the completion check
-        # auditable: `agent_done` is the executor's own claim that the task is finished, and
-        # `success` here is an independent judgement of the same question. Their
-        # disagreement rate is the only ground-truth-ish signal available for that check
-        # without human labelling, and it is unrecoverable once the report is dropped.
         run_meta = {
             "termination_reason": report.termination_reason,
             "n_env_steps": len(env_steps),
@@ -178,11 +142,6 @@ class AttemptCheckerSupervisor(Supervisor):
         }
 
         if k == 0:
-            # Same keys as the judged path below. This used to also carry `vlm_call_log`
-            # and `steps`, which that path deliberately dropped as "the same data under two
-            # names" — reachable through the SupervisorReport either way. Two shapes from
-            # one method meant a consumer reading those keys worked on empty trajectories
-            # and raised KeyError on real ones.
             return {
                 "success": False,
                 "safe_success_point": None,
@@ -208,16 +167,9 @@ class AttemptCheckerSupervisor(Supervisor):
         )
 
         reasoning = parse_key_value(judge_output, "Reasoning") or ""
-        # The judge reports a *frame number*; we immediately convert it to a
-        # vlm_call_log slice index and store THAT under "safe_success_point".
-        # i.e. consumers of this key receive a call-log index, not a frame number, so they
-        # can slice the saved call log directly.
         safe_frame = parse_int(judge_output, "Safe success point")
         safe_success_point = _frame_to_call_cutoff(report.vlm_call_log, safe_frame)
 
-        # The judgement only. The call log and the flattened steps used to be copied in here
-        # too; they are reachable through the SupervisorReport that Supervisor.evaluate
-        # attaches, so returning them as well would be the same data under two names.
         success = parse_yes_no(judge_output, "Success") is True
         return {"success": success, "safe_success_point": safe_success_point,
                 "description": description, "reasoning": reasoning, **run_meta}
@@ -285,22 +237,6 @@ def window_trajectory(
     slice_size: int = 8,
 ) -> List[tuple]:
     """Cut a trajectory into fixed-size windows and describe each in one image call.
-
-    The windowing every reader of a long trajectory shares — the critique hint, the plan
-    arm's step judgement, and the checker's trajectory description. Factored out so all
-    three slice identically: a judge that saw the frames in different groupings from the
-    critic would not be comparing like with like, and that is easy to break by accident
-    when the loop is written out three times.
-
-    *slice_prompt* is filled with ``[GAME]``, ``[TASK]``, ``[START_IDX]``, ``[END_IDX]``,
-    ``[TOTAL]`` and ``[ACTION_SEQUENCE]``. Placeholders the template does not contain are
-    simply not substituted, so a prompt that wants no action list just omits the slot —
-    and the action names are only resolved when it asks for them, since deriving them can
-    raise for an action whose name needs kwargs it did not record.
-
-    Parsing is deliberately **not** done here. The three callers read their replies with
-    different keys and different fallbacks, and unifying that would change what each of
-    them extracts; only the windowing is shared.
 
     *call* is a callable, not a VLM: this function batches every window into one
     ``infer`` call, and a supervisor must record that call. Passing

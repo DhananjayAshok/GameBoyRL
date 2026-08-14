@@ -99,6 +99,16 @@ class InvalidStepRecord:
 StepRecord = Union[EnvironmentStepRecord, ExecutorToolCallRecord, InvalidStepRecord]
 
 
+def tool_call_string(record: ExecutorToolCallRecord) -> str:
+    """
+    A tool call written the way the model was asked to write it, e.g.
+    ``locate(target=door)``. Shared by every renderer so the prompt-facing spelling of a
+    tool call cannot drift between them.
+    """
+    args = ", ".join(f"{key}={value}" for key, value in record.kwargs.items())
+    return f"{record.executor_action_class.__name__}({args})"
+
+
 def per_prompt_token_counts(
     meta: Dict[str, Any], n_prompts: int
 ) -> List[tuple]:

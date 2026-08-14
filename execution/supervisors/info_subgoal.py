@@ -1,32 +1,5 @@
 """
 Planning from retrieved knowledge.
-
-:class:`InfoSubgoalSupervisor` is
-:class:`~execution.supervisors.subgoal.SubgoalSupervisor` plus one thing: the plan and the
-hints are written from a document rather than from the task alone. It overrides
-``_knowledge()`` and nothing else about the loop.
-
-Knowledge reaches the planner through a relevance pass over the documents it was given:
-every entry of every document is judged, one call each, on whether it fits this task and
-this screen. Entries are judged on ``Description`` + ``Examples`` + their representative
-frame — never on their ``Insights``, so relevance is decided on whether the context fits
-rather than on whether the advice sounds appealing.
-
-This class does not care where the documents came from. The benchmark arm's ``--mode``
-decides that — a document distilled from real trajectories (``retrieval``) or one written
-from the model's own priors (``parametric``) — and both arrive here as
-:class:`~execution.info_doc.InfoDocument` objects and are treated identically. That is what
-makes the two modes comparable: they differ only in the document.
-
-**Why knowledge is only available with a plan.** A document is spent writing a plan; with
-no plan there is nothing to spend it on but a single hint written once at the opening
-frame. That arm existed — ``InfoHintSupervisor`` — and has been retired along with its
-benchmark arm, which is why this class sits above the subgoal one rather than beside it.
-
-The selection also used to offer a second path, ``init_state``, which skipped the document
-and read stage-A rows matching the episode's starting state. It has been removed: the arm
-now always judges document entries, and *which* document is the benchmark's choice rather
-than the supervisor's.
 """
 
 from __future__ import annotations
@@ -69,10 +42,7 @@ class InfoSubgoalSupervisor(SubgoalSupervisor):
         super().__init__(*args, **kwargs)
         # Built here rather than on first use. The relevance pass fans out across threads,
         # and the base class's lazy property is a check-then-set with no lock, so several
-        # workers could pass the `is None` test at once and construct several VLMs. Eager
-        # construction closes that by construction rather than by convention. This class
-        # always reasons, so there is nothing to defer for — and a missing model now fails
-        # at construction rather than part-way into an episode.
+        # workers could pass the `is None` test at once and construct several VLMs.
         _ = self._vlm
 
     def _run_config(self) -> dict:
@@ -98,13 +68,6 @@ class InfoSubgoalSupervisor(SubgoalSupervisor):
         insights block — :meth:`SubgoalSupervisor.write_plan` already renders that as
         ``(nothing recorded)``. The episode is then a knowledge-free planned run, which is
         exactly the ``subgoal`` arm, and ``selected_entry_ids`` is empty on that row to say so.
-
-        It used to return ``[None]`` here and skip planning altogether, on the reasoning that
-        planning from an empty page would make this an unlabelled copy of the subgoal arm.
-        That traded a labelling problem for a much worse one: skipping the planner made it an
-        unlabelled copy of the *baseline* instead, and because the replanner still ran and
-        refilled :attr:`plan` mid-episode, the run looked planned from the outside. Degrading
-        one step, to the arm directly below this one, is the honest fallback.
         """
         self.selection_log = []
         self.selected_ids = []
@@ -202,14 +165,6 @@ class InfoSubgoalSupervisor(SubgoalSupervisor):
 
     def _select_entries(self, candidates, screen) -> List[Any]:
         """Run the relevance pass over (entry, kind) candidates, in parallel.
-
-        The calls go out concurrently — they are independent — but everything they produce
-        is filed **in candidate order**, after the pool has joined: the call records onto
-        :attr:`report.event_log`, the verdicts onto :attr:`selection_log`, and the survivors
-        onto the returned list. Both were previously written from the workers as results
-        arrived, so two runs of the same episode produced differently-ordered logs and a
-        differently-ordered insights block. The parallelism is unchanged; only where the
-        results land is.
         """
         if not candidates:
             return []
@@ -245,10 +200,6 @@ class InfoSubgoalSupervisor(SubgoalSupervisor):
 
     def _candidates(self):
         """Every entry of every document, tagged with the kind of thing it describes.
-
-        A parametric document contributes only task entries — the model has seen no screens,
-        so it has no image categories to offer — but that needs no special case here: the
-        image section is simply empty and the loop yields nothing for it.
         """
         from execution.info_doc import IMAGE_SECTION, TASK_SECTION
 
@@ -260,23 +211,6 @@ class InfoSubgoalSupervisor(SubgoalSupervisor):
 
     def filter_insights(self, selected, screen) -> str:
         """Prune the selected entries' insights to what could bear on this task, once.
-
-        The relevance pass that chose these entries is deliberately blind to their insights
-        — ``evidence_block()`` is Description and Examples only, so identity is judged on
-        whether the *context* fits rather than on whether the advice sounds appealing. The
-        consequence is that a correctly-chosen entry drags its whole bundle along, including
-        insights about a character who is not here or a menu this task never opens.
-
-        This is the only pass that reads insights as insights. It runs **once per episode**,
-        and the surviving text is reused verbatim by the planner, the reviser and the hint
-        writer — deliberately, because re-filtering per call site would multiply the arm's
-        VLM cost for a judgement that rarely changes within one task.
-
-        Being a one-shot filter makes it asymmetric on purpose: what it drops is gone for
-        the whole episode, including for screens not yet reached, so
-        :data:`FILTER_INSIGHTS_PROMPT` is written to keep anything that might matter later
-        and to keep when unsure. Over-keeping costs prompt tokens; over-dropping costs
-        knowledge that was expensive to build and cannot be recovered.
 
         :return: The insight block to interpolate, grouped by entry. Falls back to the
             unfiltered block when the reply cannot be parsed — a filter that silently
@@ -331,22 +265,6 @@ class InfoSubgoalSupervisor(SubgoalSupervisor):
 
     def distil_insights(self, kept: list, grouped_block: str, screen) -> str:
         """Consolidate the surviving insights into one concrete, non-redundant list.
-
-        The filter decides *what* survives; this decides *how it reads*. They are separate
-        calls on purpose: a single prompt asked to both drop and rewrite can quietly lose
-        content inside a rewrite, and there would be no way to tell that from legitimate
-        filtering. Keeping them apart means :attr:`n_insights_kept` is a real count of
-        surviving knowledge, and this pass is judged only on whether it says the same thing
-        more usefully.
-
-        The merge tree that builds the documents produces near-duplicates at several levels
-        of detail — that is what stage B does — so by the time several entries are selected
-        the same fact can appear three times, vaguest version included. Aggregating raises
-        the specificity of what the planner reads.
-
-        Provenance is deliberately dropped here: a distilled statement may draw on entries
-        from several sources, so a per-entry label would be a lie. ``selected_ids`` still
-        records what was retrieved, which is what a reader needs to trace it back.
 
         :return: The distilled block, or *grouped_block* unchanged if the reply cannot be
             parsed — a distillation that silently returns nothing is worse than a verbose

@@ -4,20 +4,6 @@ The supervisor contract.
 A supervisor wraps one or more executor runs: it constructs the executor, lets it
 play, and then does something with the report it produces — judge it, critique it,
 turn it into a hint, or drive the next step of a plan.
-
-:class:`Supervisor` fixes only that shape.  The three concrete supervisors share the
-base class and almost nothing else; each lives in its own module.
-
-**One model per supervisor.**  A supervisor makes every one of its calls against a single
-VLM, held here and reached through :meth:`Supervisor._vlm_call`.  Subclasses used to each
-declare their own — ``checker_vlm_model``, ``hint_vlm_model``, ``plan_vlm_model`` — which
-meant a caller wiring up an arm had to know which stage names which model, and the split
-was never actually used: the only caller passed the same name to all of them.  There are
-now exactly two models in play anywhere: the executor's, and the supervisor's.
-
-The model that *built* the knowledge a supervisor reads is deliberately not a third: it is
-a property of the artifact, recorded in :class:`~execution.info_doc.Provenance` by whoever
-produced it, and no supervisor or benchmark arm takes it as a parameter.
 """
 
 from __future__ import annotations
@@ -38,8 +24,7 @@ class Supervisor(ABC):
     Abstract base class for supervisor agents.
 
     A supervisor owns an executor class and an environment, and can dispatch
-    task requests to a fresh executor instance on demand.  Subclasses implement
-    :meth:`process_executor_return` to interpret the resulting report.
+    task requests to a fresh executor instance on demand. 
 
     :param task: The task this supervisor is responsible for. Held here rather than on each
         subclass because every supervisor has one and :attr:`report` records it.
@@ -103,12 +88,6 @@ class Supervisor(ABC):
     def _run_config(self) -> dict:
         """The knobs this supervisor is running with, for :attr:`report.init_kwargs`.
 
-        This used to be ``dict(executor_kwargs)`` — the *executor's* arguments, stored under
-        a name that says supervisor. The effect was that none of the settings that actually
-        define an arm's behaviour (``max_leg_steps``, ``max_attempts_per_target``,
-        ``max_replans``, …) appeared anywhere in the archived report, so a saved episode
-        could not be matched to the configuration that produced it.
-
         Subclasses extend it. Safe to call from ``__init__`` because every subclass sets its
         own attributes *before* calling ``super().__init__()``.
         """
@@ -131,12 +110,7 @@ class Supervisor(ABC):
 
         Deferred rather than constructed in ``__init__`` because
         :class:`~execution.supervisors.dummy.DummySupervisor` makes no calls at all and must
-        keep working with no model configured — it is the control arm, and requiring it to
-        name a model it never uses would be a way to accidentally give it one.
-
-        Raises through :func:`log_error` rather than returning ``None``, so a supervisor that
-        *does* reason fails at the point the model is missing instead of somewhere later
-        inside an inference call with a less obvious message.
+        keep working with no model configured
         """
         if self._vlm_instance is None:
             if not self._supervisor_vlm_model:
@@ -151,24 +125,6 @@ class Supervisor(ABC):
 
     def _vlm_call(self, stage: str, **kwargs: Any) -> Any:
         """Make a supervisor VLM call and record it on :attr:`report`.
-
-        The supervisor-side counterpart of ``Executor._vlm_call``. Every supervisor call
-        must go through here — that is the whole point, since a call made directly on a VLM
-        leaves no trace of why the supervisor did what it did.
-
-        The model is :attr:`_vlm` and the token budget defaults to
-        :attr:`_max_new_tokens`, so neither is repeated at the call sites. A caller may still
-        pass ``max_new_tokens`` explicitly to override it for one call.
-
-        ``stage`` is an argument rather than mutable state on a wrapper object. The previous
-        design set a ``stage`` attribute on a recording proxy and then called it, so a site
-        that forgot to set it logged under the *previous* stage, silently corrupting the
-        only record of the supervisor's reasoning. Passing it with the call makes that
-        mistake unavailable.
-
-        A batched call passes a list of prompts and gets a list back; those are recorded as
-        one entry per prompt/response pair, so a windowed judgement does not collapse into a
-        single unreadable record.
 
         :param stage: Which phase of the supervisor's reasoning this call serves.
         :return: Exactly what the VLM returned, unchanged.
@@ -222,11 +178,6 @@ class Supervisor(ABC):
 
     def _vlm_caller(self, stage: str):
         """A recording ``call(**kwargs)`` for helpers that do their own batching.
-
-        :func:`~execution.supervisors.checker.window_trajectory` and friends build the
-        prompt/image lists themselves and then make one batched call. They take this
-        callable rather than a VLM so the call still lands in :attr:`report` — handing them
-        a raw VLM is what used to lose those calls entirely.
         """
         def call(**kwargs: Any) -> Any:
             return self._vlm_call(stage, **kwargs)
@@ -241,13 +192,7 @@ class Supervisor(ABC):
 
         Always returns a dict carrying ``"report"`` (this run's
         :class:`~execution.report.SupervisorReport`) plus whatever arm-specific values
-        :meth:`_evaluate` surfaced. Consumers read one or the other — never a bare report,
-        so an arm can add a value without changing its return *type*.
-
-        One run per instance. The report accumulates into ``event_log``, so a second call
-        would splice two episodes into one record and every count derived from it would be
-        the sum of both. No caller does this today (each construction site evaluates once),
-        which is exactly why it would go unnoticed.
+        :meth:`_evaluate` surfaced. 
         """
         if self._evaluated:
             log_error(
@@ -263,9 +208,6 @@ class Supervisor(ABC):
     @abstractmethod
     def _evaluate(self) -> Optional[dict]:
         """Drive the episode. Return only arm-specific values, or None.
-
-        :meth:`evaluate` attaches :attr:`report` to whatever this returns, so a subclass
-        never has to remember to include it.
         """
         raise NotImplementedError
 
@@ -275,17 +217,6 @@ class Supervisor(ABC):
         """
         Spin up an executor for the given task, run it to completion, record its report on
         :attr:`report`, then process and return the result.
-
-        The report is filed into ``event_log`` before :meth:`process_executor_return` runs,
-        so the executor's run is on record even if interpreting it raises.
-
-        **The three things that vary per leg are parameters, not state.** They used to be
-        set on the supervisor immediately before this call —
-        ``self._executor_kwargs["hint"] = ...`` and a temporary overwrite of
-        ``self._max_steps``, an attribute that otherwise means the whole episode's budget.
-        Passing them here is what lets the executor record what it actually ran under (see
-        :meth:`~execution.executors.Executor._run_config`), and removes a
-        write-then-restore dance that had to be exception-safe to be correct.
 
         :param task: Natural-language task string passed to the executor.
         :param hint: Advice for this leg, or ``None`` for an unhinted run.

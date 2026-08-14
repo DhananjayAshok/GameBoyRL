@@ -1,15 +1,6 @@
 """
 The supervisor that does nothing.
 
-:class:`DummySupervisor` runs the executor on the task it was given and adds no reasoning
-of its own. It exists so **nothing is ever benchmarked with a bare executor**: the baseline
-arm goes through a supervisor like every other arm, so all three produce a
-:class:`~execution.report.SupervisorReport` and every reader — the archive, the debug
-report, the comparators — has one shape to handle instead of two.
-
-It is the control in the experimental sense: any arm's advantage over the baseline has to
-come from the supervisor's reasoning, and this one has none, so the difference is the
-measurement. Adding anything here — a judge, a hint, a retry — would stop that being true.
 """
 
 from __future__ import annotations
