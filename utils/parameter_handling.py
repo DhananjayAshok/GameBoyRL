@@ -4,6 +4,27 @@ from typing import Any, Optional
 from utils.fundamental import get_logger
 
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+#: Root paths that are resolved against :data:`PROJECT_ROOT` when given relatively, so that
+#: every artifact path is absolute regardless of the working directory a script is run from.
+ROOT_PATH_KEYS = ("storage_dir", "results_dir")
+
+
+def absolutize_roots(params: dict[str, Any]) -> None:
+    """Rewrite every key in :data:`ROOT_PATH_KEYS` to an absolute path, in-place.
+
+    ``os.path.join`` returns its second argument unchanged when that argument is already
+    absolute, so this is idempotent and safe to call more than once.
+
+    :param params: The parameters dictionary to fix up in-place.
+    :type params: dict[str, Any]
+    """
+    for key in ROOT_PATH_KEYS:
+        if key in params and isinstance(params[key], str):
+            params[key] = os.path.abspath(os.path.join(PROJECT_ROOT, params[key]))
+
+
 def load_yaml(yaml_path: str) -> dict[str, Any]:
     """
     Load a YAML file and return its contents as a dictionary.
@@ -30,6 +51,7 @@ def compute_secondary_parameters(params: dict[str, Any]) -> None:
     :param params: The parameters dictionary to extend in-place.
     :type params: dict[str, Any]
     """
+    absolutize_roots(params)
     params["data_dir"] = os.path.join(params["storage_dir"], "data")
     params["model_dir"] = os.path.join(params["storage_dir"], "models")
     params["tmp_dir"] = os.path.join(params["storage_dir"], "tmp")
@@ -79,7 +101,7 @@ def load_parameters(parameters: Optional[dict[str, Any]] = None) -> dict[str, An
             compute_secondary_parameters(parameters)
         return parameters
     essential_keys = ["storage_dir", "results_dir"]
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    project_root = PROJECT_ROOT
     params = {"project_root": project_root}
     logger = get_logger()
     config_files = os.listdir(os.path.join(project_root, "configs"))
@@ -110,6 +132,9 @@ def load_parameters(parameters: Optional[dict[str, Any]] = None) -> dict[str, An
     for essential_key in essential_keys:
         if essential_key not in params:
             error(f"Please set {essential_key} in one of the config yamls")
+    # Before the makedirs below, so a relative root never creates a stray tree under
+    # whatever directory the script happened to be launched from.
+    absolutize_roots(params)
     # check if there are any .py files in storage_dir, if so, log error
     if os.path.exists(params["storage_dir"]):
         if any([f.endswith(".py") for f in os.listdir(params["storage_dir"])]):

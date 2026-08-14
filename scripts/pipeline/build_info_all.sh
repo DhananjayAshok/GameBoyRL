@@ -71,7 +71,7 @@ game="${ARGS["game"]}"
 run_name="${ARGS["run_name"]}"
 executor="${ARGS["executor"]}"
 mode="${ARGS["mode"]}"
-model_save_name="${ARGS["model_name"]##*/}"
+model_save_name=$(model_save_name "${ARGS["model_name"]}")
 
 sources=$(info_mode_sources "$mode")
 if [[ -z "$sources" ]]; then
@@ -83,7 +83,8 @@ echo "Mode '$mode' -> sources: $sources"
 # Validate every source before spending a single VLM call on any of them: a --mode both run
 # that dies on the second source after paying for the first is the expensive failure here.
 for source in $sources; do
-    stem=$(info_source_stem "$game" "$model_save_name" "$run_name" "$executor" "$source")
+    stem=$(path_of info_source_stem --game "$game" --model_name "${ARGS["model_name"]}" \
+                   --run_name "$run_name" --executor "$executor" --source "$source")
     for suffix in json pkl; do
         if [[ ! -f "$stem.$suffix" ]]; then
             echo "Error: $source input missing at $stem.$suffix"
@@ -98,8 +99,10 @@ for source in $sources; do
 done
 
 for source in $sources; do
-    stem=$(info_source_stem "$game" "$model_save_name" "$run_name" "$executor" "$source")
-    info_dir=$(info_dir_for_stem "$stem" "$model_save_name" "${ARGS["executor"]}")
+    stem=$(path_of info_source_stem --game "$game" --model_name "${ARGS["model_name"]}" \
+                   --run_name "$run_name" --executor "$executor" --source "$source")
+    info_dir=$(path_of source_info_dir --game "$game" --model_name "${ARGS["model_name"]}" \
+                       --run_name "$run_name" --executor "${ARGS["executor"]}" --source "$source")
 
     echo ""
     echo "=== Building info document: $source ==="

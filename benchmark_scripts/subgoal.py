@@ -14,6 +14,7 @@ from execution.registry import AVAILABLE_EXECUTORS, AVAILABLE_SUPERVISORS
 from execution.supervisors import PLAN_SEPARATOR
 
 from benchmark_scripts import common
+from python_scripts import paths
 
 SUMMARY_COLUMNS = ["planned", "n_plan_steps", "n_original_plan_steps", "n_slots_attempted",
                    "n_steps_cleared", "n_attempts", "n_replans", "n_supervisor_calls"]
@@ -66,20 +67,22 @@ def subgoal_cmd(obj, max_leg_steps, max_attempts_per_step, max_replans,
     executor = obj["executor"]
     executor_class = AVAILABLE_EXECUTORS[executor]
     model_save_name = obj["model_save_name"]
-    supervisor_class = AVAILABLE_SUPERVISORS["subgoal"]
+    supervisor_name = "subgoal"
+    supervisor_class = AVAILABLE_SUPERVISORS[supervisor_name]
 
     emulator_kwargs = {
         "headless": True,
         "save_video": obj["save_video"],
-        "session_name": f"benchmark_subgoal_{executor}_{model_save_name}",
+        "session_name": paths.benchmark_session_name(supervisor=supervisor_name, executor=executor,
+                                                     model=model_save_name),
         "max_steps": obj["max_steps"],
     }
 
     columns = common.COMMON_COLUMNS + [
         "hint", "original_plan", *SUMMARY_COLUMNS, "step_log", common.SESSION_COLUMN]
     tasks = common.select_tasks(get_benchmark_tasks(game=game), obj["n_tasks"])
-    save_path = common.results_path(
-        parameters, game, f"subgoal_{executor}_{model_save_name}", obj["n_tasks"])
+    save_path = common.results_path(parameters, game, supervisor=supervisor_name, executor=executor,
+                                    model=model_save_name, n_tasks=obj["n_tasks"])
     results, n_completed = common.load_checkpoint(save_path, obj["regenerate"],
                                                   columns, parameters)
 
@@ -122,7 +125,7 @@ def subgoal_cmd(obj, max_leg_steps, max_attempts_per_step, max_replans,
 
         return common.run_episode(
             row, play,
-            arm="subgoal",
+            supervisor=supervisor_name,
             controller_variant=obj["controller_variant"],
             executor_name=executor_class.__name__,
             model=model_save_name,

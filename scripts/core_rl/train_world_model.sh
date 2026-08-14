@@ -87,7 +87,7 @@ done
 # Logic here:
 
 env_arg_str="--game ${ARGS["game"]} --env default --init_state default --controller ${ARGS["controller"]} --max_steps 10"
-train_env_id=$(python scripts/python/get_strings.py "env_id" $env_arg_str)
+train_env_id=$(python "$PROJECT_ROOT/python_funcs.py" strings env_id $env_arg_str)
 if [[ -z "$train_env_id" ]]; then
     echo "Error: Failed to get train_env_id"
     exit 1

@@ -17,6 +17,7 @@ from tqdm import tqdm
 from gameboy_worlds import get_test_environment
 
 from execution.info_doc import load_document
+from python_scripts import paths
 from utils import depathify, log_error, log_info
 
 
@@ -70,17 +71,22 @@ def select_tasks(tasks: pd.DataFrame, n_tasks: Optional[int]) -> pd.DataFrame:
     return tasks.head(n_tasks).reset_index(drop=True)
 
 
-def results_path(parameters: dict, game: str, stem: str, n_tasks: Optional[int]) -> str:
+def results_path(parameters: dict, game: str, *, supervisor: str, executor: str,
+                 model: str, n_tasks: Optional[int]) -> str:
     """Where this run's CSV goes, creating the directory.
 
     A subset run gets its own file: resuming a full sweep from a 5-task CSV would read the
     first five as done and silently skip them.
+
+    Delegates to :func:`python_scripts.paths.benchmark_csv` rather than building the name
+    here. This used to be an f-string, and ``Paths.benchmark_csv`` rebuilt it without the
+    supervisor prefix or the ``_firstN`` suffix — so ``debug.py benchmark`` could not open
+    any CSV this function had ever written. The supervisor and n_tasks are passed through
+    instead of being pre-baked into a ``stem`` string so only one place knows the order.
     """
-    directory = os.path.join(parameters["results_dir"], "benchmark", game)
-    os.makedirs(directory, exist_ok=True)
-    if n_tasks is not None:
-        stem = f"{stem}_first{n_tasks}"
-    return os.path.join(directory, f"{stem}.csv")
+    return paths.benchmark_csv(parameters, game=game, supervisor=supervisor,
+                               executor=executor, model=model, n_tasks=n_tasks,
+                               create=True)
 
 
 def load_checkpoint(save_path: str, regenerate: bool, columns: list,
@@ -204,7 +210,7 @@ def session_path_of(environment) -> Optional[str]:
     return getattr(emulator, "session_path", None) if emulator is not None else None
 
 
-def save_report(session_path: str, *, arm: str, row, executor_name: str, model: str,
+def save_report(session_path: str, *, supervisor: str, row, executor_name: str, model: str,
                 report) -> Optional[str]:
     """Archive this episode's :class:`~execution.report.SupervisorReport` beside its video.
 
@@ -227,7 +233,7 @@ def save_report(session_path: str, *, arm: str, row, executor_name: str, model: 
     that has already been paid for in VLM calls.
     """
     payload = {
-        "arm": arm,
+        "supervisor": supervisor,
         "game": row["game"],
         "task": row["task"],
         "init_state": row.get("init_state"),
@@ -245,7 +251,7 @@ def save_report(session_path: str, *, arm: str, row, executor_name: str, model: 
         return None
 
 
-def run_episode(row, play: Callable[[Any], PlayResult], *, arm: str,
+def run_episode(row, play: Callable[[Any], PlayResult], *, supervisor: str,
                 controller_variant: str, executor_name: str, model: str,
                 **emulator_kwargs) -> EpisodeOutcome:
     """Run one benchmark task, once.
@@ -302,7 +308,8 @@ def run_episode(row, play: Callable[[Any], PlayResult], *, arm: str,
         outcome.extras = result.extras
 
         if session_path is not None:
-            save_report(session_path, arm=arm, row=row, executor_name=executor_name,
+            save_report(session_path, supervisor=supervisor, row=row,
+                        executor_name=executor_name,
                         model=model, report=result.report)
             outcome.session_dirs.append(session_path)
 

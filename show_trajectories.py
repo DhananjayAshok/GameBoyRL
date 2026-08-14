@@ -20,6 +20,7 @@ import numpy as np
 import click
 from PIL import ImageDraw, ImageFont
 
+from python_scripts import paths
 from utils import load_parameters, log_info, convert_numpy_greyscale_to_pillow
 
 
@@ -70,7 +71,8 @@ def show(name, trajectory_path, frac, group_idx, traj_idx, max_per_group):
     with open(trajectory_path, "rb") as f:
         grouped_trajectories = pickle.load(f)
 
-    os.makedirs(parameters["tmp_dir"] + f"/trajectories/{name}", exist_ok=True)
+    render_root = paths.trajectory_render_dir(parameters, name=name)
+    os.makedirs(render_root, exist_ok=True)
 
     if group_idx is not None:
         indexes = [group_idx]
@@ -82,7 +84,7 @@ def show(name, trajectory_path, frac, group_idx, traj_idx, max_per_group):
     for i, trajectory_group in tqdm(enumerate(grouped_trajectories), desc="Plotting observation transitions", total=len(grouped_trajectories)):
         if i not in indexes:
             continue
-        group_dir = parameters["tmp_dir"] + f"/trajectories/{name}/group_{i}"
+        group_dir = paths.trajectory_render_dir(parameters, name=name, group=i)
         os.makedirs(group_dir, exist_ok=True)
         if traj_idx is not None:
             trajectory = trajectory_group[traj_idx]
@@ -99,7 +101,7 @@ def show(name, trajectory_path, frac, group_idx, traj_idx, max_per_group):
             if group_idx is not None:
                 log_info(f"Saved {group_dir}/")
     if group_idx is None and traj_idx is None:
-        log_info(f"Saved {parameters['tmp_dir']}/trajectories/{name}/")
+        log_info(f"Saved {render_root}/")
 
 
 if __name__ == "__main__":

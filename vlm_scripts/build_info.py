@@ -45,9 +45,10 @@ from execution.info_doc import (
 )
 from utils import (HuggingFaceModel, VLM, log_error, log_info, log_warn, parse_key_value,
                    parse_list)
-
-INSIGHTS_FILENAME = "insights.jsonl"
-INFO_DOC_FILENAME = "info.json"
+from python_scripts import paths
+# Re-exported from paths, not redeclared: build_info writes these names and the debug
+# tools read them, and they drifted apart once already.
+from python_scripts.paths import INFO_DOC_FILENAME, INSIGHTS_FILENAME
 
 # ---------------------------------------------------------------------------
 # Prompts
@@ -578,9 +579,11 @@ def build_info_cmd(obj, trajectory_path, n_frames, max_concurrency, stage, overw
     parameters = obj["parameters"]
 
     vlm = VLM(model_name, vlm_kind)
-    model_save_name = model_name.split("/")[-1]
+    model_save_name = paths.model_save_name(model_name)
     # Guard against pointing one model at another model's artifacts — this layout invites it.
-    if model_save_name not in trajectory_path:
+    # Matched case-insensitively: model_save_name is folded, but the stem was built by a
+    # producer that may predate the folding, so a cased directory on disk still matches.
+    if model_save_name not in trajectory_path.lower():
         log_error(
             f"Model name '{model_save_name}' not found in trajectory_path '{trajectory_path}'. "
             "Ensure the trajectories were produced by the same model.",
@@ -598,8 +601,8 @@ def build_info_cmd(obj, trajectory_path, n_frames, max_concurrency, stage, overw
     # because it is the identity of the trajectories distilled: the zeroshot stem already
     # encodes it, but the curiosity stem does not, so without it two executors' curiosity
     # documents land on the same path and the second silently overwrites the first.
-    out_dir = os.path.join(os.path.dirname(trajectory_path),
-                           f"info_{model_save_name}_{executor}")
+    out_dir = paths.info_dir_from_stem(trajectory_path, model_name=model_name,
+                                       executor=executor)
     os.makedirs(out_dir, exist_ok=True)
     final_path = os.path.join(out_dir, INFO_DOC_FILENAME)
 

@@ -4,7 +4,7 @@
 # before iterating.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
-python scripts/python/create_task_dictionary.py || { echo "Could not regenerate train states"; exit 1; }
+python "$PROJECT_ROOT/python_funcs.py" task_dictionary || { echo "Could not regenerate train states"; exit 1; }
 source scripts/core/all_train_states.sh
 
 declare -A ARGS
@@ -74,7 +74,8 @@ for init_state in "${init_states_arr[@]}"; do
     if [[ "$init_state_group" == "none" ]]; then
         init_state_group="$init_state"
     fi
-    grouped_pkls+=("$storage_dir/grouped_trajectories/${game}/${ARGS["run_name"]}/${init_state_group}/grouped_global_high_reward_trajectories.pkl")
+    grouped_pkls+=("$(path_of grouped_file --game "$game" --run_name "${ARGS["run_name"]}" \
+                              --init_state "${init_state_group}")")
 done
 
 # Combine every init_state's grouped trajectories into one pkl, then annotate them in a
@@ -82,9 +83,9 @@ done
 # so a per-init_state infer loop would let only the first state's annotation survive —
 # combining first is what makes all states contribute. The combined dir is "all", which
 # collides if a game ever has a real init_state named "all" (see combine_grouped_trajectories.py).
-combined_dir="$storage_dir/grouped_trajectories/${game}/${ARGS["run_name"]}/all"
+combined_dir="$(path_of grouped_dir --game "$game" --run_name "${ARGS["run_name"]}")/all"
 input_paths=$(IFS=,; echo "${grouped_pkls[*]}")
-python scripts/python/combine_grouped_trajectories.py \
+python "$PROJECT_ROOT/python_funcs.py" combine_trajectories \
     --input_paths "$input_paths" \
     --save_path "$combined_dir" \
     --z_kind global || exit 1
@@ -96,7 +97,9 @@ infer_flags=$(args_to_flags_subset ARGS INFER_TASKS_ARG_KEYS)
 ARGS["overwrite"]="$saved_overwrite"
 bash scripts/vlm/infer_tasks.sh $infer_flags || exit 1
 
-model_save_name="${ARGS["model_name"]##*/}"
+model_save_name=$(model_save_name "${ARGS["model_name"]}")
 # Terminal artifact of the curiosity vertical: <stem>.json + <stem>.pkl. build_info.sh
 # consumes this stem.
-echo "curiosity trajectory stem: $storage_dir/proposed_tasks/${game}/${model_save_name}/curiosity/${ARGS["run_name"]}/trajectory_annotation"
+echo "curiosity trajectory stem: $(path_of info_source_stem --game "$game" \
+        --model_name "${ARGS["model_name"]}" --run_name "${ARGS["run_name"]}" \
+        --executor single_actions --source curiosity)"

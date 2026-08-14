@@ -75,7 +75,7 @@ done
 
 run_name="${ARGS["run_name"]}"
 executor="${ARGS["executor"]}"
-model_save_name="${ARGS["model_name"]##*/}"
+model_save_name=$(model_save_name "${ARGS["model_name"]}")
 
 # --- Which games to sweep -------------------------------------------------------------
 if [[ "${ARGS["games"]}" == "auto" ]]; then
@@ -111,7 +111,8 @@ for game in "${candidate_games[@]}"; do
         skipped+=("$game (no benchmark tasks)"); continue
     fi
 
-    sources=$(info_available_sources "$game" "$model_save_name" "$run_name" "$executor")
+    sources=$(path_of_allow_empty info_available_sources --game "$game" \
+                  --model_name "${ARGS["model_name"]}" --run_name "$run_name" --executor "$executor")
     if [[ -z "$sources" ]]; then
         skipped+=("$game (no zeroshot or curiosity inputs)"); continue
     fi
@@ -124,7 +125,8 @@ echo ""
 echo "########## Sweep plan ##########"
 printf "%-42s %-16s %s\n" "GAME" "MODE" "SOURCES"
 for i in "${!games[@]}"; do
-    sources=$(info_available_sources "${games[$i]}" "$model_save_name" "$run_name" "$executor")
+    sources=$(path_of_allow_empty info_available_sources --game "${games[$i]}" \
+                  --model_name "${ARGS["model_name"]}" --run_name "$run_name" --executor "$executor")
     printf "%-42s %-16s %s\n" "${games[$i]}" "${modes[$i]}" "$sources"
 done
 if [[ ${#skipped[@]} -gt 0 ]]; then
@@ -145,10 +147,16 @@ if [[ "${ARGS["dry_run"]}" == "true" ]]; then
     for i in "${!games[@]}"; do
         echo ""
         echo "  ${games[$i]}  (--mode ${modes[$i]})"
-        for source in $(info_available_sources "${games[$i]}" "$model_save_name" "$run_name" "$executor"); do
-            stem=$(info_source_stem "${games[$i]}" "$model_save_name" "$run_name" "$executor" "$source")
+        for source in $(path_of_allow_empty info_available_sources --game "${games[$i]}" \
+                            --model_name "${ARGS["model_name"]}" --run_name "$run_name" \
+                            --executor "$executor"); do
+            stem=$(path_of info_source_stem --game "${games[$i]}" \
+                       --model_name "${ARGS["model_name"]}" --run_name "$run_name" \
+                       --executor "$executor" --source "$source")
             echo "    $source stem     : $stem"
-            echo "    $source info_dir : $(info_dir_for_stem "$stem" "$model_save_name" "$executor")"
+            echo "    $source info_dir : $(path_of source_info_dir --game "${games[$i]}" \
+                       --model_name "${ARGS["model_name"]}" --run_name "$run_name" \
+                       --executor "$executor" --source "$source")"
         done
     done
     exit 0

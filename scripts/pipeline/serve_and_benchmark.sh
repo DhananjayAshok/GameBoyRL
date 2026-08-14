@@ -3,7 +3,7 @@
 # its series (the train game + the shifted eval game(s)) for a single executor.
 #
 # The checkpoint path is derived the same way train_vlm.sh writes it:
-#   $storage_dir/models/${game}-${run_name}/${model_name##*/}/final_checkpoint
+#   $storage_dir/models/${game}-${run_name}/$(model_save_name "$model_name")/final_checkpoint
 # The server is started via scripts/core/serve_vllm.sh on the largest tensor-parallel
 # size that fits the available GPUs (max of {8,4,2}), and always stopped on exit.
 #
@@ -71,10 +71,12 @@ game="${ARGS["game"]}"
 model_name="${ARGS["model_name"]}"
 run_name="${ARGS["run_name"]}"
 executor="${ARGS["executor"]}"
-# '##*/' matches train_vlm.sh and Python's model_name.split("/")[-1]. This value feeds
-# served_model_name below, which debug_scripts.paths.finetuned_model_name rebuilds — the two
-# have to derive it the same way or the debug command looks for a CSV nothing served.
-model_save_name="${model_name##*/}"
+# The shared helper, which matches train_vlm.sh and utils/paths.py's model_save_name()
+# including its case fold. This value feeds served_model_name below, which
+# Paths.finetuned_model_name rebuilds — the two have to derive it the same way or the debug
+# command looks for a CSV nothing served. Note $model_name, NOT this, is what vLLM is asked
+# to load: only the *served* alias is folded.
+model_save_name=$(model_save_name "$model_name")
 
 # Single source of truth for the name vLLM registers the model under AND the name the
 # benchmark asks the vLLM API for. These MUST be identical or the benchmark 404s on the
@@ -96,7 +98,8 @@ if [[ "${ARGS["checkpoint"]}" != "none" ]]; then
     checkpoint="${ARGS["checkpoint"]}"
     echo "Using explicit --checkpoint (skipping the game/run_name/mode derivation)"
 else
-    checkpoint="$storage_dir/models/${game}-${run_name}-${mode}/${model_save_name}/final_checkpoint"
+    checkpoint="$(path_of model_checkpoint_dir --game "$game" --model_name "$model_name" \
+                          --run_name "$run_name" --mode "$mode")/final_checkpoint"
 fi
 if [[ ! -d "$checkpoint" ]]; then
     echo "Error: checkpoint not found at $checkpoint"; exit 1

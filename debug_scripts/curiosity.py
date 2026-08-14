@@ -42,7 +42,7 @@ import pandas as pd
 from utils import log_info, log_warn, log_error
 from debug_scripts import markdown as md
 from debug_scripts.frames import trajectory_strip
-from utils.paths import Paths
+from python_scripts.paths import Paths
 
 
 GB = 1024 ** 3
@@ -448,7 +448,7 @@ def debug_curiosity(obj, init_state, n_frames, max_groups, max_traj_per_group, m
             "Skipped as already-counted or non-trajectory: "
             + ", ".join(f"`{state}` ({kind}, {n} entries)" for state, kind, n in not_trajectories)
             + ". A `manifest` is a list of *paths* to the per-init_state pickles, written by "
-            "`scripts/python/combine_grouped_trajectories.py` so one `infer_tasks` call can "
+            "`python_funcs.py combine_trajectories` so one `infer_tasks` call can "
             "annotate every state without materialising tens of GB. This is intended, and "
             "`infer_tasks.load_grouped_trajectories` reads both formats — it is skipped here only "
             "because its contents are the other init_states, which would double-count."

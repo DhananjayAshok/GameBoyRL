@@ -99,10 +99,9 @@ done
 
 
 model_name="${ARGS["model_name"]}"
-# '##*/' (after the LAST slash), matching model_name.split("/")[-1] in Python. '#*/' strips
-# only up to the FIRST slash, which agrees for a one-slash name like google/gemma-4-31b-it
-# but not for org/team/model — and the served-model name is rebuilt on the Python side.
-model_save_name="${model_name##*/}"
+# Through the shared helper rather than an inline '##*/': it also folds case, and the
+# served-model name is rebuilt on the Python side by utils/paths.py, which folds the same way.
+model_save_name=$(model_save_name "$model_name")
 
 # if overwrite is true, t, yes or y, set --restore_from_checkpoint False, else set it to empty string
 if [[ "${ARGS["overwrite"]}" == "true" || "${ARGS["overwrite"]}" == "yes" || "${ARGS["overwrite"]}" == "y" ]]; then

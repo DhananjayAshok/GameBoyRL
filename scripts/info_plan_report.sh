@@ -75,18 +75,24 @@ from collections import Counter
 
 import pandas as pd
 
+from python_scripts import paths
+
 GAME = os.environ.get("GAME", "deja_vu_1")
 SUFFIX = os.environ.get("SUFFIX", "_first5")
-BASE = f"results/benchmark/{GAME}"
 STEM = os.environ.get("STEM", "gemma-4-31b-it")
 # The arm name is part of both CSV paths now, so it cannot be hardcoded here.
 EXECUTOR = os.environ.get("EXECUTOR", "single_actions")
-OUT_DIR = f"results/debug/{GAME}/info_subgoal"
-os.makedirs(OUT_DIR, exist_ok=True)
+# Recovered from the suffix the caller passes ("" or "_firstN"), because that is the only
+# form this script is given. paths.benchmark_csv re-applies it, so the two cannot disagree.
+N_TASKS = int(SUFFIX[len("_first"):]) if SUFFIX.startswith("_first") else None
+
+OUT_DIR = paths.debug_dir(game=GAME, stage="info_subgoal")
 
 ARMS = {
-    "baseline":  f"{BASE}/dummy_{EXECUTOR}_{STEM}{SUFFIX}.csv",
-    "info subgoal": f"{BASE}/info_subgoal_retrieval_{EXECUTOR}_{STEM}{SUFFIX}.csv",
+    "baseline": paths.benchmark_csv(game=GAME, supervisor="dummy", executor=EXECUTOR,
+                                    model=STEM, n_tasks=N_TASKS),
+    "info subgoal": paths.benchmark_csv(game=GAME, supervisor="info_subgoal_retrieval",
+                                        executor=EXECUTOR, model=STEM, n_tasks=N_TASKS),
 }
 
 lines = []

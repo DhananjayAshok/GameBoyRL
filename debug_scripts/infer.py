@@ -39,7 +39,7 @@ import pandas as pd
 from utils import log_info, log_warn
 from debug_scripts import markdown as md
 from debug_scripts.frames import trajectory_strip
-from utils.paths import Paths
+from python_scripts.paths import Paths
 
 
 def _canonical_task(task: str) -> str:

@@ -35,6 +35,7 @@ from gameboy_worlds import AVAILABLE_GAMES
 from benchmark_scripts import baseline, info_subgoal, revision, subgoal
 from execution.registry import AVAILABLE_EXECUTORS
 from utils import load_parameters
+from python_scripts.paths import model_save_name
 
 
 @click.group()
@@ -96,7 +97,7 @@ def main(ctx, game, controller_variant, executor, executor_vlm_model, executor_v
         supervisor_max_new_tokens=supervisor_max_new_tokens,
         # Names the CSV and the emulator session directory. Derived once here so both arms
         # agree on it — they write beside each other and a mismatch would be silent.
-        model_save_name=executor_vlm_model.split("/")[-1].lower(),
+        model_save_name=model_save_name(executor_vlm_model),
         save_video=save_video,
         max_steps=max_steps,
         max_tool_calls=max_tool_calls,

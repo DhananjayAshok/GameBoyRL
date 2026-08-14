@@ -775,8 +775,11 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         :return: List of base64 encoded image strings.
         :rtype: list[str]
         """
+        from python_scripts.paths import api_image_cache_dir
+
         cache_dir = os.path.join(
-            self.parameters["tmp_dir"], "api_image_cache", self.unique_id, str(uuid.uuid4())
+            api_image_cache_dir(self.parameters, unique_id=self.unique_id),
+            str(uuid.uuid4()),
         )
         os.makedirs(cache_dir)
         try:

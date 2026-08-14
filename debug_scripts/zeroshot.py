@@ -32,7 +32,7 @@ import pandas as pd
 from utils import log_info, log_warn
 from debug_scripts import markdown as md
 from debug_scripts.frames import to_pil
-from utils.paths import Paths
+from python_scripts.paths import Paths
 
 
 def _load_tasks(path: str) -> dict[str, list[str]]:

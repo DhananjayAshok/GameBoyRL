@@ -1,0 +1,761 @@
+"""
+The pipeline's path scheme: one implementation, used by producers, consumers and Bash alike.
+
+Every artifact path is a pure function of a small identity — ``(storage_dir, game,
+model_name, run_name, executor)`` plus a source vertical. This module owns that function, in
+both directions: the accessors build a path from an identity, and :func:`source_label`
+recovers the vertical from a path that was built.
+
+Mirroring by hand was the failure mode this replaces: producers built their paths with
+f-strings, the debug commands rebuilt them, and Bash built them a third way, so a change to
+one silently desynchronised the rest. Bash now asks this module through ``python_funcs.py``
+rather than deriving anything itself.
+
+**Two shapes per output tree.** Stages like ``build_info.py`` and ``attempt_tasks.py`` are
+handed an input stem on the command line and write beside it; the debug tools and Bash have
+only the identity. So each such tree exposes a ``*_from_stem`` function (what the stage has)
+and an identity wrapper that calls it on top of the stem this module builds (what everyone
+else has). One rule, two entry points, no third derivation.
+
+**Why this lives outside ``utils/``.** ``python_funcs.py`` shells out once per lookup, so this
+module has to be importable in milliseconds. It may import ``utils.fundamental``,
+``utils.log_handling`` and ``utils.parameter_handling`` — never ``from utils import ...``.
+
+Every accessor that reads a pipeline artifact goes through :func:`require`, which raises (via
+``log_error``) naming both the missing path and the script that produces it. Nothing here
+reads ``logs/``, wandb, or slurm — only artifacts the pipeline guarantees.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from typing import Any, Optional
+
+from utils.log_handling import log_error
+from utils.parameter_handling import load_parameters
+
+
+# Which script to point the user at when an artifact is missing.
+PRODUCERS = {
+    "grouped": "scripts/rl/create_all_traj.sh",
+    "curiosity": "scripts/vlm/infer_tasks.sh (via scripts/pipeline/curiosity_all_tasks.sh)",
+    "tasks": "scripts/vlm/propose_zeroshot.sh",
+    "attempts": "scripts/vlm/attempt_tasks.sh",
+    "benchmark": "scripts/benchmark.sh (via scripts/pipeline/serve_and_benchmark.sh)",
+    "info": "scripts/vlm/build_info.sh",
+    "insights": "scripts/vlm/build_info.sh (stage A)",
+}
+
+GROUPED_FILENAME = "grouped_global_high_reward_trajectories.pkl"
+INFO_DOC_FILENAME = "info.json"
+INSIGHTS_FILENAME = "insights.jsonl"
+TASKS_FILENAME = "zeroshot_tasks.jsonl"
+CURIOSITY_ANNOTATION_STEM = "trajectory_annotation"
+ALL_TRAJECTORIES_FILENAME = "all_trajectories.csv"
+SUCCESS_TRAJECTORIES_STEM = "success_trajectories"
+
+#: Pickled per-episode executor report, written into an emulator session dir beside videos/0.mp4.
+REPORT_FILENAME = "report.pkl.gz"
+
+#: Every supervisor key, as it appears in a CSV stem and a session directory.
+#:
+#: Mirrors ``execution.registry.AVAILABLE_SUPERVISORS``. Duplicated rather than imported
+#: because that module constructs the supervisor classes, which pull in the VLM stack, and
+#: this module has to stay importable in milliseconds — see the module docstring.
+#: ``tests`` for the two staying in step is the assertion in ``python_funcs.py --help``'s
+#: choices; if you add a supervisor, add it here too.
+BENCHMARK_SUPERVISORS = (
+    "dummy",
+    "revision",
+    "subgoal",
+    "info_subgoal_retrieval",
+    "info_subgoal_parametric",
+)
+
+#: The two source verticals an info document can be distilled from.
+#:
+#: Bash says "zeroshot" where Python historically said "attempt" — the same vertical, named for
+#: the stage that produces it versus the artifact it produces. Both spellings are accepted
+#: everywhere a source is taken; :func:`normalise_source` is the one place that knows.
+SOURCES = ("attempt", "curiosity")
+
+
+# ---------------------------------------------------------------------------
+# Identity helpers
+# ---------------------------------------------------------------------------
+
+
+def model_save_name(model_name: str) -> str:
+    """The basename the pipeline keys paths on: ``google/Gemma-4-31B-it`` -> ``gemma-4-31b-it``.
+
+    Lowercased, because a served model's basename is not case-stable — the same weights are
+    published as ``Qwen/Qwen3-VL-8B-Instruct`` and referred to in lowercase elsewhere, and a
+    path scheme that preserves case makes those two spellings different artifacts. Case is
+    folded here and nowhere else, so this is the only definition of the rule on the Python
+    side; ``model_save_name`` in ``scripts/core/utils.sh`` is its Bash twin and must fold the
+    same way.
+
+    Never apply this to a value that is sent to a backend as a model identifier — those are
+    case-sensitive upstream. It names directories and files only.
+
+    :param model_name: Full VLM name, e.g. ``"google/gemma-4-31b-it"``.
+    :type model_name: str
+    :return: The path-safe basename.
+    :rtype: str
+    """
+    return model_name.split("/")[-1].lower()
+
+
+def finetuned_model_name(*, model_name: str, game: str, run_name: str, mode: str) -> str:
+    """Served-model name a fine-tuned checkpoint is benchmarked under.
+
+    Mirrors ``serve_and_benchmark.sh``'s ``${model_save_name}-${game}-${run_name}-${mode}``.
+    """
+    return f"{model_save_name(model_name)}-{game}-{run_name}-{mode}"
+
+
+def normalise_source(source: str, parameters=None) -> str:
+    """Map either vocabulary onto the canonical one. ``"zeroshot"`` is an alias for ``"attempt"``."""
+    if source == "zeroshot":
+        return "attempt"
+    if source in SOURCES:
+        return source
+    log_error(f"Unknown source '{source}'. Choose from {list(SOURCES)} (or 'zeroshot').",
+              parameters)
+
+
+def source_label(artifact_dir: str) -> str:
+    """
+    Short provenance label for an artifact dir, recovered from its path.
+
+    The **inverse** of the scheme this module builds, which is why it lives beside it. The two
+    verticals lay their directories out differently::
+
+        curiosity  .../curiosity/<run_name>/info_<model>_<executor>    -> "curiosity"
+        zeroshot   .../zeroshot/zeroshot_tasks_<executor>_attempts/... -> "zeroshot"
+
+    Prefer a *recorded* label where one exists — an info document carries its own provenance
+    (see :class:`~execution.info_doc.Provenance`) and should be read, not re-derived. This
+    function is the fallback for artifacts that record nothing.
+
+    Falls back to the parent directory name for anything unrecognised, so an unusual layout
+    still produces a distinguishable label rather than crashing.
+    """
+    parts = os.path.normpath(artifact_dir).split(os.sep)
+    if len(parts) >= 3 and parts[-3] == 'curiosity':
+        return 'curiosity'
+    stem = parts[-2] if len(parts) >= 2 else os.path.basename(artifact_dir)
+    if stem.endswith('_attempts'):
+        stem = stem[: -len('_attempts')]
+        stem = stem.rsplit('_', 1)[0]  # drop the trailing _<executor>
+    if stem.startswith('zeroshot_tasks'):
+        return 'zeroshot'
+    return stem or 'unknown'
+
+
+def require(path: str, kind: str, parameters=None, game: Optional[str] = None) -> str:
+    """Return *path* if it exists, otherwise raise naming the producing script."""
+    if not os.path.exists(path):
+        log_error(
+            f"Required artifact not found: {path}\n"
+            f"  This is produced by: {PRODUCERS.get(kind, kind)}\n"
+            + (f"  Run that stage for game '{game}' before this command." if game else ""),
+            parameters,
+        )
+    return path
+
+
+def _roots(parameters) -> tuple[dict, str, str]:
+    """``(parameters, storage_dir, results_dir)``, loading parameters if not already loaded."""
+    parameters = load_parameters(parameters)
+    return parameters, parameters["storage_dir"], parameters["results_dir"]
+
+
+# ---------------------------------------------------------------------------
+# Curiosity / grouping
+# ---------------------------------------------------------------------------
+
+
+def grouped_dir(parameters=None, *, game: str, run_name: str) -> str:
+    _, storage, _ = _roots(parameters)
+    return os.path.join(storage, "grouped_trajectories", game, run_name)
+
+
+def grouped_file(parameters=None, *, game: str, run_name: str, init_state: str) -> str:
+    return os.path.join(grouped_dir(parameters, game=game, run_name=run_name),
+                        init_state, GROUPED_FILENAME)
+
+
+def init_states(parameters=None, *, game: str, run_name: str) -> list[str]:
+    """Every init_state with a grouped-trajectory file, sorted. Raises if none exist."""
+    parameters, _, _ = _roots(parameters)
+    root = require(grouped_dir(parameters, game=game, run_name=run_name),
+                   "grouped", parameters, game)
+    states = sorted(
+        d for d in os.listdir(root)
+        if os.path.exists(grouped_file(parameters, game=game, run_name=run_name, init_state=d))
+    )
+    if not states:
+        log_error(f"No grouped trajectory files under {root}.\n"
+                  f"  Produced by: {PRODUCERS['grouped']}", parameters)
+    return states
+
+
+# ---------------------------------------------------------------------------
+# Task proposal / attempt
+# ---------------------------------------------------------------------------
+
+
+def proposed_tasks_dir(parameters=None, *, game: str, model_name: str) -> str:
+    _, storage, _ = _roots(parameters)
+    return os.path.join(storage, "proposed_tasks", game, model_save_name(model_name))
+
+
+def curiosity_annotation(parameters=None, *, game: str, model_name: str, run_name: str) -> str:
+    """The curiosity vertical's annotation JSON. Its stem (minus ``.json``) is what
+    ``build_info.py`` is handed as ``--trajectory_path``."""
+    return os.path.join(curiosity_dir(parameters, game=game, model_name=model_name,
+                                      run_name=run_name),
+                        f"{CURIOSITY_ANNOTATION_STEM}.json")
+
+
+def curiosity_dir(parameters=None, *, game: str, model_name: str, run_name: str) -> str:
+    return os.path.join(proposed_tasks_dir(parameters, game=game, model_name=model_name),
+                        "curiosity", run_name)
+
+
+def zeroshot_dir(parameters=None, *, game: str, model_name: str) -> str:
+    return os.path.join(proposed_tasks_dir(parameters, game=game, model_name=model_name),
+                        "zeroshot")
+
+
+def tasks_file(parameters=None, *, game: str, model_name: str) -> str:
+    return os.path.join(zeroshot_dir(parameters, game=game, model_name=model_name),
+                        TASKS_FILENAME)
+
+
+def attempts_dir_from_stem(tasks_path: str, *, executor: str) -> str:
+    """Where ``attempt_tasks.py`` writes, given the ``--tasks_path`` it was handed.
+
+    The stage has a path and no identity, so this half of the rule takes the path. See the
+    module docstring on the two-shapes-per-tree convention.
+    """
+    return os.path.splitext(tasks_path)[0] + f"_{executor}_attempts"
+
+
+def attempts_dir(parameters=None, *, game: str, model_name: str, executor: str) -> str:
+    """The same directory, for callers that have the identity rather than the path."""
+    return attempts_dir_from_stem(
+        tasks_file(parameters, game=game, model_name=model_name), executor=executor)
+
+
+def all_trajectories_csv(parameters=None, *, game: str, model_name: str, executor: str) -> str:
+    return os.path.join(attempts_dir(parameters, game=game, model_name=model_name,
+                                     executor=executor), ALL_TRAJECTORIES_FILENAME)
+
+
+def success_trajectories_json(parameters=None, *, game: str, model_name: str,
+                              executor: str) -> str:
+    return f"{success_trajectories_stem(parameters, game=game, model_name=model_name, executor=executor)}.json"
+
+
+def success_trajectories_pkl(parameters=None, *, game: str, model_name: str,
+                             executor: str) -> str:
+    return f"{success_trajectories_stem(parameters, game=game, model_name=model_name, executor=executor)}.pkl"
+
+
+def success_trajectories_stem(parameters=None, *, game: str, model_name: str,
+                              executor: str) -> str:
+    """The zeroshot vertical's ``build_info.py --trajectory_path`` stem."""
+    return os.path.join(attempts_dir(parameters, game=game, model_name=model_name,
+                                     executor=executor), SUCCESS_TRAJECTORIES_STEM)
+
+
+# ---------------------------------------------------------------------------
+# Info documents (context-engineering vertical)
+# ---------------------------------------------------------------------------
+
+
+def info_source_stem(parameters=None, *, game: str, model_name: str, run_name: str,
+                     executor: str, source: str) -> str:
+    """The trajectory stem ``build_info.py`` consumes for one source: ``<stem>.json`` + ``<stem>.pkl``.
+
+    Replaces the Bash function of the same name that used to live in ``scripts/core/utils.sh``.
+    ``model_name`` is in the path because a document is built from one model's own output; two
+    models sharing a game must not share an info dir.
+    """
+    parameters, _, _ = _roots(parameters)
+    if normalise_source(source, parameters) == "curiosity":
+        return os.path.join(curiosity_dir(parameters, game=game, model_name=model_name,
+                                          run_name=run_name), CURIOSITY_ANNOTATION_STEM)
+    return success_trajectories_stem(parameters, game=game, model_name=model_name,
+                                     executor=executor)
+
+
+def info_dir_from_stem(trajectory_path: str, *, model_name: str, executor: str) -> str:
+    """Where ``build_info.py`` puts everything, given the ``--trajectory_path`` it was handed.
+
+    The executor is in the name because it is the identity of the trajectories the document was
+    distilled from. The zeroshot stem already encodes it
+    (``zeroshot_tasks_<executor>_attempts``), but the curiosity stem does not — so without it a
+    curiosity document built from one executor's annotations silently overwrites another's.
+    """
+    return os.path.join(os.path.dirname(trajectory_path),
+                        f"info_{model_save_name(model_name)}_{executor}")
+
+
+def source_info_dir(parameters=None, *, game: str, model_name: str, run_name: str,
+                    executor: str, source: str = "attempt") -> str:
+    """Info dir for a named source. ``source`` is 'attempt' (aka 'zeroshot') or 'curiosity'."""
+    return info_dir_from_stem(
+        info_source_stem(parameters, game=game, model_name=model_name, run_name=run_name,
+                         executor=executor, source=source),
+        model_name=model_name, executor=executor)
+
+
+def info_dir(parameters=None, *, game: str, model_name: str, run_name: str,
+             executor: str) -> str:
+    """The zeroshot/attempt vertical's info dir."""
+    return source_info_dir(parameters, game=game, model_name=model_name, run_name=run_name,
+                           executor=executor, source="attempt")
+
+
+def curiosity_info_dir(parameters=None, *, game: str, model_name: str, run_name: str,
+                       executor: str) -> str:
+    """The curiosity vertical's info dir."""
+    return source_info_dir(parameters, game=game, model_name=model_name, run_name=run_name,
+                           executor=executor, source="curiosity")
+
+
+def info_doc(parameters=None, *, game: str, model_name: str, run_name: str, executor: str,
+             source: str = "attempt") -> str:
+    return os.path.join(source_info_dir(parameters, game=game, model_name=model_name,
+                                        run_name=run_name, executor=executor, source=source),
+                        INFO_DOC_FILENAME)
+
+
+def insights_jsonl(parameters=None, *, game: str, model_name: str, run_name: str,
+                   executor: str, source: str = "attempt") -> str:
+    return os.path.join(source_info_dir(parameters, game=game, model_name=model_name,
+                                        run_name=run_name, executor=executor, source=source),
+                        INSIGHTS_FILENAME)
+
+
+def info_available_sources(parameters=None, *, game: str, model_name: str, run_name: str,
+                           executor: str) -> list[str]:
+    """Which of {zeroshot, curiosity} actually have build_info inputs on disk for this game.
+
+    Replaces the Bash function of the same name. The all-games sweep uses this to pick each
+    game's ``--mode`` rather than assuming both exist: most games have only one vertical, and
+    demanding both would skip them entirely.
+
+    Returned in the Bash vocabulary ('zeroshot', not 'attempt'), zeroshot first, because that is
+    the verified-solution source and reads first in a comma-joined ``--info_docs`` list.
+    """
+    parameters, _, _ = _roots(parameters)
+    found = []
+    for source in ("zeroshot", "curiosity"):
+        stem = info_source_stem(parameters, game=game, model_name=model_name,
+                                run_name=run_name, executor=executor, source=source)
+        if os.path.isfile(f"{stem}.json") and os.path.isfile(f"{stem}.pkl"):
+            found.append(source)
+    return found
+
+
+def parametric_doc(parameters=None, *, game: str, model_name: str) -> str:
+    """The parametric document for this game and model.
+
+    Keyed on game + model only, and deliberately not on run_name or executor: nothing about
+    this document depends on a trajectory run or on which executor plays, because it is written
+    from the model's priors before any of that exists. Putting it under the trajectory tree
+    would imply a dependency it does not have, and would make the same document be regenerated
+    once per run name.
+    """
+    _, storage, _ = _roots(parameters)
+    return os.path.join(storage, "parametric_docs", game, model_save_name(model_name),
+                        INFO_DOC_FILENAME)
+
+
+# ---------------------------------------------------------------------------
+# Benchmark
+# ---------------------------------------------------------------------------
+
+
+def benchmark_dir(parameters=None, *, game: str) -> str:
+    _, _, results = _roots(parameters)
+    return os.path.join(results, "benchmark", game)
+
+
+def benchmark_stem(*, supervisor: str, executor: str, model: str,
+                   n_tasks: Optional[int] = None) -> str:
+    """The CSV basename, without extension.
+
+    ``supervisor`` is what the old consumer omitted, and ``n_tasks`` the other half: a subset
+    run gets its own file, because resuming a full sweep from a 5-task CSV would read the
+    first five as done and silently skip them.
+    """
+    return (f"{supervisor}_{executor}_{model}_first{n_tasks}" if n_tasks is not None
+            else f"{supervisor}_{executor}_{model}")
+
+
+def benchmark_session_name(*, supervisor: str, executor: str, model: str) -> str:
+    """The emulator session directory name for one benchmark run.
+
+    Shares ``supervisor``/``executor``/``model`` with :func:`benchmark_stem` on purpose: an
+    episode's CSV row and the session holding its video and archived report have to be
+    findable from each other, and they were previously two f-strings per arm that happened
+    to agree.
+    """
+    return f"benchmark_{supervisor}_{executor}_{model}"
+
+
+def benchmark_csv(parameters=None, *, game: str, supervisor: str, executor: str, model: str,
+                  n_tasks: Optional[int] = None, create: bool = False) -> str:
+    """``<results>/benchmark/<game>/<supervisor>_<executor>_<model>[_firstN].csv``.
+
+    ``model`` is already a save-name here, not a full model name — callers pass either
+    :func:`model_save_name` output or :func:`finetuned_model_name` output.
+    """
+    directory = benchmark_dir(parameters, game=game)
+    if create:
+        os.makedirs(directory, exist_ok=True)
+    return os.path.join(directory, f"{benchmark_stem(supervisor=supervisor, executor=executor, model=model, n_tasks=n_tasks)}.csv")
+
+
+def benchmark_series_csv(parameters=None, *, game: str) -> str:
+    """The GameBoyWorlds series CSV whose `game` column contains *game*."""
+    import pandas as pd
+    parameters, _, _ = _roots(parameters)
+    tests_dir = os.path.join(parameters["project_root"], "GameBoyWorlds", "benchmark", "tests")
+    require(tests_dir, "benchmark", parameters, game)
+    for filename in sorted(os.listdir(tests_dir)):
+        if not filename.endswith(".csv"):
+            continue
+        path = os.path.join(tests_dir, filename)
+        if game in set(pd.read_csv(path)["game"].unique()):
+            return path
+    log_error(f"No series CSV under {tests_dir} contains game '{game}'.", parameters)
+
+
+def train_games(*, game: str) -> list[str]:
+    """The games in *game*'s series that declare train states, sorted.
+
+    A list, not a single game: a series may declare more than one, and *game* itself is in it
+    when *game* is one of them. This is where *game*'s info documents come from — every other
+    title in the series borrows theirs.
+
+    Delegates to ``gameboy_worlds.get_train_games`` rather than reading the series CSV here, so
+    the ``can_train_from_init_state`` rule has one implementation. Deliberately called with no
+    ``parameters``: that argument is passed straight through to GameBoyWorlds'
+    ``load_parameters``, and handing it *our* dict would point its ``project_root`` at this
+    project and make it look for benchmark CSVs that live in the submodule.
+    """
+    from gameboy_worlds import get_train_games
+    return sorted(get_train_games(game))
+
+
+#: Column in a series CSV marking a game whose init_states can be trained/explored from.
+TRAIN_FLAG_COLUMN = "can_train_from_init_state"
+
+
+def train_games(parameters=None, *, game: str) -> list[str]:
+    """Every game in *game*'s series that source data can be collected from, sorted.
+
+    A series has one benchmark table but not every title in it is a training title: the
+    curiosity and zeroshot verticals run only where ``can_train_from_init_state`` is set, and
+    the other titles borrow the documents built from those. Which title that is is **not**
+    guessable from the name — bomberman's is ``bomberman_quest``, not the lower-numbered
+    ``bomberman_pocket`` — so this reads the flag rather than pattern-matching.
+
+    Returns a list because a series may declare more than one, and an empty list for a game
+    whose series marks none.
+
+    Reads the series CSV directly (pandas only, no ``gameboy_worlds`` import), so it costs a
+    file read rather than an emulator-package import.
+    """
+    import pandas as pd
+    parameters, _, _ = _roots(parameters)
+    frame = pd.read_csv(benchmark_series_csv(parameters, game=game))
+    if TRAIN_FLAG_COLUMN not in frame.columns:
+        log_error(
+            f"Series CSV for '{game}' has no {TRAIN_FLAG_COLUMN!r} column, so its training "
+            "titles cannot be determined.", parameters)
+    flag = frame[TRAIN_FLAG_COLUMN]
+    # The column is written as True/False, so pandas may hand back bool or str depending on
+    # whether any cell is blank. Normalise rather than trusting the dtype.
+    truthy = flag.astype(str).str.strip().str.lower().isin(("true", "1", "yes"))
+    return sorted(frame.loc[truthy, "game"].unique())
+
+
+def gameboy_worlds_storage() -> str:
+    """GameBoyWorlds' own ``storage_dir`` — where sessions, videos and archived reports live.
+
+    A different tree from this project's ``storage_dir``, read from the submodule's own config
+    rather than assumed equal to ours. Imported inside the function because ``gameboy_worlds``
+    is expensive and almost no caller needs it.
+    """
+    from gameboy_worlds.utils import load_parameters as gbw_load_parameters
+    return gbw_load_parameters()["storage_dir"]
+
+
+def sessions_dir(*, game: str) -> str:
+    """``<GameBoyWorlds storage>/sessions/<game>`` — the root every episode's session sits under."""
+    return os.path.join(gameboy_worlds_storage(), "sessions", game)
+
+
+def model_checkpoint_dir(parameters=None, *, game: str, run_name: str, mode: str,
+                         model_name: str) -> str:
+    """Where ``train_vlm.sh`` writes a fine-tuned checkpoint, and ``serve_and_benchmark.sh`` reads it."""
+    _, storage, _ = _roots(parameters)
+    return os.path.join(storage, "models", f"{game}-{run_name}-{mode}",
+                        model_save_name(model_name))
+
+
+# ---------------------------------------------------------------------------
+# Debug reports
+# ---------------------------------------------------------------------------
+
+
+def debug_dir(parameters=None, *, game: str, stage: str, sub: tuple = (),
+              output_dir: Optional[str] = None) -> str:
+    """``<results_dir>/debug/<game>/<stage>[/sub...]``, created on demand."""
+    _, _, results = _roots(parameters)
+    root = output_dir or os.path.join(results, "debug", game)
+    path = os.path.join(root, stage, *sub)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def debug_frames_dir(parameters=None, *, game: str, stage: str, sub: tuple = ()) -> str:
+    """``<storage_dir>/tmp/debug_frames/<game>/<stage>[/sub...]``, created on demand.
+
+    On storage rather than beside the markdown in :func:`debug_dir`, because a frame-by-frame
+    report is thousands of PNGs and ``results_dir`` is on the home filesystem, where the inode
+    quota bites long before the disk quota does.
+
+    Keyed on game and stage, with callers appending model and task below that, so two runs
+    cannot overwrite each other's frames.
+    """
+    _, storage, _ = _roots(parameters)
+    path = os.path.join(storage, "tmp", "debug_frames", game, stage, *sub)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def executor_frames_dir(parameters=None, *, game: str, executor: str,
+                        model: Optional[str], task: str) -> str:
+    """Where ``ExecutorReport._save_images`` writes its ``--verbose`` PNGs.
+
+    Keyed on the model as well as the executor, unlike the scheme this replaces. The old path
+    was ``<results>/benchmark/<game>/<executor>/<task>/`` and the writer ``rmtree``s it first,
+    so two runs of the same executor and task on different models destroyed each other's
+    output — the exact failure :func:`debug_frames_dir` was written to avoid. Two runs at the
+    same identity still overwrite, which is intended: that is the same experiment re-run.
+
+    The supervisor is deliberately absent: an ``ExecutorReport`` does not know which
+    supervisor is driving it, and threading that through purely to name a debug directory
+    would put a benchmark concept into the executor. ``model`` comes from ``init_kwargs["vlm_model"]``, which the
+    report already records; ``None`` (no model resolved) collapses to ``unknown_model``
+    rather than silently dropping a path segment.
+
+    On storage for the same inode reason :func:`debug_frames_dir` cites — a verbose run is
+    thousands of PNGs, and ``results_dir`` is on the home filesystem where the inode quota
+    bites first.
+    """
+    from utils.fundamental import depathify
+    _, storage, _ = _roots(parameters)
+    task_str = depathify(task)
+    if not task_str:
+        log_error(
+            f"Cannot derive an image directory from task {task!r}: it contains no word "
+            "characters, so the path would resolve to the parent directory and deleting it "
+            "would destroy every other task's images.", parameters)
+    stem = f"{executor}_{model_save_name(model) if model else 'unknown_model'}"
+    return os.path.join(storage, "tmp", "executor_frames", game, stem, task_str)
+
+
+# ---------------------------------------------------------------------------
+# Scratch trees under tmp_dir
+# ---------------------------------------------------------------------------
+
+
+def api_image_cache_dir(parameters=None, *, unique_id: str) -> str:
+    """Where an API-backed model stages images it has to upload."""
+    parameters, storage, _ = _roots(parameters)
+    return os.path.join(storage, "tmp", "api_image_cache", unique_id)
+
+
+def trajectory_render_dir(parameters=None, *, name: str, group: Optional[int] = None) -> str:
+    """Where ``show_trajectories.py`` renders a named set of grouped trajectories."""
+    parameters, storage, _ = _roots(parameters)
+    path = os.path.join(storage, "tmp", "trajectories", name)
+    return path if group is None else os.path.join(path, f"group_{group}")
+
+
+# There is deliberately no video_path() accessor. A video is found through the episode row's own
+# ``session_dirs``, beside that episode's report.pkl.gz — see ``debug_scripts/benchmark.py``.
+# Rebuilding the path from the task name instead cannot address an episode: several benchmark
+# rows share a task string, so they share the task-named sessions directory too.
+
+
+# ---------------------------------------------------------------------------
+# Facade
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Paths:
+    """One identity, bound once, forwarding to the functions above.
+
+    Exists so callers that resolve many paths for the same experiment — every
+    ``debug_scripts`` command does — do not re-pass the five-part identity on every call. It
+    holds no path logic of its own; each method is a one-line forward.
+
+    :param parameters: Loaded project parameters. If None, loaded from config.
+    :param game: Game name, e.g. ``"deja_vu_1"``.
+    :param run_name: Run name used by the RL/curiosity stages, e.g. ``"my_run"``.
+    :param executor: Executor short name, e.g. ``"single_actions"``.
+    :param model_name: Full VLM name, e.g. ``"google/gemma-4-31b-it"``. Only needed for stages
+        whose paths are keyed on the model; ``None`` is fine for curiosity.
+    :param output_dir: Root for generated reports. Defaults to ``<results_dir>/debug/<game>``.
+    """
+
+    parameters: Optional[dict] = None
+    game: Optional[str] = None
+    run_name: str = "my_run"
+    executor: str = "history"
+    model_name: Optional[str] = None
+    output_dir: Optional[str] = None
+    mode: str = "both"
+    storage_dir: str = field(init=False)
+    results_dir: str = field(init=False)
+
+    def __post_init__(self):
+        self.parameters = load_parameters(self.parameters)
+        self.storage_dir = self.parameters["storage_dir"]
+        self.results_dir = self.parameters["results_dir"]
+
+    # -- identity helpers ------------------------------------------------
+
+    @property
+    def _model(self) -> str:
+        if self.model_name is None:
+            log_error("model_name is required for this command but was not provided.",
+                      self.parameters)
+        return self.model_name
+
+    @property
+    def model_save_name(self) -> str:
+        return model_save_name(self._model)
+
+    @property
+    def finetuned_model_name(self) -> str:
+        return finetuned_model_name(model_name=self._model, game=self.game,
+                                    run_name=self.run_name, mode=self.mode)
+
+    def require(self, path: str, kind: str) -> str:
+        return require(path, kind, self.parameters, self.game)
+
+    # -- curiosity / grouping --------------------------------------------
+
+    def grouped_dir(self) -> str:
+        return grouped_dir(self.parameters, game=self.game, run_name=self.run_name)
+
+    def grouped_file(self, init_state: str) -> str:
+        return grouped_file(self.parameters, game=self.game, run_name=self.run_name,
+                            init_state=init_state)
+
+    def init_states(self) -> list[str]:
+        return init_states(self.parameters, game=self.game, run_name=self.run_name)
+
+    # -- proposal / attempt ----------------------------------------------
+
+    def proposed_tasks_dir(self) -> str:
+        return proposed_tasks_dir(self.parameters, game=self.game, model_name=self._model)
+
+    def curiosity_annotation(self) -> str:
+        return curiosity_annotation(self.parameters, game=self.game, model_name=self._model,
+                                    run_name=self.run_name)
+
+    def zeroshot_dir(self) -> str:
+        return zeroshot_dir(self.parameters, game=self.game, model_name=self._model)
+
+    def tasks_file(self) -> str:
+        return tasks_file(self.parameters, game=self.game, model_name=self._model)
+
+    def attempts_dir(self) -> str:
+        return attempts_dir(self.parameters, game=self.game, model_name=self._model,
+                            executor=self.executor)
+
+    def all_trajectories_csv(self) -> str:
+        return all_trajectories_csv(self.parameters, game=self.game, model_name=self._model,
+                                    executor=self.executor)
+
+    def success_trajectories_json(self) -> str:
+        return success_trajectories_json(self.parameters, game=self.game,
+                                         model_name=self._model, executor=self.executor)
+
+    def success_trajectories_pkl(self) -> str:
+        return success_trajectories_pkl(self.parameters, game=self.game,
+                                        model_name=self._model, executor=self.executor)
+
+    # -- info documents ---------------------------------------------------
+
+    def _info_kwargs(self) -> dict[str, Any]:
+        return dict(game=self.game, model_name=self._model, run_name=self.run_name,
+                    executor=self.executor)
+
+    def info_source_stem(self, source: str) -> str:
+        return info_source_stem(self.parameters, source=source, **self._info_kwargs())
+
+    def info_dir(self) -> str:
+        return info_dir(self.parameters, **self._info_kwargs())
+
+    def curiosity_info_dir(self) -> str:
+        return curiosity_info_dir(self.parameters, **self._info_kwargs())
+
+    def source_info_dir(self, source: str) -> str:
+        return source_info_dir(self.parameters, source=source, **self._info_kwargs())
+
+    def info_doc(self, source: str = "attempt") -> str:
+        return info_doc(self.parameters, source=source, **self._info_kwargs())
+
+    def insights_jsonl(self, source: str = "attempt") -> str:
+        return insights_jsonl(self.parameters, source=source, **self._info_kwargs())
+
+    def info_available_sources(self) -> list[str]:
+        return info_available_sources(self.parameters, **self._info_kwargs())
+
+    def parametric_doc(self) -> str:
+        return parametric_doc(self.parameters, game=self.game, model_name=self._model)
+
+    # -- benchmark --------------------------------------------------------
+
+    def benchmark_csv(self, bench_game: str, model: str, supervisor: str,
+                      n_tasks: Optional[int] = None, create: bool = False) -> str:
+        return benchmark_csv(self.parameters, game=bench_game, supervisor=supervisor,
+                             executor=self.executor, model=model, n_tasks=n_tasks,
+                             create=create)
+
+    def benchmark_series_csv(self) -> str:
+        return benchmark_series_csv(self.parameters, game=self.game)
+
+    def gameboy_worlds_storage(self) -> str:
+        return gameboy_worlds_storage()
+
+    def sessions_dir(self, game: Optional[str] = None) -> str:
+        return sessions_dir(game=game or self.game)
+
+    def model_checkpoint_dir(self) -> str:
+        return model_checkpoint_dir(self.parameters, game=self.game, run_name=self.run_name,
+                                    mode=self.mode, model_name=self._model)
+
+    # -- debug reports -----------------------------------------------------
+
+    def debug_dir(self, stage: str, *sub: str) -> str:
+        return debug_dir(self.parameters, game=self.game, stage=stage, sub=sub,
+                         output_dir=self.output_dir)
+
+    def debug_frames_dir(self, stage: str, *sub: str) -> str:
+        return debug_frames_dir(self.parameters, game=self.game, stage=stage, sub=sub)

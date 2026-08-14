@@ -48,9 +48,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from debug_scripts import markdown as md
-from utils.paths import Paths
+from python_scripts.paths import Paths
 from execution.info_doc import TASK_SECTION, InfoDocument
-from utils.paths import INFO_DOC_FILENAME
+from python_scripts.paths import INFO_DOC_FILENAME
 from utils import log_info, log_warn
 
 # Phrases that signal an insight has drifted into unfalsifiable advice, and the concrete

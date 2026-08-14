@@ -30,16 +30,13 @@ dir in curiosity_all_tasks.sh if that ever happens.
 """
 import os
 import pickle
-import sys
 
 import click
 
-
-def log(message):
-    print(message, file=sys.stderr)
+from python_scripts.common import log
 
 
-@click.command()
+@click.command(name="combine_trajectories")
 @click.option(
     "--input_paths",
     required=True,
@@ -56,7 +53,8 @@ def log(message):
     show_default=True,
     help="z_kind used in the output filename, matching group_trajectories.py.",
 )
-def combine(input_paths, save_path, z_kind):
+def combine_trajectories_cmd(input_paths, save_path, z_kind):
+    """Write a manifest pkl referencing several grouped-trajectory pkls."""
     paths = [p.strip() for p in input_paths.split(",") if p.strip()]
 
     manifest = []
@@ -76,7 +74,3 @@ def combine(input_paths, save_path, z_kind):
     with open(out_path, "wb") as f:
         pickle.dump(manifest, f)  # list[str] of input pkl paths, not the trajectories
     log(f"Wrote manifest of {len(manifest)} file(s) -> {out_path}")
-
-
-if __name__ == "__main__":
-    combine()

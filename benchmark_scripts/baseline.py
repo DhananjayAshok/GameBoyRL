@@ -11,10 +11,11 @@ import click
 
 from gameboy_worlds import get_benchmark_tasks
 
-from execution.registry import AVAILABLE_EXECUTORS
+from execution.registry import AVAILABLE_EXECUTORS, AVAILABLE_SUPERVISORS
 from execution.supervisors import DummySupervisor
 
 from benchmark_scripts import common
+from python_scripts import paths
 
 
 @click.command(name="baseline")
@@ -26,18 +27,21 @@ def baseline_cmd(obj):
     executor = obj["executor"]
     executor_class = AVAILABLE_EXECUTORS[executor]
     model_save_name = obj["model_save_name"]
+    supervisor_name = "dummy"
+    supervisor_class = AVAILABLE_SUPERVISORS[supervisor_name]
 
     emulator_kwargs = {
         "headless": True,
         "save_video": obj["save_video"],
-        "session_name": f"benchmark_dummy_{executor}_{model_save_name}",
+        "session_name": paths.benchmark_session_name(supervisor=supervisor_name, executor=executor,
+                                                     model=model_save_name),
         "max_steps": obj["max_steps"],
     }
 
     columns = common.COMMON_COLUMNS + [common.SESSION_COLUMN]
     tasks = common.select_tasks(get_benchmark_tasks(game=game), obj["n_tasks"])
-    save_path = common.results_path(parameters, game,
-                                    f"dummy_{executor}_{model_save_name}", obj["n_tasks"])
+    save_path = common.results_path(parameters, game, supervisor=supervisor_name, executor=executor,
+                                    model=model_save_name, n_tasks=obj["n_tasks"])
     results, n_completed = common.load_checkpoint(save_path, obj["regenerate"],
                                                   columns, parameters)
 
@@ -46,7 +50,7 @@ def baseline_cmd(obj):
             # Through DummySupervisor rather than straight to the executor: every arm
             # produces a SupervisorReport, so the archive and every reader have one shape.
             # This supervisor adds no reasoning, which is what makes it the control.
-            supervisor = DummySupervisor(
+            supervisor = supervisor_class(
                 task=row["task"],
                 executor_class=executor_class,
                 env=environment,
@@ -69,7 +73,7 @@ def baseline_cmd(obj):
 
         return common.run_episode(
             row, play,
-            arm="dummy",
+            supervisor=supervisor_name,
             controller_variant=obj["controller_variant"],
             executor_name=executor_class.__name__,
             model=model_save_name,

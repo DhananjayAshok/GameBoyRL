@@ -66,8 +66,8 @@ done
 game="${ARGS["game"]}"
 mode="${ARGS["mode"]}"
 executor="${ARGS["executor"]}"
-model_save_name="${ARGS["model_name"]##*/}"
-proposed_dir="$storage_dir/proposed_tasks/${game}/${model_save_name}"
+model_save_name=$(model_save_name "${ARGS["model_name"]}")
+proposed_dir=$(path_of proposed_tasks_dir --game "$game" --model_name "${ARGS["model_name"]}")
 
 # Run the data-collection legs for this mode, and report each leg's trajectory stem.
 # Every path is re-derived here rather than passed back up, matching how the rest of the

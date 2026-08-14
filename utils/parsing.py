@@ -9,7 +9,13 @@ from __future__ import annotations
 import re
 from typing import Optional
 
+from utils.fundamental import depathify  # noqa: F401  (re-export; see below)
 from utils.lm_inference import parse_key_value
+
+
+# depathify moved to utils.fundamental so it can be imported without the LM stack that the
+# parse_key_value import above drags in. Re-exported here because it was part of this module's
+# public surface and `from utils.parsing import depathify` appears in the wild.
 
 
 # A list item: "- foo", "* foo", "• foo", "1. foo", "1) foo", "1 foo".
@@ -17,30 +23,6 @@ from utils.lm_inference import parse_key_value
 _ITEM_RE = re.compile(r"^(?:[-*•]|\d+[.)]?)\s+(.*)$")
 
 _ABSENT = {"NONE", "N/A", "NA"}
-
-
-def depathify(string: str) -> str:
-    """
-    Collapse a free-text string into one path segment.
-
-    Every non-word character becomes ``_``, not just ``/``, ``\\`` and space. The three
-    separators are what splice a segment into extra directory levels, but they are not the
-    only input that stops the result being a *segment*: ``"."`` and ``".."`` survive a
-    separators-only replace unchanged and then resolve to the parent path, which is fatal
-    for any caller that deletes what it derives.
-
-    Case is left alone — that is the caller's policy, not this function's.
-
-    Returns ``""`` for a string with no word characters at all (``"???"``). Callers joining
-    the result onto a base path must handle that: an empty segment resolves to the base
-    directory itself.
-
-    :param string: The string to depathify.
-    :type string: str
-    :return: The depathified string.
-    :rtype: str
-    """
-    return re.sub(r"[^\w]", "_", string).strip("_")
 
 
 def _is_absent(value: str) -> bool:

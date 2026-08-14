@@ -15,7 +15,8 @@ import numpy as np
 from gameboy_worlds.interface import HighLevelAction
 
 from execution.executor_action import ExecutorAction
-from utils import depathify, load_parameters, log_error, log_info, parse_yes_no, sum_optional
+from python_scripts import paths
+from utils import load_parameters, log_error, log_info, parse_yes_no, sum_optional
 
 
 @dataclass
@@ -352,23 +353,22 @@ class ExecutorReport:
 
     def _save_images(self) -> None:
         """
-        Write every VLM-call frame to ``results_dir/benchmark/<game>/<executor>/<task>/``.
+        Write every VLM-call frame to :func:`~python_scripts.paths.executor_frames_dir`.
+
+        Keyed on the model as well as the executor, which the previous path was not: it was
+        ``<results>/benchmark/<game>/<executor>/<task>/`` and this method ``rmtree``s the
+        directory first, so a verbose run would delete the frames of a run of the same
+        executor and task under a different model. The empty-slug guard now lives in the
+        accessor, since it is a property of the path rule rather than of this caller.
         """
         parameters = load_parameters()
-        task_str = depathify(self.task.lower())
-        # An empty slug would collapse the path onto the executor directory, and the
-        # rmtree below would then wipe every *other* task's images for this executor.
-        # Executor.__init__ rejects blank tasks, but a task of pure punctuation ("???")
-        # depathifies to "" while being non-blank, so the guard is needed here too.
-        if not task_str:
-            log_error(
-                f"Cannot derive an image directory from task {self.task!r}: it contains no "
-                "word characters, so the path would resolve to the executor directory "
-                f"{os.path.join(parameters['results_dir'], 'benchmark', self.game, self.executor_name)!r} "
-                "and deleting it would destroy every other task's images.",
-                parameters=parameters,
-            )
-        img_save_path = os.path.join(parameters["results_dir"], "benchmark", self.game, self.executor_name, task_str)
+        img_save_path = paths.executor_frames_dir(
+            parameters,
+            game=self.game,
+            executor=self.executor_name,
+            model=self.init_kwargs.get("vlm_model"),
+            task=self.task.lower(),
+        )
         if os.path.exists(img_save_path):
             shutil.rmtree(img_save_path)
         os.makedirs(img_save_path)

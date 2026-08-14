@@ -12,10 +12,11 @@ import click
 from gameboy_worlds import get_benchmark_tasks
 
 from execution.parametric_doc import load_or_generate_parametric_document
-from execution.registry import AVAILABLE_EXECUTORS
+from execution.registry import AVAILABLE_EXECUTORS, AVAILABLE_SUPERVISORS
 from execution.supervisors import PLAN_SEPARATOR, InfoSubgoalSupervisor
 from utils import VLM, log_error, log_info
-from utils.paths import Paths
+from python_scripts import paths
+from python_scripts.paths import Paths
 
 from benchmark_scripts import common
 
@@ -129,10 +130,17 @@ def info_subgoal_cmd(obj, info_docs, mode, parametric_categories,
             parameters=parameters,
         )]
 
+    # The knowledge mode is part of the supervisor's identity, not a parameter beside it:
+    # AVAILABLE_SUPERVISORS has a real subclass per mode, because two modes are different
+    # experiments and must not share a CSV or a session tree.
+    supervisor_name = f"info_subgoal_{mode}"
+    supervisor_class = AVAILABLE_SUPERVISORS[supervisor_name]
+
     emulator_kwargs = {
         "headless": True,
         "save_video": obj["save_video"],
-        "session_name": f"benchmark_info_subgoal_{mode}_{executor}_{model_save_name}",
+        "session_name": paths.benchmark_session_name(supervisor=supervisor_name, executor=executor,
+                                                     model=model_save_name),
         "max_steps": obj["max_steps"],
     }
 
@@ -149,15 +157,14 @@ def info_subgoal_cmd(obj, info_docs, mode, parametric_categories,
         common.SESSION_COLUMN,
     ]
     tasks = common.select_tasks(get_benchmark_tasks(game=game), obj["n_tasks"])
-    save_path = common.results_path(
-        parameters, game, f"info_subgoal_{mode}_{executor}_{model_save_name}",
-        obj["n_tasks"])
+    save_path = common.results_path(parameters, game, supervisor=supervisor_name, executor=executor,
+                                    model=model_save_name, n_tasks=obj["n_tasks"])
     results, n_completed = common.load_checkpoint(save_path, obj["regenerate"],
                                                   columns, parameters)
 
     def run_one(row):
         def play(environment):
-            supervisor = InfoSubgoalSupervisor(
+            supervisor = supervisor_class(
                 task=row["task"],
                 executor_class=executor_class,
                 env=environment,
@@ -201,7 +208,7 @@ def info_subgoal_cmd(obj, info_docs, mode, parametric_categories,
 
         return common.run_episode(
             row, play,
-            arm="info_subgoal",
+            supervisor=supervisor_name,
             controller_variant=obj["controller_variant"],
             executor_name=executor_class.__name__,
             model=model_save_name,

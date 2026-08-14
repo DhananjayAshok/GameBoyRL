@@ -2,7 +2,7 @@
 Called by scripts/vlm/propose_zeroshot.sh and scripts/vlm/propose_all_zeroshot.sh (via vlm.py propose_tasks_zeroshot).
 Use --help for CLI options.
 
-Every path below comes from :mod:`utils.paths`, which owns the directory scheme; this
+Every path below comes from :mod:`python_scripts.paths`, which owns the directory scheme; this
 module names accessors rather than spelling layouts out, so there is nothing here to drift
 out of step with the readers.
 
@@ -24,7 +24,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from utils import (log_info, log_warn, VLM, HuggingFaceModel, parse_list)
-from utils.paths import Paths
+from python_scripts.paths import Paths
 from gameboy_worlds import get_environment
 
 PROPOSE_PROMPT = """You are observing the initial frame of a game of [GAME].
@@ -129,7 +129,7 @@ def propose_tasks_zeroshot(obj, init_states, max_concurrency):
     max_new_tokens = obj["max_new_tokens"]
     verbose = obj["verbose"]
     overwrite = obj["overwrite"]
-    # The scheme lives in utils.paths, so this script no longer spells out the directory
+    # The scheme lives in python_scripts.paths, so this script no longer spells out the directory
     # layout; it used to be duplicated here and re-derived by every reader.
     paths = Paths(parameters=parameters, game=game, model_name=model_name)
     out_path = paths.tasks_file()

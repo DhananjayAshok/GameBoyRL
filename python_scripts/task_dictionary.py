@@ -5,32 +5,34 @@ Run this whenever the set of training states in GameBoyWorlds changes so that
 create_all_traj.sh and propose_all_zeroshot.sh stay in sync.
 """
 import os
-import sys
-from gameboy_worlds import get_all_training_states
+
+import click
+
+from python_scripts.common import log
 
 # DELTA TODO: 1: Change this to print out only the init states from benchmark for those.
 # That means each game dict will lead to a straight comma separated list of states.
 
-
-def log(message):
-    # Self-contained logger: `from utils import ...` does not resolve when this is run
-    # as `python scripts/python/create_task_dictionary.py` (project root is not on
-    # sys.path under path invocation). Matches scripts/python/get_strings.py.
-    print(message, file=sys.stderr)
+#: Written relative to project_root, not CWD — this is a generated source file, and the
+#: generator must not depend on where it was invoked from.
+OUTPUT_RELPATH = os.path.join("scripts", "core", "all_train_states.sh")
 
 
-if __name__ == "__main__":
-    all_training_states = (
-        get_all_training_states()
-    )  # format {game: [state1, state2, ...]}
+@click.command(name="task_dictionary")
+@click.pass_obj
+def task_dictionary_cmd(obj):
+    """Regenerate scripts/core/all_train_states.sh from GameBoyWorlds' training states."""
+    from gameboy_worlds import get_all_training_states
 
-    output_path = os.path.join("scripts", "core", "all_train_states.sh")
+    all_training_states = get_all_training_states()  # {game: [state1, state2, ...]}
+
+    output_path = os.path.join(obj["parameters"]()["project_root"], OUTPUT_RELPATH)
     lines = [
         "# AUTO-GENERATED — do not edit by hand.",
         "# Maps (game, init_state_group) keys to comma-separated init_state names for all",
         "# supported games. Sourced by create_all_traj.sh and propose_all_zeroshot.sh to",
         "# iterate over every training init_state for a given game.",
-        "# Regenerate by running: python scripts/python/create_task_dictionary.py",
+        "# Regenerate by running: python python_funcs.py task_dictionary",
         "",
         "declare -A TRAIN_STATES",
         "",

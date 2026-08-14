@@ -14,7 +14,7 @@
 # Called by full.sh --mode both.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
-python scripts/python/create_task_dictionary.py || { echo "Could not regenerate train states"; exit 1; }
+python "$PROJECT_ROOT/python_funcs.py" task_dictionary || { echo "Could not regenerate train states"; exit 1; }
 source scripts/core/all_train_states.sh
 
 declare -A ARGS
@@ -65,8 +65,9 @@ for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
-model_save_name="${ARGS["model_name"]##*/}"
-curiosity_dir="$storage_dir/proposed_tasks/${ARGS["game"]}/${model_save_name}/curiosity/${ARGS["run_name"]}"
+model_save_name=$(model_save_name "${ARGS["model_name"]}")
+curiosity_dir=$(path_of curiosity_dir --game "${ARGS["game"]}" \
+                  --model_name "${ARGS["model_name"]}" --run_name "${ARGS["run_name"]}")
 
 # Leg 1 — curiosity. curiosity_all_tasks runs create_traj (skips if grouped trajectories
 # already exist) + infer_tasks (skips if the annotation exists) for every init_state.
@@ -90,7 +91,8 @@ bash scripts/pipeline/propose_and_attempt_all.sh $flags || exit 1
 # Each leg's terminal artifact is a trajectory stem (<stem>.json + <stem>.pkl), derived the
 # same way its own stage derives it. build_info.sh consumes these.
 executor="${ARGS["executor"]}"
-zeroshot_base="$storage_dir/proposed_tasks/${ARGS["game"]}/${model_save_name}/zeroshot"
+zeroshot_base=$(path_of zeroshot_dir --game "${ARGS["game"]}" \
+                  --model_name "${ARGS["model_name"]}")
 echo "Trajectory stems:"
 echo "  curiosity: $curiosity_dir/trajectory_annotation"
 echo "  zeroshot:  $zeroshot_base/zeroshot_tasks_${executor}_attempts/success_trajectories"

@@ -107,7 +107,8 @@ replay_buffer_save_folder=${ARGS["run_name"]}/${init_state_group}/$sweep_run_nam
 echo "Setting replay_buffer_save_folder to $replay_buffer_save_folder for iterative training"
 
 # z_kind is not an arg here; group_trajectories defaults to global, so the output is always the global file.
-grouped_file="$storage_dir/grouped_trajectories/${ARGS["game"]}/${ARGS["run_name"]}/${init_state_group}/grouped_global_high_reward_trajectories.pkl"
+grouped_file=$(path_of grouped_file --game "${ARGS["game"]}" \
+                 --run_name "${ARGS["run_name"]}" --init_state "${init_state_group}")
 if [[ "${ARGS["overwrite"]}" != "true" && -f "$grouped_file" ]]; then
     echo "Grouped trajectories already exist at $grouped_file. Skipping (pass --overwrite true to regenerate)."
     exit 0
@@ -126,7 +127,7 @@ else
     bash scripts/rl/iterative_training.sh $argstring
 fi
 
-bash scripts/rl/group_trajectories.sh --game ${ARGS["game"]} --replay_buffer_folder $replay_buffer_save_folder --save_path $storage_dir/grouped_trajectories/${ARGS["game"]}/${ARGS["run_name"]}/${init_state_group}/ --z_min ${ARGS["z_min"]}
+bash scripts/rl/group_trajectories.sh --game ${ARGS["game"]} --replay_buffer_folder $replay_buffer_save_folder --save_path "$(path_of grouped_dir --game "${ARGS["game"]}" --run_name "${ARGS["run_name"]}")/${init_state_group}/" --z_min ${ARGS["z_min"]}
 group_status=$?
 
 # Only reclaim disk once grouping has succeeded and the grouped file is on disk; the

@@ -78,6 +78,7 @@ from gameboy_worlds import get_environment
 from execution.registry import AVAILABLE_EXECUTORS
 from execution.report import EnvironmentStepRecord
 from execution.supervisors import AttemptCheckerSupervisor, derive_critique_hint
+from python_scripts import paths
 from utils import log_info, log_warn, log_error, sum_optional, VLM, HuggingFaceModel
 
 
@@ -297,12 +298,14 @@ def attempt_tasks_cmd(
     if not os.path.exists(tasks_path):
         log_error(f"tasks_path '{tasks_path}' does not exist.", parameters)
 
-    out_dir = os.path.splitext(tasks_path)[0] + f"_{executor_name}_attempts/"
+    # The stem rule lives in paths.py, which also exposes the identity-keyed twin
+    # (paths.attempts_dir) that the debug tools and Bash use to find what this writes.
+    out_dir = paths.attempts_dir_from_stem(tasks_path, executor=executor_name)
     os.makedirs(out_dir, exist_ok=True)
 
-    csv_path = os.path.join(out_dir, "all_trajectories.csv")
-    json_path = os.path.join(out_dir, "success_trajectories.json")
-    pkl_path = os.path.join(out_dir, "success_trajectories.pkl")
+    csv_path = os.path.join(out_dir, paths.ALL_TRAJECTORIES_FILENAME)
+    json_path = os.path.join(out_dir, f"{paths.SUCCESS_TRAJECTORIES_STEM}.json")
+    pkl_path = os.path.join(out_dir, f"{paths.SUCCESS_TRAJECTORIES_STEM}.pkl")
     checkpoint_json = os.path.join(out_dir, "checkpoint.json")
     checkpoint_pkl = os.path.join(out_dir, "checkpoint.pkl")
 

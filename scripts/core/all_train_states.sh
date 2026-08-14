@@ -2,7 +2,7 @@
 # Maps (game, init_state_group) keys to comma-separated init_state names for all
 # supported games. Sourced by create_all_traj.sh and propose_all_zeroshot.sh to
 # iterate over every training init_state for a given game.
-# Regenerate by running: python scripts/python/create_task_dictionary.py
+# Regenerate by running: python python_funcs.py task_dictionary
 
 declare -A TRAIN_STATES
 

@@ -42,7 +42,7 @@ function get_string_from_args() {
     local string_kind="$1"
     shift
     local flags=$(args_to_flags "$1")
-    python $PROJECT_ROOT/scripts/python/get_strings.py "$string_kind" $flags
+    python "$PROJECT_ROOT/python_funcs.py" strings "$string_kind" $flags
 }
 
 
@@ -93,6 +93,72 @@ function populate_dict_subset(){
             _target_dict["$key"]="${_source_dict[$key]}"
         fi
     done
+}
+
+# model_save_name <full_model_name>
+#
+# The basename the pipeline keys paths on: google/Gemma-4-31B-it -> gemma-4-31b-it.
+# '##*/' strips everything through the LAST slash; ',,' folds to lowercase (bash 4+).
+#
+# The Bash twin of model_save_name() in python_scripts/paths.py. Both fold case, because a
+# served model's basename is not case-stable — the same weights are published as
+# Qwen/Qwen3-VL-8B-Instruct and referred to in lowercase elsewhere, and a scheme that
+# preserves case makes those two spellings different artifacts.
+#
+# This is the ONE path-shaped rule Bash still implements itself, because it is needed before
+# any python_funcs.py call (to build $model_save_name for display and for legacy call sites)
+# and shelling out for a string split is not worth it. Everything else goes through path_of.
+# `python_funcs.py model_save_name` exists and must agree with this.
+#
+# Names directories and files ONLY. Never pass this to a backend as a model identifier —
+# those are case-sensitive upstream, and $model_name is what they take.
+#
+# Usage:
+#   model_save_name=$(model_save_name "$model_name")
+function model_save_name() {
+    local base="${1##*/}"
+    echo "${base,,}"
+}
+
+# path_of <command> [--flag value ...]
+#
+# Ask python_funcs.py for a path. THE way Bash gets any path — no script should compose
+# "$storage_dir/..." itself, because that reintroduces the second derivation this replaces.
+#
+# Wrapped rather than called directly because $(...) swallows a non-zero exit: a failed
+# lookup would otherwise set the variable to "" and silently root every derived path at "/".
+# This turns that into a loud exit instead.
+#
+# Costs ~0.15s per call (python_funcs.py imports nothing heavy). That is cheap, but not free —
+# hoist it out of tight loops rather than calling it per iteration.
+#
+# Usage:
+#   stem=$(path_of info_source_stem --game "$game" --model_name "$model_name" \
+#                  --run_name "$run_name" --executor "$executor" --source zeroshot)
+function path_of() {
+    local out
+    if ! out=$(python "$PROJECT_ROOT/python_funcs.py" "$@"); then
+        echo "path_of: lookup failed: python_funcs.py $*" >&2
+        exit 1
+    fi
+    if [[ -z "$out" ]]; then
+        echo "path_of: lookup returned empty: python_funcs.py $*" >&2
+        exit 1
+    fi
+    echo "$out"
+}
+
+# path_of_allow_empty <command> [--flag value ...]
+#
+# Same, but an empty result is a legitimate answer rather than an error. Only for commands
+# whose contract includes "nothing" — info_available_sources on a game with neither vertical.
+function path_of_allow_empty() {
+    local out
+    if ! out=$(python "$PROJECT_ROOT/python_funcs.py" "$@"); then
+        echo "path_of_allow_empty: lookup failed: python_funcs.py $*" >&2
+        exit 1
+    fi
+    echo "$out"
 }
 
 
@@ -286,71 +352,24 @@ function info_mode_sources() {
     esac
 }
 
-# info_source_stem <game> <model_save_name> <run_name> <executor> <source>
+# info_source_stem, info_dir_for_stem and info_available_sources USED TO LIVE HERE.
 #
-# The trajectory stem build_info.py consumes for one source: <stem>.json + <stem>.pkl.
-# build_info writes its output beside this stem, so this function also fixes where the
-# info dir lands (see info_dir_for_stem).
+# They are now the Python accessors of the same names in python_scripts/paths.py, reached
+# through path_of / path_of_allow_empty:
 #
-# Defined here because build_info_all.sh writes these
-# directories and benchmark_info_all.sh reads them, and the two must not drift — neither
-# passes the path to the other, both derive it from this function. utils/paths.py re-derives
-# the identical rule on the python side (info_dir / curiosity_info_dir), and
-# tests/test_paths.py pins the two against each other.
+#   stem=$(path_of info_source_stem --game "$game" --model_name "$model_name" \
+#                  --run_name "$run_name" --executor "$executor" --source "$source")
+#   dir=$(path_of source_info_dir  --game ... --source "$source")     # was info_dir_for_stem
+#   srcs=$(path_of_allow_empty info_available_sources --game ... )
 #
-# model_save_name is in the path because a document is built from one model's own output;
-# two models sharing a game must not share an info dir.
-function info_source_stem() {
-    case "$5" in
-        zeroshot)
-            echo "$storage_dir/proposed_tasks/$1/$2/zeroshot/zeroshot_tasks_$4_attempts/success_trajectories" ;;
-        curiosity)
-            echo "$storage_dir/proposed_tasks/$1/$2/curiosity/$3/trajectory_annotation" ;;
-        *)
-            echo "" ;;
-    esac
-}
-
-# info_available_sources <game> <model_save_name> <run_name> <executor>
+# The Bash versions were a second derivation of a rule Python already owned, with nothing
+# checking the two against each other — the failure they existed to prevent (build_info_all
+# writing where benchmark_info_all does not look) was exactly what a drift between them
+# would cause. Note the Python side takes the FULL --model_name and folds it itself, where
+# these took an already-folded $model_save_name.
 #
-# Which of {zeroshot, curiosity} actually have inputs on disk for this game. The all-games
-# sweep uses this to pick each game's --mode rather than assuming both exist: most games
-# have only one vertical, and demanding both would skip them entirely.
-function info_available_sources() {
-    local found=""
-    for source in zeroshot curiosity; do
-        local stem
-        stem=$(info_source_stem "$1" "$2" "$3" "$4" "$source")
-        if [[ -f "$stem.json" && -f "$stem.pkl" ]]; then found+="${found:+ }$source"; fi
-    done
-    echo "$found"
-}
-
-# info_sources_to_mode <sources>
-#
-# Inverse of info_mode_sources: the --mode that selects exactly this set.
-function info_sources_to_mode() {
-    case "$1" in
-        "zeroshot curiosity"|"curiosity zeroshot") echo "both" ;;
-        "zeroshot")                                echo "zeroshot_only" ;;
-        "curiosity")                               echo "curiosity_only" ;;
-        *)                                         echo "" ;;
-    esac
-}
-
-# info_dir_for_stem <stem> <model_save_name> <executor>
-#
-# Where build_info.py puts everything for that stem. Mirrors the one line in build_info.py
-# that decides it:
-#   os.path.join(os.path.dirname(trajectory_path), f"info_{model_save_name}_{executor}").
-#
-# The executor is in the name because it is the identity of the trajectories the document was
-# distilled from. The zeroshot stem already encodes it (zeroshot_tasks_<executor>_attempts),
-# but the curiosity stem does not — so before this, a curiosity document built from one
-# executor's annotations silently overwrote another's.
-function info_dir_for_stem() {
-    echo "$(dirname "$1")/info_$2_$3"
-}
+# info_mode_sources and info_sources_to_mode stay in Bash: they are pure vocabulary mapping
+# over --mode, not paths, and nothing on the Python side duplicates them.
 
 # build_info_all: stage A/B for every source a --mode selects, plus the debug report.
 BUILD_INFO_ALL_ESSENTIALS=()

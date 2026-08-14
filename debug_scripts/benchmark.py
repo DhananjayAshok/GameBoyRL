@@ -54,7 +54,7 @@ from utils import log_error, log_info, log_warn, parse_action_line
 from benchmark_scripts.common import REPORT_FILENAME
 from debug_scripts import markdown as md
 from debug_scripts.frames import to_pil
-from utils.paths import Paths
+from python_scripts.paths import BENCHMARK_SUPERVISORS, Paths
 
 
 def _as_list(value):
@@ -392,8 +392,16 @@ def _episode_section(index: int, row, report, model, report_dir,
               help="Game whose benchmark CSVs to read. 'none' uses --game.")
 @click.option("--max_episodes", default=0, show_default=True,
               help="Cap episodes rendered in episodes_*.md (0 = all).")
+@click.option("--supervisor", default="dummy", show_default=True,
+              type=click.Choice(BENCHMARK_SUPERVISORS),
+              help="Which supervisor's CSV to read. Part of the filename, so this is not "
+                   "optional in practice — every supervisor writes its own file for the same "
+                   "game, executor and model.")
+@click.option("--n_tasks", default=None, type=int,
+              help="Set if the run used --n_tasks, which gives it its own _firstN file.")
 @click.pass_obj
-def debug_benchmark(obj, model_name, compare_model, bench_game, max_episodes):
+def debug_benchmark(obj, model_name, compare_model, bench_game, max_episodes, supervisor,
+                    n_tasks):
     """Per-episode frame-by-frame trajectories plus a paired base-vs-fine-tuned comparison."""
     paths = Paths(
         parameters=obj["parameters"], game=obj["game"], run_name=obj["run_name"],
@@ -419,13 +427,15 @@ def debug_benchmark(obj, model_name, compare_model, bench_game, max_episodes):
     base_model = paths.model_save_name
     ft_model = paths.finetuned_model_name if compare_model == "none" else compare_model
 
-    base_path = paths.require(paths.benchmark_csv(game, base_model), "benchmark")
+    base_path = paths.require(
+        paths.benchmark_csv(game, base_model, supervisor=supervisor, n_tasks=n_tasks),
+        "benchmark")
     base = _load(base_path)
     base_reports = _require_archives(base, base_path, paths.parameters)
     log_info(f"[benchmark] base: {len(base)} tasks from {base_path} "
              f"({len(base_reports)} archived)")
 
-    ft_path = paths.benchmark_csv(game, ft_model)
+    ft_path = paths.benchmark_csv(game, ft_model, supervisor=supervisor, n_tasks=n_tasks)
     finetuned, ft_reports = None, {}
     if os.path.exists(ft_path):
         finetuned = _load(ft_path)
@@ -450,7 +460,7 @@ def debug_benchmark(obj, model_name, compare_model, bench_game, max_episodes):
         n_success = int(frame["success"].sum())
         blocks = [
             md.h1(f"Benchmark episodes — {game} / {paths.executor} / {model}"),
-            md.para(f"Source: `{paths.benchmark_csv(game, model)}`"),
+            md.para(f"Source: `{paths.benchmark_csv(game, model, supervisor=supervisor, n_tasks=n_tasks)}`"),
             md.bullets([
                 f"tasks: **{len(frame)}**",
                 f"success: **{n_success}/{len(frame)}** "

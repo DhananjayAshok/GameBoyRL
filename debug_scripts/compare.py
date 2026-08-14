@@ -39,7 +39,7 @@ import pandas as pd
 from utils import log_info, log_warn
 from debug_scripts import markdown as md
 from debug_scripts.benchmark import _load, _paired_index
-from utils.paths import Paths
+from python_scripts.paths import Paths
 
 QUADRANTS = [
     ("both_pass", "Both pass"),

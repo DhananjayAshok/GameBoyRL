@@ -17,11 +17,45 @@ AVAILABLE_EXECUTORS: dict[str, type[Executor]] = {
 """ Registry of available executors. Keys are ``<action>_<history>``, values the classes.
 """
 
+#: Where the plan arm's planner gets its knowledge. ``retrieval`` reads documents distilled
+#: out of real trajectories; ``parametric`` uses one the model writes from its own priors,
+#: given only the game's name. Everything after the document is identical, which is what
+#: makes the pair isolate what distillation actually bought.
+KNOWLEDGE_MODES = ("retrieval", "parametric")
+
+
+def make_info_subgoal_class(knowledge_mode: str) -> type:
+    """A named subclass of :class:`InfoSubgoalSupervisor` for one knowledge mode.
+
+    A real subclass rather than a config flag, for the same reason
+    :func:`~execution.executors.executor.make_executor_class` makes real subclasses: the
+    name has to survive into the identity of what ran. Two knowledge modes are different
+    experiments and must not share a benchmark CSV or a session directory, so the mode has
+    to be part of the supervisor's *name*, not a parameter beside it.
+
+    Without this there was a separate ``arm`` concept carrying ``info_subgoal_<mode>``
+    alongside a ``supervisor`` that could not express it — two words for one axis.
+    """
+    name = f"info_subgoal_{knowledge_mode}"
+    return type(name, (InfoSubgoalSupervisor,), {
+        "KNOWLEDGE_MODE": knowledge_mode,
+        "__doc__": f"Plan arm, {knowledge_mode} knowledge.",
+    })
+
+
 AVAILABLE_SUPERVISORS: dict[str, type[Supervisor]] = {
     "dummy": DummySupervisor,
     "revision": RevisingSupervisor,
     "subgoal": SubgoalSupervisor,
-    "info_subgoal": InfoSubgoalSupervisor,
+    **{f"info_subgoal_{mode}": make_info_subgoal_class(mode)
+       for mode in KNOWLEDGE_MODES},
 }
 """ Registry of available supervisors.
+
+The key is the full identity of an arm, and is what names its benchmark CSV and its emulator
+session directory (see ``python_scripts.paths.benchmark_stem``). ``info_subgoal`` is not a key
+on its own — it is always qualified by a knowledge mode, because the unqualified form does not
+describe a runnable experiment.
+
+Note ``dummy`` is the control arm, whose ``run_benchmark.py`` subcommand word is ``baseline``.
 """

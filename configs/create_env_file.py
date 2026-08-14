@@ -7,6 +7,21 @@ import os
 import yaml
 
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Kept in step with ROOT_PATH_KEYS in utils/parameter_handling.py. Duplicated rather than
+# imported because this script is run as `python configs/create_env_file.py`, which puts
+# configs/ on sys.path rather than the project root.
+ROOT_PATH_KEYS = ("storage_dir", "results_dir")
+
+
+def absolutize_roots(params):
+    """Rewrite the root path keys to absolute paths, so bash and python agree on them."""
+    for key in ROOT_PATH_KEYS:
+        if key in params and isinstance(params[key], str):
+            params[key] = os.path.abspath(os.path.join(PROJECT_ROOT, params[key]))
+
+
 def flatten_dict(d, parent_key='', sep='_'):
     """Flatten nested dictionaries with keys joined by sep."""
     items = []
@@ -43,6 +58,7 @@ def main():
 
     # Flatten in case of nested keys
     flat_data = flatten_dict(all_params)
+    absolutize_roots(flat_data)
     env_file = os.path.join("configs", "config.env")
 
     # Write to config.env

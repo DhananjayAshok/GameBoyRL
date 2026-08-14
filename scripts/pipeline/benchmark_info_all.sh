@@ -83,7 +83,7 @@ executor="${ARGS["executor"]}"
 mode="${ARGS["mode"]}"
 knowledge_mode="${ARGS["knowledge_mode"]}"
 model_name="${ARGS["model_name"]}"
-model_save_name="${model_name##*/}"
+model_save_name=$(model_save_name "$model_name")
 
 sources=$(info_mode_sources "$mode")
 if [[ -z "$sources" ]]; then
@@ -110,8 +110,8 @@ echo "Knowledge mode '$knowledge_mode' -> runs: $knowledge_modes"
 info_docs=""
 if [[ "$knowledge_modes" == *retrieval* ]]; then
     for source in $sources; do
-        stem=$(info_source_stem "$game" "$model_save_name" "$run_name" "$executor" "$source")
-        info_dir=$(info_dir_for_stem "$stem" "$model_save_name" "$executor")
+        info_dir=$(path_of source_info_dir --game "$game" --model_name "$model_name" \
+                           --run_name "$run_name" --executor "$executor" --source "$source")
         doc="$info_dir/info.json"
 
         if [[ ! -f "$doc" ]]; then

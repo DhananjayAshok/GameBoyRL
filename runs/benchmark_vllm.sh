@@ -12,7 +12,7 @@
 source scripts/core/utils.sh
 source configs/config.env
 
-games=("sword_of_hope_2" "legend_of_zelda_the_oracle_of_seasons" "harvest_moon_3")
+games=("deja_vu_2" "legend_of_zelda_the_oracle_of_seasons" "harvest_moon_3")
 #games=("harvest_moon_1" "harvest_moon_2" "harvest_moon_3")
 #games=("survival_kids_1")
 #games=("pokemon_red" "legend_of_zelda_links_awakening" "sword_of_hope_1" "harvest_moon_1" "bomberman_pocket" "deja_vu_1")
@@ -37,28 +37,21 @@ knowledge_modes=("parametric" "retrieval")
 
 MAX_STEPS=${MAX_STEPS:-150}
 
-# Documents are built once per series, from the title that declares train states — every
-# other title in the series borrows it. Same mapping run.sh uses.
-docs_game_for() {
-    case "$1" in
-        deja_vu_*)                    echo "deja_vu_1" ;;
-        legend_of_zelda_*)            echo "legend_of_zelda_links_awakening" ;;
-        sword_of_hope_*)              echo "sword_of_hope_1" ;;
-        survival_kids_*)              echo "survival_kids_1" ;;
-        runes_of_virtue_*)            echo "runes_of_virtue_1" ;;
-        bomberman_*)                  echo "bomberman_quest" ;;
-        harvest_moon_*)               echo "harvest_moon_1" ;;
-    esac
-}
-
-# Globbed rather than hardcoded: which vertical exists differs per game, and a literal path
+# Documents are built once per series, from the title(s) that declare train states — every
+# other title in the series borrows them. Asked of `path_of train_games` (GameBoyWorlds'
+# can_train_from_init_state column) rather than hardcoded, same as run.sh. It is a list: a
+# series may declare more than one train game, and all of their documents are in scope.
+#
+# Globbed rather than derived: which vertical exists differs per game, and a literal path
 # list would hand the arm a file that is not there.
 docs_for() {
-    local docs_game found
-    docs_game=$(docs_game_for "$1")
-    [[ -z "$docs_game" ]] && return
-    found=$(ls "$storage_dir/proposed_tasks/$docs_game"/*/*/*/info_*/info.json 2>/dev/null)
-    echo "$found" | paste -sd, -
+    local docs_game hits found=""
+    for docs_game in "$@"; do
+        hits=$(ls "$storage_dir/proposed_tasks/$docs_game"/*/*/*/info_*/info.json 2>/dev/null \
+                   | paste -sd, -)
+        [[ -n "$hits" ]] && found+="${found:+,}$hits"
+    done
+    echo "$found"
 }
 
 n_free=$(( ${#games[@]} * ${#executors[@]} * ${#supervisors[@]} ))
@@ -73,7 +66,9 @@ echo "############################################################"
 for game in "${games[@]}"; do
     echo ""
     echo "=== game: $game ==="
-    docs=$(docs_for "$game")
+    # Once per game: path_of shells out, and this command pays a ~3s gameboy_worlds import.
+    mapfile -t docs_games < <(path_of train_games --game "$game")
+    docs=$(docs_for "${docs_games[@]}")
 
     for executor in "${executors[@]}"; do
         for supervisor in "${supervisors[@]}"; do

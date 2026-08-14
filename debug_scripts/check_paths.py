@@ -8,7 +8,7 @@ import os
 
 import click
 
-from utils.paths import Paths
+from python_scripts.paths import BENCHMARK_SUPERVISORS, Paths
 
 
 def _mark(path: str) -> str:
@@ -60,9 +60,12 @@ def check_paths(obj, model_name):
         print(f"     [{_mark(path)}] {label}: {path}")
 
     print("\n-- benchmark --")
+    # Every supervisor writes its own file for one (game, executor, model), so a single
+    # path here would report 'missing' for a game that has four of the five on disk.
     for model in [paths.model_save_name, paths.finetuned_model_name]:
-        path = paths.benchmark_csv(paths.game, model)
-        print(f"  [{_mark(path)}] {path}")
+        for supervisor in BENCHMARK_SUPERVISORS:
+            path = paths.benchmark_csv(paths.game, model, supervisor=supervisor)
+            print(f"  [{_mark(path)}] {path}")
     gbw = paths.gameboy_worlds_storage()
     print(f"  GameBoyWorlds storage: {gbw or '(unreadable)'}")
 

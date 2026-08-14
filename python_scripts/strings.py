@@ -1,21 +1,39 @@
 """
-CLI helper called by bash scripts (via utils.sh get_string_from_args) to generate
-structured strings — experiment names and env IDs — from --key value argument pairs.
-Extensible: add a new StringFunction subclass and register it in STRING_FUNCTIONS to
-expose a new string kind. Prints exactly one line to stdout; all diagnostics go to stderr.
+Structured strings — RL experiment names and env IDs — built from --key value argument pairs.
+
+Called by bash through ``python_funcs.py strings ...`` (via utils.sh get_string_from_args).
+Extensible: add a new StringFunction subclass and register it in STRING_FUNCTIONS to expose a
+new string kind. Prints exactly one line to stdout; all diagnostics go to stderr.
+
+Deliberately does NOT load project parameters — an experiment name is a pure function of its
+arguments, and these are called in RL script hot paths.
 """
 
-import sys
 from abc import ABC, abstractmethod
 
+import click
 
-def log(message):
-    print(message, file=sys.stderr)
+from python_scripts.common import log  # noqa: F401  (kept on the module's surface)
 
 
-def depathify(string) -> str:
-    """
-    Helper function to convert a path-like string to a string that can be used as a filename or an experiment name.
+def depathify_legacy(string) -> str:
+    """The WEAK depathify: folds only ``/``, ``\\`` and space. Used by :class:`ExperimentName` only.
+
+    ``utils.fundamental.depathify`` is the one everything else uses, and it folds *every*
+    non-word character — including ``-`` and ``.``. The two are kept separate on purpose.
+
+    Switching :class:`ExperimentName` onto the strong one would change every ``exp_name`` built
+    with a non-``none`` ``--embedder_load_path`` / ``--buffer_load_path`` (reachable from
+    ``iterative_training.sh``), and so rename the directories those runs live in:
+    ``<storage>/models/<game>[/<model_dir>]/<exp_name>/`` and
+    ``<storage>/logs/<log_folder>/<exp_name>.out``.
+
+    Verified blast radius: ``exp_name`` reaches those two trees and cleanrl's
+    ``--exp_name``/``--save-name``, and **nothing at or downstream of grouped_trajectories** —
+    that tree is keyed on ``(game, run_name, init_state_group)``, and replay_buffers on
+    ``(game, replay_buffer_save_folder)``. So unifying would be safe for this repo. It is held
+    back only because ``cleanrl/`` is an unaudited submodule that receives ``--exp_name`` and
+    may key checkpoints or wandb runs off it. Check that, then collapse the two. See report.md.
 
     :param string: the string to depathify
     :type string: str
@@ -132,7 +150,7 @@ class ExperimentName(StringFunction):
             kwargs,
         )
         if kwargs["embedder_load_path"] is not None:
-            exp_name += f"-{depathify(kwargs['embedder_load_path'])}_"
+            exp_name += f"-{depathify_legacy(kwargs['embedder_load_path'])}_"
         else:
             exp_name += f"_"
         exp_name = self.add_to_exp_name(
@@ -141,7 +159,7 @@ class ExperimentName(StringFunction):
             kwargs=kwargs,
         )
         if kwargs["buffer_load_path"] is not None:
-            exp_name += f"-{depathify(kwargs['buffer_load_path'])}_"
+            exp_name += f"-{depathify_legacy(kwargs['buffer_load_path'])}_"
         else:
             exp_name += f"_"
         exp_name += f"{kwargs['seed']}"
@@ -161,16 +179,13 @@ STRING_FUNCTIONS = [ExperimentName, EnvID]
 ALL_STRING_FUNCTIONS = {func.NAME.lower(): func() for func in STRING_FUNCTIONS}
 
 
-def parse():
-    passed_in_args = sys.argv[1:]
-    if len(passed_in_args) < 1:
-        raise ValueError("Must provide at least the string name to get")
-    string_name = passed_in_args[0].lower()
-    if string_name not in ALL_STRING_FUNCTIONS:
-        raise ValueError(
-            f"String function {string_name} not found. Available string functions: {list(ALL_STRING_FUNCTIONS.keys())}"
-        )
-    args = passed_in_args[1:]
+def parse_pairs(args) -> dict:
+    """Turn a flat ``["--key", "value", ...]`` list into a dict, mapping ``none`` -> ``None``.
+
+    Not click-parsed: the keys are whatever ``args_to_flags`` happens to emit for the caller's
+    ARGS dict, which varies per script, so there is no fixed option set to declare.
+    """
+    args = list(args)
     # must be an even number, matching --key value pairs
     if len(args) % 2 != 0:
         raise ValueError(f"Arguments must be in the format --key value. Got: {args}")
@@ -186,9 +201,25 @@ def parse():
             arg_dict[args[i].strip("--").lower()] = None
         else:
             arg_dict[args[i].strip("--").lower()] = args[i + 1]
-    return string_name, arg_dict
+    return arg_dict
 
 
-if __name__ == "__main__":
-    string_name, args = parse()
-    ALL_STRING_FUNCTIONS[string_name].get_string(**args)
+@click.command(
+    name="strings",
+    context_settings=dict(ignore_unknown_options=True, allow_extra_args=True),
+)
+@click.argument("string_kind")
+@click.pass_context
+def strings_cmd(ctx, string_kind):
+    """Print one structured string (exp_name, env_id) built from --key value pairs.
+
+    Everything after STRING_KIND is forwarded verbatim, so the caller's ARGS dict can be
+    splatted in with args_to_flags without this command having to know its keys.
+    """
+    string_name = string_kind.lower()
+    if string_name not in ALL_STRING_FUNCTIONS:
+        raise click.ClickException(
+            f"String function {string_name} not found. Available: "
+            f"{list(ALL_STRING_FUNCTIONS.keys())}"
+        )
+    ALL_STRING_FUNCTIONS[string_name].get_string(**parse_pairs(ctx.args))

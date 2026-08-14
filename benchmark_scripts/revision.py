@@ -14,6 +14,7 @@ from gameboy_worlds import get_benchmark_tasks
 from execution.registry import AVAILABLE_EXECUTORS, AVAILABLE_SUPERVISORS
 
 from benchmark_scripts import common
+from python_scripts import paths
 
 SUMMARY_COLUMNS = ["n_attempts", "n_supervisor_calls"]
 
@@ -40,19 +41,21 @@ def revision_cmd(obj, max_leg_steps, max_frames_per_slice):
     executor = obj["executor"]
     executor_class = AVAILABLE_EXECUTORS[executor]
     model_save_name = obj["model_save_name"]
-    supervisor_class = AVAILABLE_SUPERVISORS["revision"]
+    supervisor_name = "revision"
+    supervisor_class = AVAILABLE_SUPERVISORS[supervisor_name]
 
     emulator_kwargs = {
         "headless": True,
         "save_video": obj["save_video"],
-        "session_name": f"benchmark_revision_{executor}_{model_save_name}",
+        "session_name": paths.benchmark_session_name(supervisor=supervisor_name, executor=executor,
+                                                     model=model_save_name),
         "max_steps": obj["max_steps"],
     }
 
     columns = common.COMMON_COLUMNS + [*SUMMARY_COLUMNS, "step_log", common.SESSION_COLUMN]
     tasks = common.select_tasks(get_benchmark_tasks(game=game), obj["n_tasks"])
-    save_path = common.results_path(
-        parameters, game, f"revision_{executor}_{model_save_name}", obj["n_tasks"])
+    save_path = common.results_path(parameters, game, supervisor=supervisor_name, executor=executor,
+                                    model=model_save_name, n_tasks=obj["n_tasks"])
     results, n_completed = common.load_checkpoint(save_path, obj["regenerate"],
                                                   columns, parameters)
 
@@ -88,7 +91,7 @@ def revision_cmd(obj, max_leg_steps, max_frames_per_slice):
 
         return common.run_episode(
             row, play,
-            arm="revision",
+            supervisor=supervisor_name,
             controller_variant=obj["controller_variant"],
             executor_name=executor_class.__name__,
             model=model_save_name,

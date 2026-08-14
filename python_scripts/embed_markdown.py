@@ -1,7 +1,7 @@
 """
 Inline a markdown report's local images and videos into ONE standalone HTML file.
 
-    python scripts/python/embed_markdown.py <report.md> [--out report.html] [--tasks a,b]
+    python python_funcs.py embed_markdown <report.md> [--out report.html] [--tasks a,b]
 
 Why this exists
 ---------------
@@ -30,7 +30,6 @@ to cut it to the episodes worth looking at. Targets that are not local files (ht
 anchors) are left exactly as they are.
 """
 
-import argparse
 import base64
 import mimetypes
 import os
@@ -40,7 +39,11 @@ import subprocess
 import sys
 import tempfile
 
+import click
 import markdown
+
+from python_scripts.common import MAYBE_NONE
+from utils.log_handling import log_error, log_info, log_warn
 
 IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
 LINK_RE = re.compile(r"(?<!!)\[([^\]]*)\]\(([^)\s]+)\)")
@@ -122,8 +125,8 @@ def transcoded_uri(path: str, ffmpeg: str, scale: int):
             capture_output=True, text=True,
         )
         if result.returncode != 0 or os.path.getsize(handle.name) == 0:
-            print(f"  ffmpeg failed on {os.path.basename(path)}: "
-                  f"{result.stderr.strip()[:160]}", file=sys.stderr)
+            log_warn(f"  ffmpeg failed on {os.path.basename(path)}: "
+                     f"{result.stderr.strip()[:160]}")
             return None
         with open(handle.name, "rb") as done:
             return b64(done.read(), "video/mp4")
@@ -144,34 +147,32 @@ def select_tasks(text: str, wanted: list) -> str:
     return "".join(kept)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("report", help="Path to the markdown report.")
-    parser.add_argument("--out", default=None,
-                        help="Output HTML path. Defaults to the report with a .html suffix.")
-    parser.add_argument("--tasks", default=None,
-                        help="Comma-separated substrings; keep only matching '## ' sections.")
-    parser.add_argument("--video-scale", type=int, default=3,
-                        help="Nearest-neighbour upscale for embedded clips (1 = none).")
-    parser.add_argument("--no-transcode", action="store_true",
-                        help="Embed video bytes as recorded. They will not play in a browser.")
-    args = parser.parse_args()
+@click.command(name="embed_markdown")
+@click.argument("report")
+@click.option("--out", default=None,
+              help="Output HTML path. Defaults to the report with a .html suffix.")
+@click.option("--tasks", default=None, type=MAYBE_NONE,
+              help="Comma-separated substrings; keep only matching '## ' sections.")
+@click.option("--video_scale", "--video-scale", "video_scale", type=int, default=3,
+              show_default=True,
+              help="Nearest-neighbour upscale for embedded clips (1 = none).")
+@click.option("--no_transcode", "--no-transcode", "no_transcode", is_flag=True, default=False,
+              help="Embed video bytes as recorded. They will not play in a browser.")
+def embed_markdown_cmd(report, out, tasks, video_scale, no_transcode) -> int:
+    """Inline a markdown report's local images and videos into one standalone HTML file."""
+    if not os.path.exists(report):
+        log_error(f"no such report: {report}")
+    base_dir = os.path.dirname(os.path.abspath(report))
+    out_path = out or os.path.splitext(report)[0] + ".html"
 
-    if not os.path.exists(args.report):
-        print(f"no such report: {args.report}", file=sys.stderr)
-        return 1
-    base_dir = os.path.dirname(os.path.abspath(args.report))
-    out_path = args.out or os.path.splitext(args.report)[0] + ".html"
+    ffmpeg = None if no_transcode else find_ffmpeg()
+    if not no_transcode and ffmpeg is None:
+        log_warn("no ffmpeg found. Videos are embedded as recorded (mp4v), which no "
+                 "browser will play.")
 
-    ffmpeg = None if args.no_transcode else find_ffmpeg()
-    if not args.no_transcode and ffmpeg is None:
-        print("  WARNING: no ffmpeg found. Videos are embedded as recorded (mp4v), which no "
-              "browser will play.", file=sys.stderr)
-
-    text = open(args.report).read()
-    if args.tasks:
-        text = select_tasks(text, [t.strip() for t in args.tasks.split(",") if t.strip()])
+    text = open(report).read()
+    if tasks:
+        text = select_tasks(text, [t.strip() for t in tasks.split(",") if t.strip()])
 
     # Cache keyed on the resolved path: the same frame is often linked twice, and re-encoding
     # or re-base64ing a multi-megabyte corpus twice over is pure waste.
@@ -190,7 +191,7 @@ def main() -> int:
         if full not in cache:
             uri = None
             if is_video and ffmpeg is not None:
-                uri = transcoded_uri(full, ffmpeg, args.video_scale)
+                uri = transcoded_uri(full, ffmpeg, video_scale)
                 if uri is not None:
                     stats["transcoded"] += 1
             if uri is None:
@@ -239,12 +240,8 @@ def main() -> int:
         handle.write(html)
 
     size = os.path.getsize(out_path) / 1e6
-    print(f"wrote {out_path}  ({size:.1f} MB)")
-    print(f"  embedded {stats['img']} image(s), {stats['video']} video(s) "
-          f"[{stats['transcoded']} transcoded to H.264, {stats['raw_video']} left as recorded]")
-    print(f"  {stats['missing']} unresolved, {stats['skipped']} external left alone")
+    log_info(f"wrote {out_path}  ({size:.1f} MB)")
+    log_info(f"  embedded {stats['img']} image(s), {stats['video']} video(s) "
+             f"[{stats['transcoded']} transcoded to H.264, {stats['raw_video']} left as recorded]")
+    log_info(f"  {stats['missing']} unresolved, {stats['skipped']} external left alone")
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

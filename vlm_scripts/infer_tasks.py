@@ -13,7 +13,7 @@ Input: grouped_high_reward_trajectories.pkl
 
 Output: trajectory_annotation.json  +  trajectory_annotation.pkl
     Path: Paths.curiosity_annotation() and its .pkl sibling. The directory scheme lives in
-    :mod:`utils.paths`, so this module names the accessor rather than the layout.
+    :mod:`python_scripts.paths`, so this module names the accessor rather than the layout.
     trajectory_annotation.json — dict[int, str]
         - keys are group indices
         - values are distilled imperative task strings (e.g. "Walk into the building")
@@ -38,7 +38,7 @@ import numpy as np
 import click
 
 from utils import log_info, log_warn, log_error, VLM, parse_key_value, HuggingFaceModel
-from utils.paths import Paths
+from python_scripts.paths import Paths
 from show_trajectories import plot_transitions
 
 SAVE_FRAMES_DIR = "save_frames"
@@ -511,7 +511,7 @@ def infer_task_cmd(
     parameters = obj["parameters"]
     model_name = obj["model_name"]
     vlm = VLM(model_name, vlm_kind)
-    # The directory layout lives in utils.paths, not here — this script used to spell it
+    # The directory layout lives in python_scripts.paths, not here — this script used to spell it
     # out and every reader re-derived the same string independently.
     paths = Paths(parameters=parameters, game=game, model_name=model_name,
                   run_name=run_name)
