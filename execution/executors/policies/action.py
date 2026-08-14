@@ -1,23 +1,6 @@
 """
 How one decision produces action(s).
 
-An :class:`ActionPolicy` contributes two fragments to the step prompt and parses the reply
-into a :class:`Decision`.  **It never touches the VLM.**  The executor makes exactly one
-call on its behalf and hands it the text.
-
-That is the whole point of the split.  Two executors were deleted for making the action
-across several calls — a ``SelfConsistencyExecutor`` that logged one action call per sample
-and a ``ConfidenceGatedExecutor`` that decided in a non-action-tagged ``"rethink"`` call —
-and in both cases every action they took was dropped from the harvested dataset, silently.
-A policy that cannot reach the VLM cannot reintroduce that: the "exactly one action-tagged
-call per decision" rule is enforced by the shape of this interface rather than by anyone
-remembering it.
-
-The three policies differ only in what they ask for and how they read the answer:
-
-- :class:`SingleActionPolicy`   reason, then name one action
-- :class:`ScoredActionPolicy`   justify and score every action, take the best
-- :class:`SequenceActionPolicy` commit to several actions at once
 """
 
 from __future__ import annotations
@@ -31,11 +14,6 @@ from utils import parse_action_line, parse_int, parse_key_value
 @dataclass(frozen=True)
 class Decision:
     """What one VLM call decided.
-
-    ``actions`` is a list even when it holds one element.  That is the change that lets a
-    single loop drive every policy: the sequence planner used to need its own ``_execute``
-    solely because a call produced several actions, and the loop that special-cased it had
-    to reimplement budget accounting, invalid handling and the completion check.
 
     :param actions: Action strings to dispatch in order. Empty is not a valid decision —
         return ``None`` from :meth:`ActionPolicy.parse` instead, which the loop reads as a
@@ -55,8 +33,6 @@ class ActionPolicy(Protocol):
     tag: str
     #: Registry name, and half of the arm's ``<action>_<history>`` identity.
     name: str
-    #: Whether the step prompt should offer passive tool calls alongside env actions.
-    supports_tools: bool
     #: Token budget for the deciding call, or ``None`` for the executor's default.
     max_new_tokens: Optional[int]
     #: How :attr:`Decision.reasoning` is introduced to the completion check. A policy that
@@ -69,6 +45,12 @@ class ActionPolicy(Protocol):
     def response_format(self) -> str:
         """The exact reply format, appended after the instruction."""
 
+    def action_format(self, tools_offered: bool) -> str:
+        """The ``Action:`` line spliced in for ``[ACTION_FORMAT]``.
+
+        :param tools_offered: Whether a tool call is a legal answer this step.
+        """
+
     def parse(self, response: str) -> Optional[Decision]:
         """Read the reply, or ``None`` if nothing usable came back."""
 
@@ -79,12 +61,34 @@ class ActionPolicy(Protocol):
         """What to tell the model when a parsed action is not a real action."""
 
 
+def _one_action_format(tools_offered: bool) -> str:
+    if tools_offered:
+        return "Action: <one environment action OR one tool call>"
+    return "Action: <one environment action>"
+
+
+def _split_top_level(body: str) -> List[str]:
+    """Split on commas that are not inside brackets, so ``f(a=1, b=2)`` stays whole."""
+    parts, current, depth = [], "", 0
+    for char in body:
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth = max(0, depth - 1)
+        if char == "," and depth == 0:
+            parts.append(current)
+            current = ""
+        else:
+            current += char
+    parts.append(current)
+    return [part.strip() for part in parts if part.strip()]
+
+
 class SingleActionPolicy:
     """Reason, then name one action. The reference behaviour."""
 
     tag = "action"
     name = "single"
-    supports_tools = True
     max_new_tokens = None
     done_check_reasoning_label = "The reasoning given for that action was:"
 
@@ -93,6 +97,9 @@ class SingleActionPolicy:
 
     def response_format(self) -> str:
         return "Reasoning: <your reasoning>\n[ACTION_FORMAT]"
+
+    def action_format(self, tools_offered: bool) -> str:
+        return _one_action_format(tools_offered)
 
     def parse(self, response: str) -> Optional[Decision]:
         action = parse_action_line(response)
@@ -120,16 +127,17 @@ class ScoredActionPolicy:
     Forces systematic evaluation of all options rather than anchoring on the first
     plausible action. Ties go to the first in the list.
 
-    ``supports_tools`` is False: the rubric scores actions on progress toward the task, and
-    a passive tool call makes none by construction, so a tool would score 1 and never win.
-    Offering tools under a rubric that cannot choose them is worse than not offering them.
-    Revisit alongside a rubric that scores information-gathering on its own terms.
+    Tool calls are scored under the same rubric, which asks about progress toward the task
+    — something a passive tool makes none of by construction — so they will tend to score
+    low until the rubric scores information-gathering on its own terms.
     """
 
     tag = "score"
     name = "scored"
-    supports_tools = False
-    max_new_tokens = 300
+    # One scored line per available action, and tool calls add lines on top of the action
+    # list. Truncation here is silent — the parser just maxes over whatever lines arrived —
+    # so the budget is set well clear of what the longest action list needs.
+    max_new_tokens = 700
     done_check_reasoning_label = "The justification given for scoring that action highest was:"
 
     def instruction(self) -> str:
@@ -141,19 +149,12 @@ class ScoredActionPolicy:
     def response_format(self) -> str:
         return "<action>: <one-sentence reason for the score>: <score>\n..."
 
+    def action_format(self, tools_offered: bool) -> str:
+        return _one_action_format(tools_offered)
+
     def parse_score_line(self, line: str) -> Optional[Tuple[str, str, int]]:
-        """Split one ``<action>: <reasoning>: <score>`` line into its three fields.
-
-        Anchored at both ends rather than on a single separator, because only the outer
-        two colons are reliable: the action is everything before the **first** and the
-        score everything after the **last**, leaving the middle — reasoning, colons and
-        all — untouched. An action invocation is ``name(args)`` and never contains a colon,
-        so the first colon is always the action's terminator even though the *listed*
-        verbalisation of that action carries one before its description.
-
-        A line with only one colon is read as an action and a score with the justification
-        omitted, rather than rejected — a missing reason costs the completion check some
-        context, but the score it came with is still a usable vote.
+        """
+        Split one ``<action>: <reasoning>: <score>`` line into its three fields.
         """
         stripped = line.strip()
         first, last = stripped.find(":"), stripped.rfind(":")
@@ -195,16 +196,10 @@ class ScoredActionPolicy:
 
 
 class SequenceActionPolicy:
-    """Commit to a short sequence of actions, executed until exhausted or one fails.
-
-    ``supports_tools`` is False: a passive tool call neither advances the game nor is
-    unlimited, so one sitting in the middle of a committed plan is a different execution
-    model than the plan assumes.
-    """
+    """Commit to a short sequence of actions, executed until exhausted or one fails."""
 
     tag = "action"
     name = "sequence"
-    supports_tools = False
     max_new_tokens = None
     # This policy reasons once per *plan* and then executes several actions from it, so the
     # reasoning the completion check sees is the plan's rather than the step's. Say so
@@ -217,15 +212,20 @@ class SequenceActionPolicy:
                 "Respond in exactly this format:")
 
     def response_format(self) -> str:
-        return "Reasoning: <your reasoning>\nAction: <ACTION1, ACTION2, ...>"
+        return "Reasoning: <your reasoning>\n[ACTION_FORMAT]"
+
+    def action_format(self, tools_offered: bool) -> str:
+        if tools_offered:
+            return ("Action: <ACTION1, ACTION2, ...> — a sequence of environment actions, "
+                    "OR Action: <TOOL_CALL> — a single tool call on its own")
+        return "Action: <ACTION1, ACTION2, ...>"
 
     def parse(self, response: str) -> Optional[Decision]:
         for line in response.splitlines():
             stripped = line.strip()
             if not stripped.lower().startswith("action:"):
                 continue
-            body = stripped[len("action:"):].strip()
-            actions = [part.strip() for part in body.split(",") if part.strip()]
+            actions = _split_top_level(stripped[len("action:"):].strip())
             if not actions:
                 return None
             return Decision(actions=actions,

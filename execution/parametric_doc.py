@@ -49,13 +49,10 @@ from execution.info_doc import (
 )
 from utils import log_info, log_warn, VLM
 
-#: ``Provenance.source`` for a document from this module. Deliberately not ``"zeroshot"``:
-#: that label already means the zero-shot *task proposal* vertical, whose documents are
-#: distilled from real attempted trajectories. Confusing the two would make a document's
-#: provenance block a lie about how it was produced.
 PARAMETRIC_SOURCE = "parametric"
 
-PARAMETRIC_PROMPT = """You are writing a knowledge base for the Game Boy game [GAME], from what you already know about it. You will not be shown any screenshots — write only from your own knowledge of this game.
+PARAMETRIC_PROMPT = """
+You are writing a knowledge base for the Game Boy game [GAME], from what you already know about it. You will not be shown any screenshots — write only from your own knowledge of this game.
 
 Produce up to [N_CATEGORIES] categories of task a player might be asked to perform in this game. For each category, give:
 
@@ -67,8 +64,8 @@ Produce up to [N_CATEGORIES] categories of task a player might be asked to perfo
 Requirements:
 
 - Only write about [GAME]. Do NOT pad with advice that would apply to any game ("explore the area", "save often", "be careful"): a generic entry fires on every screen and displaces a useful one.
-- If you are unsure whether a detail is true of THIS game, either leave it out or say plainly in the insight what is uncertain. A confidently wrong instruction is followed until the step limit; an absent one costs nothing.
-- If you do not know this game at all, return an empty array [] rather than inventing a plausible-sounding game. An empty document is a real and useful answer.
+- If you are unsure whether a detail is true of THIS game, either leave it out or say plainly in the insight what is uncertain.
+- If you do not know this game at all, return an empty array [] rather than inventing a plausible-sounding game.
 
 Respond with ONLY a JSON array, no prose before or after it, in exactly this shape:
 
@@ -86,10 +83,6 @@ Respond with ONLY a JSON array, no prose before or after it, in exactly this sha
 def _extract_json_array(output: str) -> Optional[list]:
     """Pull the JSON array out of a reply, tolerating fenced or prefaced output.
 
-    Parsed rather than trusted: models wrap JSON in ``` fences or precede it with a
-    sentence often enough that a bare ``json.loads`` on the whole reply fails on
-    well-formed content. The array is located by its outermost brackets, which is
-    sufficient here because the requested shape has no array nested above the top level.
 
     :return: The decoded list, or ``None`` if nothing parseable was found.
     """
@@ -110,11 +103,7 @@ def _extract_json_array(output: str) -> Optional[list]:
 def _entries_from_payload(payload: list, parameters: Optional[dict]) -> List[Entry]:
     """Turn the decoded JSON into entries, dropping items that carry no usable knowledge.
 
-    An item needs a category and at least one insight to be worth keeping: the category is
-    what the relevance pass judges and the insights are the only thing the planner ever
-    reads, so an item missing either contributes nothing but a wasted VLM call per episode.
-    Malformed items are skipped individually rather than failing the whole document — one
-    bad element out of ten is not a reason to fall back to no knowledge at all.
+    An item needs a category and at least one insight to be worth keeping
     """
     entries = []
     for item in payload:
@@ -147,13 +136,9 @@ def generate_parametric_document(
     max_new_tokens: int = 4000,
     parameters: Optional[dict] = None,
 ) -> InfoDocument:
-    """Ask *vlm* to write a document for *game* from its own knowledge.
+    """
+    Ask *vlm* to write a document for *game* from its own knowledge.
 
-    One call. The reply is parsed strictly and a document that comes back empty stays empty:
-    inventing entries to avoid an empty document would be exactly the failure this control
-    exists to detect. An empty document is not an error — it is the honest answer for a game
-    the model has never seen, and a run against one degrades to planning without insights.
-    It is written to disk either way, so what the model actually said stays auditable.
 
     :param game: The game identifier, as the benchmark names it.
     :param vlm: The model to ask. Not a supervisor call — no episode is running yet, so
@@ -199,19 +184,8 @@ def generate_parametric_document(
 
 def _warn_if_empty(document: InfoDocument, game: str, path: str, cached: bool,
                    parameters: Optional[dict]) -> None:
-    """Say loudly that the parametric document carries no task entries.
-
-    An empty document is a truthful answer about the model's priors — it does not know this
-    game — and running on one is allowed: selection finds nothing, so the arm plans with no
-    insights, which is the knowledge-free ``subgoal`` behaviour. What it is *not* is a
-    parametric result, so this has to be visible when reading the CSV afterwards. The
-    machine-readable version of the same fact is the ``selected_entry_ids`` column, which is
-    empty on every row of such a run.
-
-    Warned rather than raised: an empty document is a legitimate configuration, not a
-    misconfiguration. It stays a warning only because the degraded behaviour is now the
-    honest one — before, an empty document silently produced an *unplanned* run, which is
-    the baseline wearing this arm's name.
+    """
+    Say loudly that the parametric document carries no task entries.
     """
     if document.task_entries:
         return
@@ -241,14 +215,6 @@ def load_or_generate_parametric_document(
 ) -> InfoDocument:
     """Return the cached document at *path*, generating and writing it if absent.
 
-    Cached per (game, model) rather than regenerated per run so that two runs of the same
-    command plan from the same document. Without that, every rerun silently redraws the
-    knowledge and a change in score cannot be attributed to whatever was actually changed.
-
-    Reloaded through :func:`~execution.info_doc.load_document` even on the generating run, so
-    the freshly written and the cached paths return an identically populated object —
-    ``Entry.source`` set from provenance, ``resolved_frame`` resolved — instead of differing
-    in exactly the fields a reader forgets to check.
 
     :param path: Where the document is cached, from ``Paths.parametric_doc()``.
     :param regenerate: Overwrite an existing cached document instead of reusing it. The new

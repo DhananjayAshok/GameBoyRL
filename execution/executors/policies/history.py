@@ -1,15 +1,5 @@
 """
 What the executor remembers between decisions, and how it reads in the prompt.
-
-A :class:`HistoryPolicy` is shown every environment step as it happens and renders a block
-spliced into the step prompt.  Unlike :mod:`.action`, a history policy **may** call the VLM
-— :class:`VisualHistoryPolicy` has to, to describe what changed between two frames — so it
-is handed the executor's recording ``_vlm_call`` at construction.
-
-That asymmetry is deliberate.  An action policy decides the step, so it is kept unable to
-call at all and the "exactly one action-tagged call per decision" rule holds by
-construction.  A history policy only annotates, so its calls own no steps, carry an
-auxiliary tag, and may be as numerous as they like.
 """
 
 from __future__ import annotations
@@ -18,7 +8,8 @@ from typing import Callable, List, Optional, Protocol
 
 from gameboy_worlds.interface.action import LowLevelAction
 
-from execution.report import EnvironmentStepRecord
+from execution.report import (EnvironmentStepRecord, ExecutorToolCallRecord,
+                              StepRecord)
 
 #: Recent steps rendered into the prompt. Applies to every policy that keeps a list: a
 #: visual description is much longer per entry than an action name, so an untruncated
@@ -35,8 +26,8 @@ class HistoryPolicy(Protocol):
     def reset(self) -> None:
         """Forget everything. Called once before the loop starts."""
 
-    def observe(self, steps: List[EnvironmentStepRecord]) -> None:
-        """Fold in the environment steps one decision produced, in order."""
+    def observe(self, steps: List[StepRecord]) -> None:
+        """Fold in the environment steps and tool calls one decision produced, in order."""
 
     def render(self) -> str:
         """The block to splice into ``[CONTEXT_SECTION]``, or ``""`` for nothing.
@@ -56,20 +47,23 @@ class NoHistoryPolicy:
     def reset(self) -> None:
         pass
 
-    def observe(self, steps: List[EnvironmentStepRecord]) -> None:
+    def observe(self, steps: List[StepRecord]) -> None:
         pass
 
     def render(self) -> str:
         return ""
 
 
-def _action_line(record: EnvironmentStepRecord) -> str:
-    """One past action, tagged with whether it did anything.
+def _tool_call_string(record: ExecutorToolCallRecord) -> str:
+    args = ", ".join(f"{key}={value}" for key, value in record.kwargs.items())
+    return f"{record.executor_action_class.__name__}({args})"
 
-    ``[no change]`` is the load-bearing part: an agent that cannot tell a blocked move from
-    a successful one repeats it until the budget runs out, and the frame-change flag is the
-    only signal that distinguishes them.
+
+def _action_line(record: StepRecord) -> str:
+    """One past action, tagged with whether it did anything.
     """
+    if isinstance(record, ExecutorToolCallRecord):
+        return f"  {_tool_call_string(record)} -> {record.result}"
     action_str = record.action_class.get_action_name(**record.kwargs)
     changed = record.frame_changed
     if issubclass(record.action_class, LowLevelAction):
@@ -81,14 +75,12 @@ def _action_line(record: EnvironmentStepRecord) -> str:
     return f"  {action_str}  [{status}{'' if changed else ', no change'}]"
 
 
-STUCK_HINT = (
-    "\nIf you have been trying to execute the same action repeatedly (specifically A or B) "
-    "and especially if you get the [no change] message on your recent actions, consider "
-    "that you may be stuck in a loop, and should try something else. Look at the screen "
-    "deeply and use the visual cues to guide your decision making. If you are trying to "
-    "interact with something, you likely have the incorrect orientation and need to "
-    "slightly adjust your positioning"
-)
+STUCK_HINT = """
+If you have been trying to execute the same action repeatedly 
+(specifically A or B) and especially if you get the [no change] message on your recent actions, consider that you may be stuck in a loop, and should try something else. 
+Look at the screen deeply and use the visual cues to guide your decision making. 
+If you are trying to interact with something, you likely have the incorrect orientation and need to slightly adjust your positioning
+"""
 
 
 class ActionHistoryPolicy:
@@ -98,12 +90,12 @@ class ActionHistoryPolicy:
 
     def __init__(self, history_k: int = DEFAULT_HISTORY_K, **kwargs) -> None:
         self._history_k = history_k
-        self._records: List[EnvironmentStepRecord] = []
+        self._records: List[StepRecord] = []
 
     def reset(self) -> None:
         self._records = []
 
-    def observe(self, steps: List[EnvironmentStepRecord]) -> None:
+    def observe(self, steps: List[StepRecord]) -> None:
         self._records.extend(steps)
 
     def render(self) -> str:
@@ -112,27 +104,20 @@ class ActionHistoryPolicy:
         recent = self._records[-self._history_k:]
         lines = ["Recent actions (oldest first):"]
         lines += [_action_line(record) for record in recent]
-        stuck = STUCK_HINT if any(not r.frame_changed for r in recent) else ""
+        stuck = STUCK_HINT if any(isinstance(r, EnvironmentStepRecord)
+                                  and not r.frame_changed for r in recent) else ""
         return "\n".join(lines) + stuck + "\n\n"
 
 
 class VisualHistoryPolicy:
-    """Describe what each action actually changed on screen, and remember that.
-
-    For every environment step, the frame before and the frame after are shown to the VLM
-    together with the action taken between them, and the one-line answer is stored beside
-    that action.  The rendered block therefore says both *what was pressed* and *what it
-    did* — where :class:`ActionHistoryPolicy` can only say that the screen changed, this
-    says how.
-
-    All the pairs from one decision go out in **one batched call**.  A sequence policy can
-    produce five steps per decision, and five separate round trips per decision is the
-    difference between an arm that is worth running and one that is not.
+    """
+    Describe what each action actually changed on screen, and remember that.
     """
 
     name = "visual"
 
-    DIFF_PROMPT = """You are watching someone play the GameBoy game [GAME].
+    DIFF_PROMPT = """
+You are watching someone play the GameBoy game [GAME].
 
 Image 1 is the screen BEFORE they pressed [ACTION]. Image 2 is the screen AFTER.
 
@@ -150,30 +135,40 @@ In one short sentence, say what changed between the two screens as a result of t
     def reset(self) -> None:
         self._entries = []
 
-    def observe(self, steps: List[EnvironmentStepRecord]) -> None:
-        if not steps or self._call is None:
+    def observe(self, steps: List[StepRecord]) -> None:
+        if not steps:
             return
 
-        prompts, images, actions = [], [], []
+        # (action string, description) with description None for the entries still waiting
+        # on a frame diff. Built in step order so a tool call keeps its place in the
+        # sequence even though it does not go out to the VLM.
+        pending: List[list] = []
+        prompts, images = [], []
         for record in steps:
+            if isinstance(record, ExecutorToolCallRecord):
+                pending.append([_tool_call_string(record), str(record.result)])
+                continue
             # frame_after is the screen the *next* step starts from, so a pair is always
             # (before, after) of one action rather than two consecutive observations.
-            if record.frame_before is None or record.frame_after is None:
+            if (self._call is None or record.frame_before is None
+                    or record.frame_after is None):
                 continue
             action_str = record.action_class.get_action_name(**record.kwargs)
-            actions.append(action_str)
+            pending.append([action_str, None])
             prompts.append(self.DIFF_PROMPT
                            .replace("[GAME]", self._game)
                            .replace("[ACTION]", action_str))
             images.append([record.frame_before, record.frame_after])
 
-        if not prompts:
+        if not pending:
             return
 
-        responses = self._call("frame_diff", texts=prompts, images=images,
-                               max_new_tokens=60)
-        for action_str, response in zip(actions, responses):
-            self._entries.append((action_str, _first_sentence(response)))
+        responses = iter(self._call("frame_diff", texts=prompts, images=images,
+                                    max_new_tokens=60) if prompts else [])
+        for entry in pending:
+            if entry[1] is None:
+                entry[1] = _first_sentence(next(responses, ""))
+            self._entries.append((entry[0], entry[1]))
 
     def render(self) -> str:
         if not self._entries:
@@ -187,10 +182,8 @@ In one short sentence, say what changed between the two screens as a result of t
 
 
 def _first_sentence(response: str) -> str:
-    """The description, without the model's preamble.
-
-    Kept to one line because the block holds *k* of these and a paragraph each would crowd
-    out the screen the model is supposed to be looking at.
+    """
+    The description, without the model's preamble.
     """
     text = (response or "").strip()
     for line in text.splitlines():

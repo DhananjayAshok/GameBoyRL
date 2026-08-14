@@ -1,46 +1,5 @@
 """
 Abstract base class for all executors.
-
-An executor is a one-shot agent that receives a game environment and a natural-
-language task, then attempts to complete that task by interleaving passive tool
-calls (:class:`~execution.executor_action.ExecutorAction`) with active
-high-level environment steps.
-
-Execution begins automatically inside :meth:`Executor.__init__` and cannot be
-triggered a second time — the executor is sealed after construction.
-
-.. warning:: **Subclass initialisation order**
-
-    :meth:`Executor.__init__` calls :meth:`_execute` immediately before it
-    returns.  Any attribute a subclass needs during :meth:`_execute` **must**
-    be set *before* calling ``super().__init__()``.  Place the ``super()`` call
-    as the **last** line of the subclass ``__init__``.
-
-    **Correct pattern**::
-
-        class MyExecutor(Executor):
-            def __init__(self, env, task, max_steps, max_tool_calls, my_arg, **kwargs):
-                self._my_arg = my_arg          # set up own state FIRST
-                super().__init__(env, task, max_steps, max_tool_calls, **kwargs)  # LAST
-
-    **Wrong pattern** (will crash — :meth:`_execute` fires before
-    ``self._my_arg`` exists)::
-
-        class MyExecutor(Executor):
-            def __init__(self, env, task, max_steps, max_tool_calls, my_arg, **kwargs):
-                super().__init__(...)   # triggers _execute() immediately
-                self._my_arg = my_arg  # too late — _execute already ran
-
-.. note:: **There is exactly one loop**
-
-    :class:`~execution.executors.executor.PolicyExecutor` is the only subclass, and every
-    arm is that class composed with a different pair of policies. Nothing overrides
-    :meth:`_execute`.
-
-    This used to read as a warning that one variant bypassed the loop and reimplemented
-    its budget accounting, invalid handling and completion check. That variant was the
-    sequence planner, and it needed its own loop only because one of its calls produced
-    several environment steps. A decision now yields a *list* of actions, so it does not.
 """
 
 from __future__ import annotations
@@ -55,17 +14,9 @@ from execution.report import (ACTION_TAGS, EnvironmentStepRecord, ExecutorReport
                               InvalidStepRecord, ExecutorToolCallRecord,
                               ExecutorVLMCallRecord, parse_completion,
                               per_prompt_token_counts)
-from utils import load_parameters, log_error, log_info, ExecutorVLM, parse_key_value
+from utils import load_parameters, log_error, log_info, log_warn, ExecutorVLM, parse_key_value
 
-#: Consecutive unparseable/unrecognised action replies before the executor gives up with
-#: ``max_invalid``.
-#:
-#: **Must stay below the smallest leg an executor is ever run with.** At 10 it was dead
-#: code in every supervised arm: a supervisor leg is ``--max_leg_steps`` steps (default 5)
-#: and ``consecutive_invalid`` resets with each new executor, so the counter could never
-#: reach 10 before the leg ended. That mattered because it is the only thing that stops a
-#: leg spending its whole budget on replies that never reach the environment, which is the
-#: state the supervisor's own budget accounting used to be blind to.
+#: Consecutive unparseable/unrecognised action replies before the executor gives up
 MAX_CONSECUTIVE_INVALID = 4
 DEBUG_ON_INVALID = False
 
@@ -74,17 +25,10 @@ class Executor(ABC):
     """
     Abstract base class for game-playing executor agents.
 
-    Subclasses implement :meth:`_execute` (game loop logic) and
-    :meth:`_take_action` (how a high-level action is dispatched to the
-    environment).  The base class owns the report lifecycle: it creates
-    :attr:`report` before calling :meth:`_execute` and seals it immediately
-    after.
-
     .. warning:: **Subclass initialisation order**
 
         ``super().__init__()`` triggers :meth:`_execute` immediately.  Set all
-        subclass attributes *before* calling ``super().__init__()``.  See
-        module-level docstring for the correct pattern.
+        subclass attributes *before* calling ``super().__init__()``. 
 
     :param env: The game environment.  All environment interaction must go
         through this object — never access ``env._emulator`` directly.
@@ -104,21 +48,6 @@ class Executor(ABC):
         "agent_done"``.  Defaults to ``False``, in which case nothing extra is
         called and the executor plays until the environment or the step budget
         stops it.
-
-        How often the check runs follows from one rule in the loop: at a **decision
-        boundary**, and only when the decision ran to the end. That is every environment
-        step for a policy that decides one action at a time, and once per committed plan
-        for one that decides several — the two cadences the arms used to implement
-        separately. :data:`DONE_CHECK_EVERY_K_STEPS` thins it further.
-
-        There is deliberately **no give-up mechanism**.  The check asks one
-        question — is the task complete — and "this is hopeless" is not an
-        answer to it.  An executor that cannot make progress runs to
-        ``max_steps``.
-
-        The action prompt is **identical** either way: nothing about
-        termination is ever advertised to the acting model, so a run's prompts
-        do not depend on this flag.
     :type allow_self_termination: bool
     :param kwargs: Additional subclass-specific keyword arguments.  These are
         recorded verbatim in :attr:`report.init_kwargs` but are otherwise
@@ -126,29 +55,12 @@ class Executor(ABC):
 
     .. attribute:: available_tools
         :type: List[Type[ExecutorAction]]
-
-        Class-level list of :class:`~execution.executor_action.ExecutorAction`
-        subclasses this executor may call.  Defaults to ``[]`` (no tools).
-        Override at the subclass level::
-
-            class MyExecutor(Executor):
-                available_tools = [LocateAction, OCRAction]
     """
 
     available_tools: list = []
 
-    #: Prompt for the post-step completion check (:meth:`_check_task_complete`).
-    #:
-    #: The verdict is asked for BEFORE the reasoning, which is the reverse of every other
-    #: prompt here. This one is paid per environment step, so its token budget is the
-    #: tightest in the codebase, and a model that narrates before answering (gemini writes a
-    #: ``Reasoning:`` preamble of its own before the response proper) can spend the whole
-    #: allowance without ever reaching the last line. Verdict-last means truncation costs the
-    #: answer and keeps the explanation; verdict-first means it costs the explanation and
-    #: keeps the answer. An unparsed verdict reads as "not complete", so the failure is
-    #: silent: the check simply never fires.
-    #: Two images are attached: the frame before the last action and the frame after it.
-    DONE_CHECK_PROMPT = """Task: [TASK][HINT_BLOCK]
+    DONE_CHECK_PROMPT = """
+Task: [TASK][HINT_BLOCK]
 
 You are judging whether a task being played on a GameBoy has been FULLY completed.
 
@@ -165,28 +77,15 @@ Complete: <yes or no>
 Reasoning: <why, referring to what is visible in image 2>
 [STOP]"""
 
-    #: How the reasoning passed to the completion check is introduced. The action policy
-    #: supplies it (see :attr:`PolicyExecutor.DONE_CHECK_REASONING_LABEL`), because whether
-    #: the stored reasoning explains *this action* or *the plan this action came from*
-    #: depends entirely on how the decision was made — and a prompt that mislabels it is
-    #: asking the judge to read a sentence as something it is not.
     DONE_CHECK_REASONING_LABEL = "The reasoning given for that action was:"
 
     #: Env actions shown to the completion check as history.
     DONE_CHECK_HISTORY_K = 8
 
-    #: Run the completion check after every k-th environment step. 1 checks every step,
-    #: which is the most responsive and the most expensive — it roughly doubles the VLM
-    #: calls of a self-terminating run. Raising it to 2 or 3 halves or thirds that, at the
-    #: cost of noticing completion up to k-1 steps late. The last permitted step is always
-    #: checked whatever k is (see :meth:`_done_check_due`).
+    #: Run the completion check after every k-th environment step.
     DONE_CHECK_EVERY_K_STEPS = 1
 
-    #: Token budget for the completion check, paid once per environment step. Not 300: a
-    #: model that narrates before answering (gemini writes its own ``Reasoning:`` preamble)
-    #: spends that entirely on prose and the reply is cut off before the verdict.
-    #: :data:`DONE_CHECK_PROMPT` asks for the verdict first so truncation costs the
-    #: explanation rather than the answer.
+    #: Token budget for the completion check
     DONE_CHECK_MAX_NEW_TOKENS = 1500
 
     def __init__(
@@ -204,10 +103,6 @@ Reasoning: <why, referring to what is visible in image 2>
         **kwargs: Any,
     ) -> None:
         self._parameters = load_parameters(parameters)
-        # A blank task is never a real request, and it is silently destructive downstream:
-        # ExecutorReport._save_images derives its output directory by slugifying the task,
-        # and an empty slug collapses that path onto the executor directory, which it then
-        # rmtree's. Refuse here rather than at the end of an episode that cost real tokens.
         if not task or not task.strip():
             log_error(
                 f"Executor task must be a non-empty string, got {task!r}.",
@@ -228,12 +123,7 @@ Reasoning: <why, referring to what is visible in image 2>
         self._max_new_tokens = self._parameters.get("executor_vlm_max_new_tokens", 512)
         self._last_frame_changed = True
         self._n_tool_calls = 0
-        # The reasoning the acting model gave for the action it most recently chose, kept
-        # for the completion check. Set by _pick_action; None until the first parse, and on
-        # executors whose action call produces no reasoning at all.
         self._last_reasoning: Optional[str] = None
-        # The VLM call currently being acted on. Set by _vlm_call, read by _record_step so
-        # every step is filed under the call that caused it. None before the first call.
         self._current_call: Optional[ExecutorVLMCallRecord] = None
 
         self.report = self._make_report(task, self._run_config(kwargs), max_steps,
@@ -245,25 +135,8 @@ Reasoning: <why, referring to what is visible in image 2>
         self.report.final_state = self._get_state()
 
     def _run_config(self, extra_kwargs: Dict[str, Any]) -> Dict[str, Any]:
-        """The configuration this run actually resolved to, for :attr:`report.init_kwargs`.
-
-        Built deliberately rather than by forwarding the leftover ``**kwargs``, which is
-        what used to happen and which was **structurally always empty**: every argument a
-        supervisor forwards (``hint``, ``allow_self_termination``, ``vlm_model``,
-        ``vlm_kind``, ``game``, ``parameters``) is a named parameter of
-        :meth:`__init__`, so nothing was ever left over to record. The consequence was that
-        ``SupervisorReport.__str__``'s per-leg ``init_kwargs.get("hint")`` line could never
-        fire, and the archived report — the artifact that exists so an episode can be
-        reconstructed — did not say which hint any leg ran under.
-
-        The model name is read back off :attr:`_parameters` rather than from the
-        constructor argument, so it records the model that was *used* rather than the
-        override that may have been ``None``.
-
-        Subclasses extend it (see
-        :meth:`~execution.executors.executor.PolicyExecutor._run_config`); anything still
-        left in ``**kwargs`` is merged in last so a future argument is recorded even before
-        anyone thinks to name it here.
+        """
+        The configuration this run actually resolved to, for :attr:`report.init_kwargs`.
         """
         return {
             "hint": self._hint,
@@ -282,11 +155,7 @@ Reasoning: <why, referring to what is visible in image 2>
         max_tool_calls: int,
     ) -> ExecutorReport:
         """
-        Factory for the report object.  Override in subclasses to return a
-        different :class:`~execution.report.ExecutorReport` subclass.
-
-        Called by :meth:`__init__` before :meth:`_execute` runs, so
-        ``self._get_state()`` is already available.
+        Factory for the report object. 
         """
         return ExecutorReport(
             task=task,
@@ -297,10 +166,6 @@ Reasoning: <why, referring to what is visible in image 2>
             max_tool_calls=max_tool_calls,
             initial_state=self._get_state(),
         )
-
-    # ------------------------------------------------------------------
-    # Abstract interface — subclasses must implement
-    # ------------------------------------------------------------------
 
     @abstractmethod
     def _execute(self) -> int:
@@ -323,6 +188,8 @@ Reasoning: <why, referring to what is visible in image 2>
         """
         Dispatch a high-level action to the environment and record the result.
 
+        # TODO: This currently doesn't account for actions that are well defined in the HighLevelAction space of the controller but isn't valid in the current state
+
         Implementations **must**:
 
         - Use :meth:`~gameboy_worlds.interface.Environment.step_high_level_action`
@@ -337,17 +204,9 @@ Reasoning: <why, referring to what is visible in image 2>
         """
         raise NotImplementedError
 
-    # ------------------------------------------------------------------
-    # Concrete helpers — uniform across all executors
-    # ------------------------------------------------------------------
-
     def _record_step(self, step) -> None:
-        """File a step under the VLM call that caused it.
-
-        The single write path for every step an executor takes. Ownership is recorded
-        here, at the moment the step happens, rather than reconstructed later by pairing
-        two lists — which is what used to go wrong whenever a call produced anything
-        other than exactly one step.
+        """
+        File a step under the VLM call that caused it.
 
         :param step: An :class:`~execution.report.EnvironmentStepRecord`,
             :class:`~execution.report.ExecutorToolCallRecord` or
@@ -362,17 +221,15 @@ Reasoning: <why, referring to what is visible in image 2>
         self._current_call.steps.append(step)
 
     def _record_invalid(self, response: str, reason: str = "parse failure") -> None:
-        """Record an invalid step and trigger a breakpoint if DEBUG_ON_INVALID is set.
+        """
+        Record an invalid step and trigger a breakpoint if DEBUG_ON_INVALID is set.
 
-        Files an :class:`InvalidStepRecord` under the current call, so a call whose reply
-        was unusable is recorded as having produced *that* rather than nothing at all —
-        which is what keeps a failed parse visible in the report and countable in
         :attr:`~execution.report.ExecutorReport.invalid_steps`.
 
         :param reason: ``"parse failure"`` or ``"unrecognised action"``.
         """
         self._record_step(InvalidStepRecord(response=response, reason=reason))
-        log_info(f"Invalid response recorded: \n{response}", parameters=self._parameters)
+        log_warn(f"Invalid response recorded: \n{response}", parameters=self._parameters)
         if DEBUG_ON_INVALID:
             breakpoint()
 
@@ -384,11 +241,6 @@ Reasoning: <why, referring to what is visible in image 2>
         """
         Invoke a passive :class:`~execution.executor_action.ExecutorAction` and
         record the result.
-
-        The action receives the current environment state via
-        :meth:`_get_state` but does **not** advance the emulator.  The
-        resulting :class:`~execution.report.ExecutorToolCallRecord` is filed under the current
-        VLM call (see :meth:`_record_step`) before being returned.
 
         :param executor_action_class: The
             :class:`~execution.executor_action.ExecutorAction` subclass to
@@ -415,9 +267,7 @@ Reasoning: <why, referring to what is visible in image 2>
     def _hint_block(self) -> str:
         if self._hint is None:
             return ""
-        # Steps taken so far == non-tool records in report.steps (tool calls don't
-        # advance the env / n_env_steps). This is the step the agent is about to take.
-        steps_taken = sum(1 for s in self.report.steps if not isinstance(s, ExecutorToolCallRecord))
+        steps_taken = sum(1 for s in self.report.steps if isinstance(s, EnvironmentStepRecord))
         step_info = f"""
 [STEP_INFO] You have already taken {steps_taken + 1} actions so for this attempt. Note: this may not be the first step of the overall task and one action does not correspond to one step in the hint plan — earlier actions may already have been taken before this attempt began, so reason from what you currently see on screen rather than assuming a fresh start. [STEP_INFO_END]"""
         return step_info + f"\n[HINT_START]\nHint: {self._hint}\nNote: This hint block is a secret. You must use it to guide your decision making, but in the reasoning you say, you should pretend as if you actually just know the content of the hint. Do not refer to it explicitly. So if the hint gives you a direction, instead of saying 'the hint says go here', your reasoning should just say 'next I must go here'. [HINT_END]"
@@ -501,18 +351,8 @@ Reasoning: <why, referring to what is visible in image 2>
         return result
 
     def _batched_vlm_call(self, tag: str, **kwargs: Any) -> list:
-        """Several prompts in one round trip, recorded one entry per pair.
-
-        Split out from :meth:`_vlm_call` rather than branching inline so the single-prompt
-        path — the one that assigns step ownership — stays readable as a straight line.
-
-        Takes the prompts and images out of ``kwargs`` rather than as parameters so the
-        whole dict can be forwarded to ``infer`` untouched — naming them here as well is
-        how they ended up passed twice.
-
-        Mirrors ``Supervisor._vlm_call``'s list handling, including per-prompt images when
-        the caller batched them that way and the shared set otherwise, so the two sides of
-        the codebase stay one pattern rather than two that drift.
+        """
+        Several prompts in one round trip, recorded one entry per pair.
         """
         texts = kwargs["texts"]
         images = kwargs["images"]
@@ -575,12 +415,6 @@ Reasoning: <why, referring to what is visible in image 2>
     def _recent_actions_block(self, k: Optional[int] = None) -> str:
         """
         The last *k* environment actions, oldest first, for the completion check.
-
-        Derived from :attr:`report.steps` rather than from the history policy's state, so
-        the completion check sees the same trajectory on every arm — including the ones
-        whose history policy remembers nothing. The two are deliberately not merged: this
-        serves the judge and always exists, while a history policy serves the acting model
-        and may be empty by design.
         """
         k = self.DONE_CHECK_HISTORY_K if k is None else k
         env_steps = [s for s in self.report.steps if isinstance(s, EnvironmentStepRecord)]
@@ -612,15 +446,6 @@ Reasoning: <why, referring to what is visible in image 2>
         with the task, the hint, the action just taken, the reasoning that chose it and the
         recent action history. Consumes no environment step and no tool budget.
 
-        The judge is the executor's own model — the same :attr:`_vlm`, so it follows the
-        ``vlm_model`` constructor override. Judging with a stronger model than the one
-        acting would make ``agent_done`` mean something different per run and stop
-        self-terminated episodes being comparable across the benchmark.
-
-        The response format is owned by :func:`~execution.report.parse_completion`, not by
-        this class — the report renderer and the plan supervisor read the same verdict off
-        the call log and must agree with the decision made here.
-
         :param record: The step record just appended by :meth:`_take_action`.
         :return: ``True`` only on an explicit ``Complete: yes``.
         """
@@ -637,7 +462,7 @@ Reasoning: <why, referring to what is visible in image 2>
             # are about the *acting* model's formatting, and a judge's bad formatting must
             # not push an executor toward max_invalid. This is the only site that can tell
             # "said no" from "did not answer" apart, so it is the only one that reports it.
-            log_info(
+            log_warn(
                 f"Completion check response had no parseable 'Complete:' line, treating as "
                 f"not complete:\n{response}",
                 parameters=self._parameters,
@@ -648,24 +473,6 @@ Reasoning: <why, referring to what is visible in image 2>
         """
         Run the completion check and end the run if it says the task is done.
 
-        Call from ``_execute`` immediately after a successful environment step, **after**
-        the environment's own ``terminated`` / ``truncated`` branches, passing the loop's
-        own budget counter::
-
-            outcome = self._maybe_self_terminate(record, n_env_steps)
-            if outcome is not None:
-                return outcome
-
-        The ordering is not cosmetic: the environment's verdict is ground truth and the
-        agent's is an opinion, so when both fire on the same step the ground truth is what
-        gets recorded. Reversing them would quietly turn benchmark success rates into agent
-        self-assessments.
-
-        Because the check only ever runs after a step has been taken, a zero-step
-        ``agent_done`` is impossible by construction.
-
-        The check is skipped on steps that are not due one — see
-        :meth:`_done_check_due`, which implements :data:`DONE_CHECK_EVERY_K_STEPS`.
 
         :param record: The step record just appended by :meth:`_take_action`.
         :param n_env_steps: The calling loop's budget counter, *after* it was incremented
@@ -686,30 +493,7 @@ Reasoning: <why, referring to what is visible in image 2>
     def _done_check_due(self, n_env_steps: int) -> bool:
         """Whether this step is one the completion check runs on.
 
-        The check is the most expensive thing in an episode: one two-image VLM call per
-        environment step, so it roughly doubles the call count of any run with
-        ``allow_self_termination`` set. :data:`DONE_CHECK_EVERY_K_STEPS` trades latency of
-        detection for that cost — at *k* the run notices it has finished up to *k-1* steps
-        late, and pays a *k*-th of the checks.
-
-        **Two different counters, deliberately.** *k* counts environment actions actually
-        dispatched (``EnvironmentStepRecord``s), because that is what the check costs money
-        against — a step the agent burned on an unparseable response produced no new frame
-        for a judge to look at. The step *budget*, though, is spent by everything the loop
-        records: ``_execute`` increments its ``n_env_steps`` on a parse failure, an
-        unrecognised action and a passive tool call as well as on a real action. So "is this
-        the last permitted step" can only be answered by the budget counter the loop itself
-        is running on, which is why it is passed in rather than recomputed here.
-
-        The final permitted step is **always** checked regardless of *k*. Without that, a
-        budget that is not a multiple of *k* would end with its last steps unexamined, and
-        an executor that finished on one of them would run out its budget and report
-        ``max_steps`` — which reads as failure. That is the one moment where a missed check
-        cannot be recovered later, so it is never the one that gets skipped. Testing that
-        against the action count instead would break the guarantee outright: after a single
-        invalid step the action count trails the budget permanently and never reaches
-        ``max_steps``, so the last step would go unchecked in exactly the runs the
-        guarantee exists for.
+        The final permitted step is **always** checked regardless of *k*.
 
         :param n_env_steps: The calling loop's budget counter, after it was incremented for
             this step. Compared against ``max_steps``; never used for the *k* cadence.

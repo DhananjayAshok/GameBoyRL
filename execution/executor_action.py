@@ -80,6 +80,17 @@ class ExecutorAction(ABC):
             must be able to parse every string that ``verbalize`` declares as valid.
             If the two are out of sync the executor will silently drop tool calls.
 
+        .. warning:: **No colons in the call syntax**
+
+            The invocation string a tool declares — the ``Example:`` line, and any
+            signature the model might copy verbatim — must not contain ``:``.
+            :class:`~execution.executors.policies.action.ScoredActionPolicy` delimits its
+            reply as ``<action>: <reasoning>: <score>`` and reads the action as everything
+            before the *first* colon, so a colon inside the call syntax truncates the tool
+            name and the call is recorded as an unrecognised action.  Use ``=`` for
+            arguments (``locate(target=door)``) and keep type annotations and prose out of
+            the part the model is asked to reproduce.
+
         A good verbalization includes:
 
         - The tool name (use a stable, unambiguous identifier).
@@ -88,8 +99,8 @@ class ExecutorAction(ABC):
 
         Example return value::
 
-            "locate(target: str) — find a named object on the current screen.\\n"
-            "  target: the object to search for (e.g. 'pokémon center door').\\n"
+            "locate(target=<str>) — find a named object on the current screen.\\n"
+            "  target — the object to search for (e.g. 'pokémon center door').\\n"
             "  Example: locate(target=pokémon center door)"
 
         :return: Prompt-ready description of the tool and its call syntax.

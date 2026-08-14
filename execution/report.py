@@ -1,43 +1,10 @@
 """
 Data structures for recording a complete executor run, and the supervisor run around it.
-
-A run is **one list**: :attr:`ExecutorReport.vlm_call_log`, holding one
-:class:`ExecutorVLMCallRecord` per inference call, in order. Each call owns the steps it
-produced, in :attr:`ExecutorVLMCallRecord.steps`:
-
-- **0 steps** — an auxiliary call (``done_check``, or any other tag a variant adds) that
-  reasoned about the run without acting on it.
-- **1 step** — the ordinary case: an action-tagged call that took an
-  :class:`EnvironmentStepRecord`, ran a passive tool (:class:`ExecutorToolCallRecord`), or
-  produced nothing usable (:class:`InvalidStepRecord`).
-- **N steps** — a call that committed to several actions at once, as the ``sequence``
-  action policy does.
-
-``steps`` used to be a second, parallel list on the report, paired with the call log by
-walking both in lockstep. That pairing was positional, so an executor emitting anything
-other than exactly one step per action call silently mis-attributed every step after the
-first — which two executors did, in opposite directions. Ownership is now stored where
-it is created, so it cannot drift, and it survives serialisation: pickling the call log
-carries the steps with it, which is what the saved-trajectory readers rely on.
-
-:attr:`ExecutorReport.steps` still exists as a **flattened, read-only view** over the
-call log, so anything that just wants "every step in order" is unchanged.
-
-The module functions cover the completion-check contract shared with the executors and
-the plan supervisor: :func:`parse_completion` (three-valued) and :func:`says_complete`
-(two-valued, anything-but-yes is no).
-
-The supervisor mirror lives at the bottom: :class:`SupervisorVLMCallRecord`,
-:class:`SupervisorToolCallRecord` and :class:`SupervisorReport`, whose
-:attr:`~SupervisorReport.event_log` interleaves the supervisor's own calls with the
-:class:`ExecutorReport` of every executor it ran. That is the artifact the benchmark saves;
-the executor records are reached through it.
 """
 
 from __future__ import annotations
 
 import os
-import re
 import shutil
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Type, Union
@@ -48,16 +15,13 @@ import numpy as np
 from gameboy_worlds.interface import HighLevelAction
 
 from execution.executor_action import ExecutorAction
-from utils import load_parameters, log_error, parse_yes_no, sum_optional
+from utils import depathify, load_parameters, log_error, log_info, parse_yes_no, sum_optional
 
 
 @dataclass
 class ExecutorToolCallRecord:
     """
     Record of a single passive tool call made by an executor.
-
-    Tool calls do **not** advance the emulator, so no state snapshot is stored
-    here — the state is identical before and after a tool call.
 
     :param executor_action_class: The :class:`~execution.executor_action.ExecutorAction`
         subclass that was invoked.
@@ -73,7 +37,6 @@ class ExecutorToolCallRecord:
         ``None`` if the action arguments failed validation.
     :type success_code: Optional[int]
     """
-
     executor_action_class: Type[ExecutorAction]
     kwargs: Dict[str, Any]
     result: Optional[Dict[str, Any]]
@@ -84,10 +47,6 @@ class ExecutorToolCallRecord:
 class EnvironmentStepRecord:
     """
     Record of a single high-level environment step taken by an executor.
-
-    Each step corresponds to one call to
-    :meth:`~gameboy_worlds.interface.Environment.step_high_level_action` or
-    :meth:`~gameboy_worlds.interface.Environment.step_str`.
 
     :param frame_before: The screen before the action was executed
     :type frame_before: np.ndarray
@@ -105,22 +64,10 @@ class EnvironmentStepRecord:
     :param action_success: Integer success code returned by the high-level
         action.
     :type action_success: int
+    :param frame_changed: Whether the screen actually moved. 
+    :type frame_changed: bool
     :param reward: Reward returned by the environment for this step.
     :type reward: float
-    :param frame_changed: Whether the screen actually moved. The environment's own signal
-        (``info["core"]["frame_changed"]``), not a comparison of the two frames above.
-
-        On the record rather than only on the executor because it is the difference
-        between "you pressed A" and "you pressed A and nothing happened", and anything
-        rendering a trajectory back to a model needs it — an agent that cannot tell a
-        blocked move from a successful one repeats it until the budget runs out.
-
-        .. todo:: **Drop the default.** It exists only so reports written before this
-            field can still be unpickled, and a default of ``True`` silently claims the
-            screen moved for every one of them. Once the pre-refactor reports are wiped,
-            make this a required field so an unset value is impossible rather than
-            plausible.
-    :type frame_changed: bool
     """
     frame_before: np.ndarray
     frame_after: np.ndarray
@@ -128,19 +75,14 @@ class EnvironmentStepRecord:
     kwargs: Dict[str, Any]
     transition_states: List[Dict[str, Any]]
     action_success: int
+    frame_changed: bool
     reward: float = 0.0
-    frame_changed: bool = True
 
 
 @dataclass
 class InvalidStepRecord:
     """
     Record of an action-tagged VLM call that did **not** advance the emulator.
-
-    Held in the producing call's :attr:`ExecutorVLMCallRecord.steps` alongside
-    :class:`EnvironmentStepRecord` and :class:`ExecutorToolCallRecord`, so that a call which
-    reached the environment and one whose reply was unusable are both recorded as
-    outcomes of that call rather than one of them leaving a hole.
 
     :param response: The raw VLM response that failed to produce a step.
     :type response: str
@@ -160,25 +102,8 @@ StepRecord = Union[EnvironmentStepRecord, ExecutorToolCallRecord, InvalidStepRec
 def per_prompt_token_counts(
     meta: Dict[str, Any], n_prompts: int
 ) -> List[tuple]:
-    """Split a batched call's ``meta`` into one ``(input_tokens, output_tokens)`` per prompt.
-
-    A batched call is recorded as one record per prompt/response pair, so its counts have
-    to be distributed across those records. ``meta``'s values are normally per-record lists
-    of length ``n_prompts`` and are used directly.
-
-    Anything else is **collapsed onto the first prompt**, with ``0`` on the rest: a scalar
-    (which is what a caller sees if the batch degenerated to one shared reply), or a list
-    of the wrong length (a backend reporting one usage for the whole batch). ``0`` here
-    carries the same meaning as in :mod:`utils.lm_inference` — "already counted on a
-    sibling entry" — so the sum across the batch stays correct even though the attribution
-    to individual prompts is not. Losing the attribution is acceptable; losing the total is
-    not, which is why this never drops the counts on the floor.
-
-    ``None`` is preserved rather than turned into ``0``: an unreported count must stay
-    unknown so it propagates through :func:`~utils.lm_inference.sum_optional`.
-
-    Shared by ``Executor._batched_vlm_call`` and ``Supervisor._vlm_call`` so the two sides
-    distribute counts identically — writing it out twice is how they would come to disagree.
+    """
+    Split a batched call's ``meta`` into one ``(input_tokens, output_tokens)`` per prompt.
 
     :param meta: ``{"input_tokens": ..., "output_tokens": ...}`` from one ``VLM.infer``.
     :param n_prompts: How many prompts the batch held, i.e. how many records to fill.
@@ -222,17 +147,9 @@ class ExecutorVLMCallRecord:
         its own.
     :type steps: List[StepRecord]
     :param input_tokens: Prompt tokens this call consumed, as reported by the backend.
-        ``None`` means the backend did not report it — a different fact from zero, and it
-        propagates through :attr:`ExecutorReport.total_input_tokens` rather than being
-        silently treated as no cost.
+        ``None`` means the backend did not report it — a different fact from zero.
     :type input_tokens: Optional[int]
     :param output_tokens: Generated tokens this call produced. ``None`` as above.
-
-        For a **batched** call the executor records one entry per prompt/response pair,
-        and the backend's per-record counts are distributed across them. Where the
-        backend reports a single usage covering the whole batch, the counts land on the
-        first record and the rest carry ``0`` — "already counted on a sibling" — so the
-        sum over the batch is still right.
     :type output_tokens: Optional[int]
     """
 
@@ -256,7 +173,6 @@ class ExecutorReport:
     Complete record of a single executor run.
 
     Produced and sealed entirely by :class:`~execution.executors.Executor.__init__`.
-    Subclasses never build or overwrite this object.
 
     :param task: Natural-language task description given to the executor. Never blank —
         :meth:`~execution.executors.Executor.__init__` rejects an empty task, partly
@@ -308,11 +224,6 @@ class ExecutorReport:
     max_tool_calls: int
     initial_state: Dict[str, Any]
     vlm_call_log: List[ExecutorVLMCallRecord] = field(default_factory=list)
-    """
-    The run. One :class:`ExecutorVLMCallRecord` per inference call, in order, each owning the
-    steps it produced (:attr:`ExecutorVLMCallRecord.steps`). This is the only stored log —
-    everything else on this class is a view over it.
-    """
     final_state: Optional[Dict[str, Any]] = None
     outcome: Optional[int] = None
     notes: Optional[str] = None
@@ -329,68 +240,41 @@ class ExecutorReport:
       (only possible under ``allow_self_termination``).
     - ``"max_invalid"``— too many consecutive unparseable action responses.
     - ``None``         — execution has not yet completed.
-
-    ``"agent_give_up"`` was a sixth value, produced by a ``GIVE_UP`` action token that no
-    longer exists. It is retired rather than recycled: artifacts written before that
-    removal still contain it, and nothing new should reuse the string or its outcome code
-    (``4``).
     """
 
     @property
     def steps(self) -> List[StepRecord]:
-        """Every step of the run, flattened in order, regardless of which call made it.
+        """
+        Every step of the run, flattened in order, regardless of which call made it.
 
-        A **read-only view** over :attr:`vlm_call_log`, not stored state: a step belongs
-        to the call that produced it, and this walks the calls in order collecting them.
-        Executors must therefore append to ``call.steps``, never to this.
-
-        The flattening is what most consumers want — "what happened, in order" — and it
-        is why moving ownership onto the call records changed nothing for
-        :attr:`SimpleReport.n_env_steps`, the checker's ``env_steps`` filter, or the
-        supervisors.
+        :return: List of every step recorded in the call log, in order.
+        :rtype: List[StepRecord]
         """
         return [step for call in self.vlm_call_log for step in call.steps]
 
     @property
     def invalid_steps(self) -> List[str]:
-        """Raw VLM responses that produced no action, in order.
+        """
+        Raw VLM responses that produced no action, in order.
 
-        **Derived from** :attr:`steps`, not stored. Every
-        :class:`InvalidStepRecord` already carries the response that produced it, so a
-        parallel list would be the same fact recorded twice — two things to keep in
-        sync, and a silent inconsistency the day one of them is appended to and the
-        other is not.
-
-        It lives on :class:`ExecutorReport` rather than :class:`SimpleReport` because
-        :meth:`~execution.executors.Executor._record_invalid` is defined on the base
-        executor: a field declared only on the subclass report meant the base class was
-        writing an attribute that a plain :class:`ExecutorReport` does not have.
-
-        Callers wanting only the count can use ``len(report.invalid_steps)``, which is
-        what the benchmark runners do.
+        :return: List of every response that failed to produce a step, in order.
+        :rtype: List[str]
         """
         return [s.response for s in self.steps if isinstance(s, InvalidStepRecord)]
 
     @property
     def total_input_tokens(self) -> Optional[int]:
-        """Prompt tokens across every VLM call this executor made.
-
-        **Derived from** :attr:`vlm_call_log`, not stored — the same rule as
-        :attr:`steps` and :attr:`invalid_steps`. A stored counter would be a second copy
-        of a fact the log already holds, and the two would disagree the first time a call
-        was recorded without the counter being bumped. Being a property also makes it a
-        live running total mid-run: read it at any point and it describes the calls made
-        so far.
-
-        ``None`` if any call's count is unknown, via
-        :func:`~utils.lm_inference.sum_optional` — an unreported call makes the total
-        unknown rather than quietly understated.
+        """
+        Total prompt tokens across every VLM call this executor made.
 
         .. important:: This covers :attr:`vlm_call_log` **only**. Inference performed
             inside a passive tool is not included: see the TODO on
             :meth:`~execution.executors.Executor._use_tool`. No tool infers today, so the
             number is currently complete, but it will silently stop being so the moment
             one does.
+
+        :return: Total prompt tokens across every VLM call this executor made.
+        :rtype: Optional[int]
         """
         return sum_optional([call.input_tokens for call in self.vlm_call_log])
 
@@ -400,16 +284,18 @@ class ExecutorReport:
 
         Same derivation, ``None`` propagation and tool-call caveat as
         :attr:`total_input_tokens`.
+
+        :return: Total generated tokens across every VLM call this executor made.
+        :rtype: Optional[int]
         """
         return sum_optional([call.output_tokens for call in self.vlm_call_log])
 
     def __str__(self) -> str:
-        """Return the full interleaved VLM-call / step trajectory as a string.
+        """
+        Return the full interleaved VLM-call / step trajectory as a string.
 
-        Pure formatting with no disk side effects — safe to call anywhere a
-        report is stringified (e.g. the benchmark CSV ``report`` column). Use
-        :meth:`show` to also print the trajectory and save the per-call frames
-        to disk.
+        :return: The full trajectory as text
+        :rtype: str
         """
         lines: List[str] = []
 
@@ -455,19 +341,15 @@ class ExecutorReport:
         return "\n".join(lines)
 
     def _save_images(self) -> None:
-        """Write every VLM-call frame to ``results_dir/benchmark/<game>/<executor>/<task>/``.
-
-        Split out of :meth:`__str__` so that merely stringifying a report has no
-        disk side effects. The target directory is rmtree'd and recreated first,
-        so images are keyed on the executor class (not the model) and a later run
-        overwrites an earlier one — see ``debug_scripts/benchmark.py``.
+        """
+        Write every VLM-call frame to ``results_dir/benchmark/<game>/<executor>/<task>/``.
         """
         parameters = load_parameters()
-        task_str = re.sub(r"[^\w]", "_", self.task.lower()).strip("_")
+        task_str = depathify(self.task.lower())
         # An empty slug would collapse the path onto the executor directory, and the
         # rmtree below would then wipe every *other* task's images for this executor.
         # Executor.__init__ rejects blank tasks, but a task of pure punctuation ("???")
-        # slugifies to "" while being non-blank, so the guard is needed here too.
+        # depathifies to "" while being non-blank, so the guard is needed here too.
         if not task_str:
             log_error(
                 f"Cannot derive an image directory from task {self.task!r}: it contains no "
@@ -490,7 +372,8 @@ class ExecutorReport:
                 plt.clf()
 
     def show(self) -> str:
-        """Print the full trajectory and save the per-call frames to disk.
+        """
+        Print the full trajectory and save the per-call frames to disk.
 
         For verbose/debug output. Use ``str(report)`` when only the rendered
         text is needed (e.g. persisting to the CSV ``report`` column) — that
@@ -498,7 +381,7 @@ class ExecutorReport:
         """
         text = str(self)
         self._save_images()
-        print(text)
+        log_info(text)
         return text
 
 
@@ -514,51 +397,35 @@ def _step_summary(step: StepRecord) -> str:
     return f"TOOL  {step.executor_action_class.__name__}({step.kwargs})  result={step.result}"
 
 
-#: Tags of the calls that ask the model for an action, and so are the ones expected to
-#: own steps. This is a **label, not a mechanism** — step ownership is recorded directly
-#: in :attr:`ExecutorVLMCallRecord.steps` and nothing derives it from the tag. Consumers that
-#: reconstruct an action sequence from a call log alone filter on this to skip calls that
-#: were never asked for an action.
+#: Tags of the calls that ask the model for an action.
 ACTION_TAGS = {"action", "score"}
 
 #: Tag of the post-step completion check (``Executor._check_task_complete``).
-#: Deliberately **not** in :data:`ACTION_TAGS`: the check reasons about the run without
-#: acting on it, so it owns no steps and must not be read as part of an action sequence.
-#: Consumers should filter on this rather than on whether the response happens to parse
-#: as an action.
 DONE_CHECK_TAG = "done_check"
 
 
 def parse_completion(response: str) -> Optional[bool]:
-    """The verdict in a ``done_check`` response, or ``None`` if it had no ``Complete:`` line.
+    """
+    Parse the completion status from a ``done_check`` response.
 
-    The ``Complete: <yes|no>`` format is a **cross-module contract**, not an executor
-    detail, which is why the sole parse of it lives here rather than on
-    :class:`~execution.executors.Executor`. Three subsystems read the same verdict off the
-    same call log: the executor decides whether to stop, :meth:`ExecutorReport.__str__`
-    renders it, and the plan supervisor quotes it back to the reviser. Only the first of
-    those has an executor instance, so a per-executor parse could never have been honoured
-    by the other two — the format cannot vary by subclass even in principle.
+    :param response: The model response.
+    :type response: str
 
-    ``None`` is distinct from ``False`` on purpose: "the judge said no" and "the judge did
-    not answer" are the same decision (see :func:`says_complete`) but not the same event,
-    and only the caller that made the call is in a position to report the difference.
-
-    This function exists to name the *contract* — that ``Complete:`` is the key three
-    subsystems agree on. The *format* — what counts as yes — belongs to
-    :func:`~utils.parse_yes_no` and is shared with every other verdict in the codebase.
+    :return: ``True`` if the response says yes, ``False`` if it says no, or ``None`` if it is unparseable.
+    :rtype: Optional[bool]
     """
     return parse_yes_no(response, "Complete")
 
 
 def says_complete(response: str) -> bool:
-    """Whether a ``done_check`` response answered yes.
+    """
+    Whether a ``done_check`` response answered yes.
 
-    **Anything that does not explicitly say yes is a no**, including an unparseable
-    response. A malformed judgement must never end a run: stopping early destroys the rest
-    of the episode, while carrying on costs at most the remaining step budget. The
-    asymmetry is hard-coded here rather than left to the prompt precisely because it is the
-    behaviour every reader must agree on.
+    :param response: The model response.
+    :type response: str
+
+    :return: ``True`` if the response says yes, ``False`` if it says no or 'None'.
+    :rtype: bool
     """
     return parse_completion(response) is True
 
@@ -568,10 +435,6 @@ class SimpleReport(ExecutorReport):
     """
     Report produced by :class:`~execution.executors.executor.PolicyExecutor`, and so by
     every arm.
-
-    Adds nothing to the stored state — only convenience read-only accessors over
-    :attr:`~ExecutorReport.steps`. (:attr:`~ExecutorReport.invalid_steps` used to be a
-    stored field here; it is now a derived property on the base class.)
     """
 
     @property
@@ -598,16 +461,14 @@ class SimpleReport(ExecutorReport):
 # ---------------------------------------------------------------------------
 # Supervisor side
 # ---------------------------------------------------------------------------
-# The executor records above answer "what did the agent do". These answer "what did the
-# thing driving the agent do", in the same shape and for the same reason: before this, a
-# supervisor's own VLM calls went straight to the VLM and touched no report, so a run left
-# no trace of *why* the supervisor did what it did.
 
 
 @dataclass
 class SupervisorToolCallRecord:
-    """Record of a passive tool call made by a *supervisor*.
+    """
+    Record of a passive tool call made by a *supervisor*.
 
+    TODO: Add a supervisor tool and record its output here.
     The supervisor-side counterpart of :class:`ExecutorToolCallRecord`. **Nothing produces
     one yet** — supervisors have no tools — so :attr:`SupervisorVLMCallRecord.steps` is
     always empty in practice. It exists so the shape matches the executor side and a
@@ -634,11 +495,6 @@ SupervisorStepRecord = Union[SupervisorToolCallRecord]
 class SupervisorVLMCallRecord:
     """Record of a single VLM call made by a supervisor, and whatever it did as a result.
 
-    Mirrors :class:`ExecutorVLMCallRecord`, with two differences: :attr:`steps` is
-    restricted to supervisor tool calls, and the label is :attr:`stage` rather than a tag,
-    because what varies on the supervisor side is which phase of its own reasoning the call
-    served — ``plan``, ``filter``, ``distil``, ``judge``, ``hint``, ``revise``.
-
     :param stage: Which phase of the supervisor's reasoning this call served.
     :param images: Images given to the VLM for this call.
     :param prompt: The prompt sent.
@@ -646,14 +502,13 @@ class SupervisorVLMCallRecord:
     :param steps: What this call produced. Always empty today — see
         :class:`SupervisorToolCallRecord`.
     :param input_tokens: Prompt tokens this call consumed, or ``None`` if the backend did
-        not report it. Same semantics as :class:`ExecutorVLMCallRecord`, including how a
-        batched call distributes its counts across the per-prompt records.
+        not report it. 
     :param output_tokens: Generated tokens this call produced, or ``None``.
 
     .. note:: An unparseable reply leaves no marker: it is recorded in :attr:`response`
         like any other, and the caller's failure to parse it is not represented. The
         executor side has :class:`InvalidStepRecord` for exactly this, and a
-        ``SupervisorInvalidStepRecord`` is the obvious future addition — a truncated judge
+        TODO: ``SupervisorInvalidStepRecord`` is the obvious future addition — a truncated judge
         verdict is currently indistinguishable from a judgement that genuinely said no.
     """
 
@@ -668,22 +523,8 @@ class SupervisorVLMCallRecord:
 
 @dataclass
 class SupervisorReport:
-    """Complete record of one supervisor run.
-
-    The supervisor analogue of :class:`ExecutorReport`, and the artifact the benchmark
-    saves. Where an executor run is one list of VLM calls, a supervisor run is one list of
-    **events** — :attr:`event_log` — because a supervisor alternates between thinking and
-    handing control to an executor, and the order of those two is the thing worth keeping.
-
-    Each entry is either a :class:`SupervisorVLMCallRecord` (the supervisor thought) or an
-    :class:`ExecutorReport` (the supervisor ran an executor, and here is everything that
-    executor did). Nested :class:`SupervisorReport` entries are deliberately not allowed:
-    no supervisor currently drives another one, and a layer that does — a strategist over
-    several supervisors — would own its own list of these rather than nest.
-
-    Each :class:`ExecutorReport` is self-identifying, so no per-entry labelling is needed:
-    ``task`` says what that leg was asked to do (the plan arm passes each plan step as the
-    executor's task) and ``init_kwargs`` carries the hint it ran under.
+    """
+    Complete record of one supervisor run.
 
     :param task: The task the supervisor was given.
     :param supervisor_name: ``__class__.__name__`` of the supervisor.
@@ -723,15 +564,8 @@ class SupervisorReport:
 
     @property
     def supervisor_input_tokens(self) -> Optional[int]:
-        """Prompt tokens the supervisor spent on its **own** reasoning.
-
-        Supervisor and executor cost are kept apart rather than merged into one total,
-        because the question the arms exist to answer is what the supervision itself
-        costs: an arm that plans well but spends more on planning than it saves on
-        execution has not won, and a single number cannot show that. Consumers wanting
-        the combined figure use :attr:`total_input_tokens`.
-
-        ``None`` propagates via :func:`~utils.lm_inference.sum_optional`.
+        """
+        Prompt tokens the supervisor spent on its **own** reasoning.
         """
         return sum_optional([call.input_tokens for call in self.supervisor_calls])
 
@@ -764,8 +598,6 @@ class SupervisorReport:
     def __str__(self) -> str:
         """The interleaved event log as text, for the benchmark CSV's ``report`` column.
 
-        Executor runs delegate to :meth:`ExecutorReport.__str__`, so an executor leg reads
-        exactly as it does on its own; supervisor calls are rendered around them.
         """
         if not self.event_log:
             return "  (no supervisor events recorded)"

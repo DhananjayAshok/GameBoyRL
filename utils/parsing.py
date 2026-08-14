@@ -23,13 +23,24 @@ def depathify(string: str) -> str:
     """
     Collapse a free-text string into one path segment.
 
+    Every non-word character becomes ``_``, not just ``/``, ``\\`` and space. The three
+    separators are what splice a segment into extra directory levels, but they are not the
+    only input that stops the result being a *segment*: ``"."`` and ``".."`` survive a
+    separators-only replace unchanged and then resolve to the parent path, which is fatal
+    for any caller that deletes what it derives.
+
+    Case is left alone — that is the caller's policy, not this function's.
+
+    Returns ``""`` for a string with no word characters at all (``"???"``). Callers joining
+    the result onto a base path must handle that: an empty segment resolves to the base
+    directory itself.
+
     :param string: The string to depathify.
     :type string: str
     :return: The depathified string.
     :rtype: str
-
     """
-    return string.replace("/", "_").replace("\\", "_").replace(" ", "_")
+    return re.sub(r"[^\w]", "_", string).strip("_")
 
 
 def _is_absent(value: str) -> bool:
