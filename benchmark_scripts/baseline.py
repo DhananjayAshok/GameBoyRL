@@ -1,10 +1,6 @@
 """
 The no-knowledge arm: run the executor on each benchmark task with nothing but the task
 string.
-
-This is the control every other arm is measured against, which is why it takes no options
-of its own beyond the shared ones — anything that would make it cleverer would stop it
-being a baseline.
 """
 
 from __future__ import annotations

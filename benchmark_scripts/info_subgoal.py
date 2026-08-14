@@ -1,34 +1,6 @@
 """
 The plan arm: plan from the info document, then supervise the executor through the plan
 step by step.
-
-The episode runs each plan step under its own executor call, judges from the frames whether
-the step landed, hints when it did not, and rewrites the plan when hinting keeps failing.
-
-``--mode`` decides only where the planner's knowledge comes from. Everything after that —
-the relevance pass, the insight filter, the planner, the step loop — is identical, which is
-what makes the two modes comparable:
-
-``retrieval``
-    Documents distilled from real trajectories by ``vlm_scripts/build_info.py``, named with
-    ``--info_docs``.
-
-``parametric``
-    One document written by the model from its own knowledge of the game, given nothing but
-    the game's name. Generated on first use and cached at ``Paths.parametric_doc()``.
-
-The pair is the control the arm was missing. "Planning from a distilled document beats the
-baseline" does not distinguish *distillation worked* from *any game-specific text worked*;
-retrieval-vs-parametric does, and where they score alike the build pipeline has not earned
-its cost.
-
-Budgets: ``--max_leg_steps`` caps a single executor call and is internal to the supervisor;
-``--max_steps`` caps emulator steps across the whole episode, retries included, so this arm
-and the baseline play with the same allowance and their CSVs stay comparable.
-
-This costs materially more VLM calls per episode than the baseline — a relevance pass, a
-plan, then per attempt a windowed judgement plus a hint, plus a revision every few failures.
-Budget accordingly before sweeping a whole game.
 """
 
 from __future__ import annotations
@@ -50,12 +22,6 @@ from benchmark_scripts import common
 
 def _plan_summary(result: dict, report) -> dict:
     """Flat counts for the CSV, from the supervisor's returned extras and its report.
-
-    Reads the ``evaluate()`` return value rather than the supervisor object: the return
-    value is the contract, so a count here cannot go stale against an attribute that was
-    renamed. ``_join_leg_reports`` used to live beside this to stitch the per-attempt
-    trajectories into one CSV cell; ``SupervisorReport.__str__`` renders the interleaved
-    event log directly, so the stitching is gone.
     """
     step_log = result["step_log"]
     attempts = [a for record in step_log for a in record["attempts"]]

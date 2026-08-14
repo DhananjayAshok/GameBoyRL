@@ -1,13 +1,6 @@
 """
 The revision arm: run the task in short legs, critiquing and re-hinting between them.
 
-No plan and no document — the executor is given the benchmark task every time, and all the
-supervisor contributes is a hint rewritten after each failed leg from what the leg actually
-did. It is the arm that isolates *revision* from *planning*: whatever it gains over the
-baseline is what critique-and-retry is worth on its own.
-
-Success is still the environment's verdict. The supervisor never judges the task complete —
-with one target there is nothing to judge, only something to advise on.
 """
 
 from __future__ import annotations

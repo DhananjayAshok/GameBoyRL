@@ -1,16 +1,5 @@
 """
 Machinery shared by every benchmark arm.
-
-The four arms — baseline, revision, subgoal and info_subgoal — are the same experiment run
-four ways, and the whole point of the comparison is that they differ *only* in what drives
-the episode. This module holds everything that must therefore be identical between them:
-which tasks get run, where results land, how a run resumes, the reset loop, and how each
-episode's VLM calls are archived. An arm supplies one callback and its own extra columns;
-it does not get to have its own opinion about task selection or CSV naming.
-
-Before this existed the arms lived as forked copies of one file and had already drifted:
-the retired hint arm had no ``--n_tasks`` at all, so it could not be pointed at the same
-task prefix as the others, and the bounds checks they did share ran in a different order.
 """
 
 from __future__ import annotations

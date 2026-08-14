@@ -1,14 +1,5 @@
 """
 The subgoal arm: decompose the task into a plan, then drive the plan step by step.
-
-The same retry engine as ``revision``, but the targets are plan steps rather than the task.
-Each intermediate step is judged from the frames, hinted when it fails, and the plan is
-rewritten when hinting keeps failing. The final step reverts to the real task, so success
-stays the environment's call.
-
-No document. The planner sees the task and the opening screen and nothing else, which is
-what makes this the control for ``info_subgoal``: whatever that arm gains over this one is
-what the retrieved knowledge bought, rather than what planning bought.
 """
 
 from __future__ import annotations
