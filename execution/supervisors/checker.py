@@ -254,6 +254,26 @@ def _frame_to_call_cutoff(
     return len(vlm_call_log)
 
 
+def _action_name(step) -> str:
+    """One env step's action name, falling back to the class name if it cannot be derived.
+
+    ``get_action_name`` is not one signature: some actions declare it with no parameters,
+    some with ``**kwargs``, some with named ones (``get_action_name(x_steps, y_steps)``).
+    So ``get_action_name(**step.kwargs)`` raises ``TypeError`` whenever a record's stored
+    kwargs do not match the signature of the action that produced it.
+
+    That has to be caught **here**, not left to the caller: this runs inside
+    ``RevisingSupervisor._segment_summaries``, so an exception does not degrade one line of
+    one prompt — it propagates out of ``_evaluate``, loses the whole episode, and then
+    ``run_sweep``'s ``log_error`` ends the entire sweep. ``_format.action_trace`` already
+    guards the identical call for exactly this reason; this was the one path that did not.
+    """
+    try:
+        return step.action_class.get_action_name(**step.kwargs)
+    except Exception:
+        return step.action_class.__name__
+
+
 def window_trajectory(
     env_steps: list,
     slice_prompt: str,
@@ -296,10 +316,8 @@ def window_trajectory(
 
     total = len(env_steps)
     wants_actions = "[ACTION_SEQUENCE]" in slice_prompt
-    action_lines_all = [
-        f"  {i + 1}. {step.action_class.get_action_name(**step.kwargs)}"
-        for i, step in enumerate(env_steps)
-    ] if wants_actions else []
+    action_lines_all = [f"  {i + 1}. {_action_name(step)}"
+                        for i, step in enumerate(env_steps)] if wants_actions else []
 
     segment_ranges = []
     segment_prompts = []

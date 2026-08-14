@@ -89,8 +89,22 @@ class RevisingSupervisor(Supervisor):
 
     @property
     def max_final_attempts(self) -> int:
-        """Failed attempts at the *last* target before the episode gives up."""
-        return self.max_attempts_per_target * self.final_attempt_multiplier
+        """Failed attempts at the *last* target before the episode gives up.
+
+        **A backstop, not a second budget.** ``final_attempt_multiplier *
+        max_attempts_per_target`` is the floor, but the cap is never allowed below the
+        episode's own step budget, because :meth:`_budget_spent` charges at least 1 per leg
+        and so the budget can never permit more legs than that.
+
+        Without the ``max`` this bound *binds first on a healthy run* and quietly truncates
+        the episode: at the defaults (200 steps, 5-step legs, 3 attempts per target) the
+        floor is 9, so the arm would stop after 9 legs having spent 45 of its 200 steps,
+        while the baseline arm spends all 200. That is the same arms-are-not-comparable
+        problem :meth:`_budget_spent` exists to fix, in the opposite direction — and much
+        harder to notice, because every episode still looks like it ran normally.
+        """
+        floor = self.max_attempts_per_target * self.final_attempt_multiplier
+        return max(floor, self._max_steps)
 
     def _run_config(self) -> dict:
         return {**super()._run_config(),
@@ -360,7 +374,14 @@ class RevisingSupervisor(Supervisor):
         # line carries a full uncapped action trace. The replanner's prompt renders these as
         # "attempt 1…n" and is written for a handful, not for the whole back half of an
         # episode.
-        del history[:-self.max_history_attempts]
+        #
+        # Not `del history[:-n]`: at n == 0 that is `del history[:0]`, which deletes
+        # *nothing* rather than everything, so the one setting that reads as "show no
+        # history" would silently restore the unbounded growth this line exists to stop.
+        if self.max_history_attempts > 0:
+            del history[:-self.max_history_attempts]
+        else:
+            history.clear()
 
         replacement = self._diagnose_failure(index, targets, history, verdict, regression)
         if replacement:
