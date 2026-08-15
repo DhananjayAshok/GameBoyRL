@@ -517,6 +517,26 @@ PROPOSE_AND_ATTEMPT_DEFAULTS["attempt_only"]=false
 
 PROPOSE_AND_ATTEMPT_ARG_KEYS=("${PROPOSE_AND_ATTEMPT_ESSENTIALS[@]}" "${!PROPOSE_AND_ATTEMPT_DEFAULTS[@]}")
 
+# collect_and_info_all: curiosity_and_zeroshot_all for every train game of --game, then
+# create_all_info_docs for --game itself. One run_name is shared by both stages by design —
+# the curiosity dir the collection leg writes is the one the info leg reads.
+# init_states is deliberately not required (curiosity_and_zeroshot_all does not take it
+# either): the per-game train states come from all_train_states.sh downstream.
+COLLECT_AND_INFO_ALL_ESSENTIALS=()
+populate_array CREATE_ALL_INFO_DOCS_ESSENTIALS COLLECT_AND_INFO_ALL_ESSENTIALS
+
+declare -A COLLECT_AND_INFO_ALL_DEFAULTS
+populate_dict PROPOSE_AND_ATTEMPT_DEFAULTS COLLECT_AND_INFO_ALL_DEFAULTS
+populate_dict CREATE_ALL_INFO_DOCS_DEFAULTS COLLECT_AND_INFO_ALL_DEFAULTS
+COLLECT_AND_INFO_ALL_DEFAULTS["run_name"]="my_run"
+# The two stages want different token budgets from the same key name, so the info leg's is
+# carried separately and swapped in around its call: 1000 truncates a stage-A info document,
+# 3000 is wasteful for proposal/attempt.
+COLLECT_AND_INFO_ALL_DEFAULTS["max_new_tokens"]="${PROPOSE_AND_ATTEMPT_DEFAULTS["max_new_tokens"]}"
+COLLECT_AND_INFO_ALL_DEFAULTS["info_max_new_tokens"]="${CREATE_ALL_INFO_DOCS_DEFAULTS["max_new_tokens"]}"
+
+COLLECT_AND_INFO_ALL_ARG_KEYS=("${COLLECT_AND_INFO_ALL_ESSENTIALS[@]}" "${!COLLECT_AND_INFO_ALL_DEFAULTS[@]}")
+
 # debug.py: read-only diagnostics over saved artifacts (scripts/debug/*.sh).
 # These map to debug.py's *group* options, which every subcommand shares. Per-subcommand
 # options (n_samples, n_frames, ...) stay local to their own script.
