@@ -72,7 +72,7 @@ def select_tasks(tasks: pd.DataFrame, n_tasks: Optional[int]) -> pd.DataFrame:
 
 
 def results_path(parameters: dict, game: str, *, supervisor: str, executor: str,
-                 model: str, n_tasks: Optional[int]) -> str:
+                 controller_variant: str, model: str, n_tasks: Optional[int]) -> str:
     """Where this run's CSV goes, creating the directory.
 
     A subset run gets its own file: resuming a full sweep from a 5-task CSV would read the
@@ -85,8 +85,8 @@ def results_path(parameters: dict, game: str, *, supervisor: str, executor: str,
     instead of being pre-baked into a ``stem`` string so only one place knows the order.
     """
     return paths.benchmark_csv(parameters, game=game, supervisor=supervisor,
-                               executor=executor, model=model, n_tasks=n_tasks,
-                               create=True)
+                               executor=executor, controller_variant=controller_variant,
+                               model=model, n_tasks=n_tasks, create=True)
 
 
 def load_checkpoint(save_path: str, regenerate: bool, columns: list,

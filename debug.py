@@ -33,8 +33,10 @@ from debug_scripts import (
 @click.option("--game", required=True, help="Game name (e.g. deja_vu_1)")
 @click.option("--run_name", default="my_run", show_default=True,
               help="Run name used by the RL/curiosity stages and the fine-tuned model name.")
-@click.option("--executor", default="history", show_default=True,
+@click.option("--executor", default="single_actions", show_default=True,
               help="Executor short name; selects the attempts dirs and benchmark CSVs.")
+@click.option("--controller_variant", default="low_level", show_default=True,
+              help="Controller variant; part of the attempts dir and benchmark CSV names.")
 @click.option("--mode", default="both", show_default=True,
               type=click.Choice(["curiosity_only", "zeroshot_only", "both"]),
               help="Which full.sh --mode produced the fine-tuned model; part of its served name.")
@@ -43,12 +45,13 @@ from debug_scripts import (
 @click.option("--overwrite", is_flag=True, default=False,
               help="Re-render images that already exist instead of reusing them.")
 @click.pass_context
-def main(ctx, game, run_name, executor, output_dir, overwrite, mode):
+def main(ctx, game, run_name, executor, controller_variant, output_dir, overwrite, mode):
     parameters = load_parameters()
     ctx.obj = dict(
         game=game,
         run_name=run_name,
         executor=executor,
+        controller_variant=controller_variant,
         output_dir=output_dir,
         overwrite=overwrite,
         mode=mode,

@@ -70,6 +70,7 @@ done
 game="${ARGS["game"]}"
 run_name="${ARGS["run_name"]}"
 executor="${ARGS["executor"]}"
+controller_variant="${ARGS["controller_variant"]}"
 mode="${ARGS["mode"]}"
 model_save_name=$(model_save_name "${ARGS["model_name"]}")
 
@@ -84,7 +85,8 @@ echo "Mode '$mode' -> sources: $sources"
 # that dies on the second source after paying for the first is the expensive failure here.
 for source in $sources; do
     stem=$(path_of info_source_stem --game "$game" --model_name "${ARGS["model_name"]}" \
-                   --run_name "$run_name" --executor "$executor" --source "$source")
+                   --run_name "$run_name" --executor "$executor" \
+                   --controller_variant "$controller_variant" --source "$source")
     for suffix in json pkl; do
         if [[ ! -f "$stem.$suffix" ]]; then
             echo "Error: $source input missing at $stem.$suffix"
@@ -100,9 +102,11 @@ done
 
 for source in $sources; do
     stem=$(path_of info_source_stem --game "$game" --model_name "${ARGS["model_name"]}" \
-                   --run_name "$run_name" --executor "$executor" --source "$source")
+                   --run_name "$run_name" --executor "$executor" \
+                   --controller_variant "$controller_variant" --source "$source")
     info_dir=$(path_of source_info_dir --game "$game" --model_name "${ARGS["model_name"]}" \
-                       --run_name "$run_name" --executor "${ARGS["executor"]}" --source "$source")
+                       --run_name "$run_name" --executor "${ARGS["executor"]}" \
+                       --controller_variant "$controller_variant" --source "$source")
 
     echo ""
     echo "=== Building info document: $source ==="

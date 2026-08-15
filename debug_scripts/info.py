@@ -182,7 +182,8 @@ def debug_info(obj, model_name, source, max_entries):
     """Info-document build diagnostics: funnel, coverage, merge curve, drift, match audit."""
     paths = Paths(
         parameters=obj["parameters"], game=obj["game"], run_name=obj["run_name"],
-        executor=obj["executor"], model_name=model_name, output_dir=obj["output_dir"],
+        executor=obj["executor"], controller_variant=obj["controller_variant"],
+        model_name=model_name, output_dir=obj["output_dir"],
         mode=obj["mode"],
     )
     report_dir = paths.debug_dir("info")

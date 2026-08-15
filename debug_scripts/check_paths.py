@@ -26,6 +26,7 @@ def check_paths(obj, model_name):
         game=obj["game"],
         run_name=obj["run_name"],
         executor=obj["executor"],
+        controller_variant=obj["controller_variant"],
         model_name=model_name,
         output_dir=obj["output_dir"], mode=obj["mode"],
     )

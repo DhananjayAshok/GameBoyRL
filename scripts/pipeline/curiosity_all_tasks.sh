@@ -102,4 +102,4 @@ model_save_name=$(model_save_name "${ARGS["model_name"]}")
 # consumes this stem.
 echo "curiosity trajectory stem: $(path_of info_source_stem --game "$game" \
         --model_name "${ARGS["model_name"]}" --run_name "${ARGS["run_name"]}" \
-        --executor single_actions --source curiosity)"
+        --executor single_actions --controller_variant low_level --source curiosity)"

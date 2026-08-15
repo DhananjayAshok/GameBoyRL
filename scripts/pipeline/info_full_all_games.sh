@@ -75,6 +75,7 @@ done
 
 run_name="${ARGS["run_name"]}"
 executor="${ARGS["executor"]}"
+controller_variant="${ARGS["controller_variant"]}"
 model_save_name=$(model_save_name "${ARGS["model_name"]}")
 
 # --- Which games to sweep -------------------------------------------------------------
@@ -112,7 +113,8 @@ for game in "${candidate_games[@]}"; do
     fi
 
     sources=$(path_of_allow_empty info_available_sources --game "$game" \
-                  --model_name "${ARGS["model_name"]}" --run_name "$run_name" --executor "$executor")
+                  --model_name "${ARGS["model_name"]}" --run_name "$run_name" \
+                  --executor "$executor" --controller_variant "$controller_variant")
     if [[ -z "$sources" ]]; then
         skipped+=("$game (no zeroshot or curiosity inputs)"); continue
     fi
@@ -126,7 +128,8 @@ echo "########## Sweep plan ##########"
 printf "%-42s %-16s %s\n" "GAME" "MODE" "SOURCES"
 for i in "${!games[@]}"; do
     sources=$(path_of_allow_empty info_available_sources --game "${games[$i]}" \
-                  --model_name "${ARGS["model_name"]}" --run_name "$run_name" --executor "$executor")
+                  --model_name "${ARGS["model_name"]}" --run_name "$run_name" \
+                  --executor "$executor" --controller_variant "$controller_variant")
     printf "%-42s %-16s %s\n" "${games[$i]}" "${modes[$i]}" "$sources"
 done
 if [[ ${#skipped[@]} -gt 0 ]]; then
@@ -149,14 +152,17 @@ if [[ "${ARGS["dry_run"]}" == "true" ]]; then
         echo "  ${games[$i]}  (--mode ${modes[$i]})"
         for source in $(path_of_allow_empty info_available_sources --game "${games[$i]}" \
                             --model_name "${ARGS["model_name"]}" --run_name "$run_name" \
-                            --executor "$executor"); do
+                            --executor "$executor" \
+                            --controller_variant "$controller_variant"); do
             stem=$(path_of info_source_stem --game "${games[$i]}" \
                        --model_name "${ARGS["model_name"]}" --run_name "$run_name" \
-                       --executor "$executor" --source "$source")
+                       --executor "$executor" --controller_variant "$controller_variant" \
+                       --source "$source")
             echo "    $source stem     : $stem"
             echo "    $source info_dir : $(path_of source_info_dir --game "${games[$i]}" \
                        --model_name "${ARGS["model_name"]}" --run_name "$run_name" \
-                       --executor "$executor" --source "$source")"
+                       --executor "$executor" --controller_variant "$controller_variant" \
+                       --source "$source")"
         done
     done
     exit 0

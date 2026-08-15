@@ -16,6 +16,7 @@ declare -A ARGS
 ARGS["suffix"]="_first5"
 ARGS["stem"]="gemma-4-31b-it"
 ARGS["executor"]="single_actions"
+ARGS["controller_variant"]="low_level"
 
 REQUIRED_ARGS=("game")
 
@@ -66,8 +67,10 @@ GAME="${ARGS["game"]}"
 SUFFIX="${ARGS["suffix"]}"
 STEM="${ARGS["stem"]}"
 EXECUTOR="${ARGS["executor"]}"
+CONTROLLER_VARIANT="${ARGS["controller_variant"]}"
 
-GAME=$GAME SUFFIX=$SUFFIX STEM=$STEM EXECUTOR=$EXECUTOR python - <<'PY'
+GAME=$GAME SUFFIX=$SUFFIX STEM=$STEM EXECUTOR=$EXECUTOR \
+    CONTROLLER_VARIANT=$CONTROLLER_VARIANT python - <<'PY'
 """Deep diagnostics for the info_subgoal arm: where the budget goes and why steps do not clear."""
 import json
 import os
@@ -82,6 +85,7 @@ SUFFIX = os.environ.get("SUFFIX", "_first5")
 STEM = os.environ.get("STEM", "gemma-4-31b-it")
 # The arm name is part of both CSV paths now, so it cannot be hardcoded here.
 EXECUTOR = os.environ.get("EXECUTOR", "single_actions")
+CONTROLLER_VARIANT = os.environ.get("CONTROLLER_VARIANT", "low_level")
 # Recovered from the suffix the caller passes ("" or "_firstN"), because that is the only
 # form this script is given. paths.benchmark_csv re-applies it, so the two cannot disagree.
 N_TASKS = int(SUFFIX[len("_first"):]) if SUFFIX.startswith("_first") else None
@@ -90,9 +94,12 @@ OUT_DIR = paths.debug_dir(game=GAME, stage="info_subgoal")
 
 ARMS = {
     "baseline": paths.benchmark_csv(game=GAME, supervisor="dummy", executor=EXECUTOR,
+                                    controller_variant=CONTROLLER_VARIANT,
                                     model=STEM, n_tasks=N_TASKS),
     "info subgoal": paths.benchmark_csv(game=GAME, supervisor="info_subgoal_retrieval",
-                                        executor=EXECUTOR, model=STEM, n_tasks=N_TASKS),
+                                        executor=EXECUTOR,
+                                        controller_variant=CONTROLLER_VARIANT,
+                                        model=STEM, n_tasks=N_TASKS),
 }
 
 lines = []

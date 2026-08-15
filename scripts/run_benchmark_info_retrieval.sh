@@ -59,6 +59,7 @@ done
 game="${ARGS["game"]}"
 docs_model="${ARGS["docs_model"]}"
 docs_executor="${ARGS["docs_executor"]}"
+docs_controller_variant="${ARGS["docs_controller_variant"]}"
 docs_run_name="${ARGS["docs_run_name"]}"
 
 wanted_sources=$(info_mode_sources "${ARGS["docs_mode"]}")
@@ -83,14 +84,16 @@ info_docs=""
 for docs_game in "${docs_games[@]}"; do
     available=$(path_of_allow_empty info_available_sources --game "$docs_game" \
                     --model_name "$docs_model" --run_name "$docs_run_name" \
-                    --executor "$docs_executor")
+                    --executor "$docs_executor" \
+                    --controller_variant "$docs_controller_variant")
     for source in $wanted_sources; do
         if [[ ! " $available " =~ " $source " ]]; then
             echo "  $docs_game/$source -> no build_info input on disk, skipping"
             continue
         fi
         doc=$(path_of info_doc --game "$docs_game" --model_name "$docs_model" \
-                  --run_name "$docs_run_name" --executor "$docs_executor" --source "$source")
+                  --run_name "$docs_run_name" --executor "$docs_executor" \
+                  --controller_variant "$docs_controller_variant" --source "$source")
         if [[ -f "$doc" ]]; then
             info_docs+="${info_docs:+,}$doc"
             echo "  $docs_game/$source -> $doc"

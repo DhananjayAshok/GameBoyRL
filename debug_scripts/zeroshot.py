@@ -71,14 +71,14 @@ def _render_first_frame(paths: Paths, init_state: str, images_dir: str,
 
 @click.command(name="zeroshot")
 @click.option("--model_name", required=True, help="Full VLM name (e.g. google/gemma-4-31b-it)")
-@click.option("--controller_variant", default="low_level", show_default=True,
-              help="Controller variant passed to get_environment when loading first frames.")
 @click.pass_obj
-def debug_zeroshot(obj, model_name, controller_variant):
+def debug_zeroshot(obj, model_name):
     """Proposed tasks per init_state, beside that state's real benchmark tasks."""
+    controller_variant = obj["controller_variant"]
     paths = Paths(
         parameters=obj["parameters"], game=obj["game"], run_name=obj["run_name"],
-        executor=obj["executor"], model_name=model_name, output_dir=obj["output_dir"], mode=obj["mode"],
+        executor=obj["executor"], controller_variant=controller_variant,
+        model_name=model_name, output_dir=obj["output_dir"], mode=obj["mode"],
     )
     overwrite = obj["overwrite"]
     report_dir = paths.debug_dir("zeroshot")

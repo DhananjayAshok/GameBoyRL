@@ -281,7 +281,8 @@ def debug_curiosity(obj, init_state, n_frames, max_groups, max_traj_per_group, m
     """Summarise curiosity exploration: group counts, inequality, rewards, frame strips."""
     paths = Paths(
         parameters=obj["parameters"], game=obj["game"], run_name=obj["run_name"],
-        executor=obj["executor"], output_dir=obj["output_dir"], mode=obj["mode"],
+        executor=obj["executor"], controller_variant=obj["controller_variant"],
+        output_dir=obj["output_dir"], mode=obj["mode"],
     )
     overwrite = obj["overwrite"]
     report_dir = paths.debug_dir("curiosity")

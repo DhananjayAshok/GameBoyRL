@@ -39,6 +39,10 @@ def _executor(f):
     return click.option("--executor", default="single_actions", show_default=True,
                         help="Executor short name.")(f)
 
+def _controller(f):
+    return click.option("--controller_variant", default="low_level", show_default=True,
+                        help="Controller variant, e.g. low_level.")(f)
+
 
 def _source(f):
     return click.option("--source", default="attempt", show_default=True,
@@ -46,8 +50,8 @@ def _source(f):
 
 
 def _identity(f):
-    """game + model + run_name + executor, the full info-document identity."""
-    return _game(_model(_run(_executor(f))))
+    """game + model + run_name + executor + controller_variant, the full info-document identity."""
+    return _game(_model(_run(_executor(_controller(f)))))
 
 
 # --- name helpers ------------------------------------------------------------
@@ -157,33 +161,38 @@ def tasks_file_cmd(obj, game, model_name):
 @_game
 @_model
 @_executor
+@_controller
 @click.pass_obj
-def attempts_dir_cmd(obj, game, model_name, executor):
+def attempts_dir_cmd(obj, game, model_name, executor, controller_variant):
     """Where attempt_tasks.py writes for this identity."""
     click.echo(paths.attempts_dir(obj["parameters"](), game=game, model_name=model_name,
-                                  executor=executor))
+                                  executor=executor, controller_variant=controller_variant))
 
 
 @click.command("all_trajectories_csv")
 @_game
 @_model
 @_executor
+@_controller
 @click.pass_obj
-def all_trajectories_csv_cmd(obj, game, model_name, executor):
+def all_trajectories_csv_cmd(obj, game, model_name, executor, controller_variant):
     """<attempts_dir>/all_trajectories.csv"""
     click.echo(paths.all_trajectories_csv(obj["parameters"](), game=game,
-                                          model_name=model_name, executor=executor))
+                                          model_name=model_name, executor=executor,
+                                          controller_variant=controller_variant))
 
 
 @click.command("success_trajectories_stem")
 @_game
 @_model
 @_executor
+@_controller
 @click.pass_obj
-def success_trajectories_stem_cmd(obj, game, model_name, executor):
+def success_trajectories_stem_cmd(obj, game, model_name, executor, controller_variant):
     """The zeroshot vertical's build_info --trajectory_path stem."""
     click.echo(paths.success_trajectories_stem(obj["parameters"](), game=game,
-                                               model_name=model_name, executor=executor))
+                                               model_name=model_name, executor=executor,
+                                               controller_variant=controller_variant))
 
 
 # --- info documents ----------------------------------------------------------
@@ -192,53 +201,53 @@ def success_trajectories_stem_cmd(obj, game, model_name, executor):
 @_identity
 @_source
 @click.pass_obj
-def info_source_stem_cmd(obj, game, model_name, run_name, executor, source):
+def info_source_stem_cmd(obj, game, model_name, run_name, executor, controller_variant, source):
     """The build_info --trajectory_path stem for one source. Replaces the Bash function."""
     click.echo(paths.info_source_stem(obj["parameters"](), game=game, model_name=model_name,
-                                      run_name=run_name, executor=executor, source=source))
+                                      run_name=run_name, executor=executor, controller_variant=controller_variant, source=source))
 
 
 @click.command("source_info_dir")
 @_identity
 @_source
 @click.pass_obj
-def source_info_dir_cmd(obj, game, model_name, run_name, executor, source):
+def source_info_dir_cmd(obj, game, model_name, run_name, executor, controller_variant, source):
     """Where build_info writes for one source. Replaces Bash's info_dir_for_stem."""
     click.echo(paths.source_info_dir(obj["parameters"](), game=game, model_name=model_name,
-                                     run_name=run_name, executor=executor, source=source))
+                                     run_name=run_name, executor=executor, controller_variant=controller_variant, source=source))
 
 
 @click.command("info_doc")
 @_identity
 @_source
 @click.pass_obj
-def info_doc_cmd(obj, game, model_name, run_name, executor, source):
+def info_doc_cmd(obj, game, model_name, run_name, executor, controller_variant, source):
     """<source_info_dir>/info.json"""
     click.echo(paths.info_doc(obj["parameters"](), game=game, model_name=model_name,
-                              run_name=run_name, executor=executor, source=source))
+                              run_name=run_name, executor=executor, controller_variant=controller_variant, source=source))
 
 
 @click.command("insights_jsonl")
 @_identity
 @_source
 @click.pass_obj
-def insights_jsonl_cmd(obj, game, model_name, run_name, executor, source):
+def insights_jsonl_cmd(obj, game, model_name, run_name, executor, controller_variant, source):
     """<source_info_dir>/insights.jsonl"""
     click.echo(paths.insights_jsonl(obj["parameters"](), game=game, model_name=model_name,
-                                    run_name=run_name, executor=executor, source=source))
+                                    run_name=run_name, executor=executor, controller_variant=controller_variant, source=source))
 
 
 @click.command("info_available_sources")
 @_identity
 @click.pass_obj
-def info_available_sources_cmd(obj, game, model_name, run_name, executor):
+def info_available_sources_cmd(obj, game, model_name, run_name, executor, controller_variant):
     """Which verticals have build_info inputs on disk, space-separated. Replaces the Bash function.
 
     Prints an empty line when neither exists, which is what the caller tests for.
     """
     click.echo(" ".join(paths.info_available_sources(
         obj["parameters"](), game=game, model_name=model_name, run_name=run_name,
-        executor=executor)))
+        executor=executor, controller_variant=controller_variant)))
 
 
 @click.command("parametric_doc")
@@ -263,6 +272,7 @@ def benchmark_dir_cmd(obj, game):
 @click.command("benchmark_csv")
 @_game
 @_executor
+@_controller
 @click.option("--supervisor", required=True, type=click.Choice(BENCHMARK_SUPERVISORS),
               help="Supervisor key, as in execution.registry.AVAILABLE_SUPERVISORS. Names "
                    "the CSV and the session dir.")
@@ -271,10 +281,10 @@ def benchmark_dir_cmd(obj, game):
 @click.option("--n_tasks", default=None, type=MAYBE_NONE,
               help="Subset size, if the run used --n_tasks. Adds the _firstN suffix.")
 @click.pass_obj
-def benchmark_csv_cmd(obj, game, executor, supervisor, model, n_tasks):
-    """<results>/benchmark/<game>/<supervisor>_<executor>_<model>[_firstN].csv"""
+def benchmark_csv_cmd(obj, game, executor, controller_variant, supervisor, model, n_tasks):
+    """<results>/benchmark/<game>/<supervisor>_<executor>_<controller_variant>_<model>[_firstN].csv"""
     click.echo(paths.benchmark_csv(obj["parameters"](), game=game, supervisor=supervisor,
-                                   executor=executor,
+                                   executor=executor, controller_variant=controller_variant,
                                    model=model,
                                    n_tasks=int(n_tasks) if n_tasks is not None else None))
 

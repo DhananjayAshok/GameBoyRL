@@ -80,6 +80,7 @@ done
 game="${ARGS["game"]}"
 run_name="${ARGS["run_name"]}"
 executor="${ARGS["executor"]}"
+controller_variant="${ARGS["controller_variant"]}"
 mode="${ARGS["mode"]}"
 knowledge_mode="${ARGS["knowledge_mode"]}"
 model_name="${ARGS["model_name"]}"
@@ -111,7 +112,8 @@ info_docs=""
 if [[ "$knowledge_modes" == *retrieval* ]]; then
     for source in $sources; do
         info_dir=$(path_of source_info_dir --game "$game" --model_name "$model_name" \
-                           --run_name "$run_name" --executor "$executor" --source "$source")
+                           --run_name "$run_name" --executor "$executor" \
+                           --controller_variant "$controller_variant" --source "$source")
         doc="$info_dir/info.json"
 
         if [[ ! -f "$doc" ]]; then

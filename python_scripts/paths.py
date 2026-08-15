@@ -236,41 +236,44 @@ def tasks_file(parameters=None, *, game: str, model_name: str) -> str:
                         TASKS_FILENAME)
 
 
-def attempts_dir_from_stem(tasks_path: str, *, executor: str) -> str:
+def attempts_dir_from_stem(tasks_path: str, *, executor: str, controller_variant: str) -> str:
     """Where ``attempt_tasks.py`` writes, given the ``--tasks_path`` it was handed.
 
     The stage has a path and no identity, so this half of the rule takes the path. See the
     module docstring on the two-shapes-per-tree convention.
     """
-    return os.path.splitext(tasks_path)[0] + f"_{executor}_attempts"
+    return os.path.splitext(tasks_path)[0] + f"_{executor}_{controller_variant}_attempts"
 
 
-def attempts_dir(parameters=None, *, game: str, model_name: str, executor: str) -> str:
+def attempts_dir(parameters=None, *, game: str, model_name: str, executor: str,
+                 controller_variant: str) -> str:
     """The same directory, for callers that have the identity rather than the path."""
     return attempts_dir_from_stem(
-        tasks_file(parameters, game=game, model_name=model_name), executor=executor)
+        tasks_file(parameters, game=game, model_name=model_name), executor=executor,
+        controller_variant=controller_variant)
 
 
-def all_trajectories_csv(parameters=None, *, game: str, model_name: str, executor: str) -> str:
+
+def all_trajectories_csv(parameters=None, *, game: str, model_name: str, executor: str, controller_variant: str) -> str:
     return os.path.join(attempts_dir(parameters, game=game, model_name=model_name,
-                                     executor=executor), ALL_TRAJECTORIES_FILENAME)
+                                     executor=executor, controller_variant=controller_variant), ALL_TRAJECTORIES_FILENAME)
 
 
 def success_trajectories_json(parameters=None, *, game: str, model_name: str,
-                              executor: str) -> str:
-    return f"{success_trajectories_stem(parameters, game=game, model_name=model_name, executor=executor)}.json"
+                              executor: str, controller_variant: str) -> str:
+    return f"{success_trajectories_stem(parameters, game=game, model_name=model_name, executor=executor, controller_variant=controller_variant)}.json"
 
 
 def success_trajectories_pkl(parameters=None, *, game: str, model_name: str,
-                             executor: str) -> str:
-    return f"{success_trajectories_stem(parameters, game=game, model_name=model_name, executor=executor)}.pkl"
+                             executor: str, controller_variant: str) -> str:
+    return f"{success_trajectories_stem(parameters, game=game, model_name=model_name, executor=executor, controller_variant=controller_variant)}.pkl"
 
 
 def success_trajectories_stem(parameters=None, *, game: str, model_name: str,
-                              executor: str) -> str:
+                              executor: str, controller_variant: str) -> str:
     """The zeroshot vertical's ``build_info.py --trajectory_path`` stem."""
     return os.path.join(attempts_dir(parameters, game=game, model_name=model_name,
-                                     executor=executor), SUCCESS_TRAJECTORIES_STEM)
+                                     executor=executor, controller_variant=controller_variant), SUCCESS_TRAJECTORIES_STEM)
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +282,7 @@ def success_trajectories_stem(parameters=None, *, game: str, model_name: str,
 
 
 def info_source_stem(parameters=None, *, game: str, model_name: str, run_name: str,
-                     executor: str, source: str) -> str:
+                     executor: str, controller_variant: str, source: str) -> str:
     """The trajectory stem ``build_info.py`` consumes for one source: ``<stem>.json`` + ``<stem>.pkl``.
 
     Replaces the Bash function of the same name that used to live in ``scripts/core/utils.sh``.
@@ -291,7 +294,7 @@ def info_source_stem(parameters=None, *, game: str, model_name: str, run_name: s
         return os.path.join(curiosity_dir(parameters, game=game, model_name=model_name,
                                           run_name=run_name), CURIOSITY_ANNOTATION_STEM)
     return success_trajectories_stem(parameters, game=game, model_name=model_name,
-                                     executor=executor)
+                                     executor=executor, controller_variant=controller_variant)
 
 
 def info_dir_from_stem(trajectory_path: str) -> str:
@@ -301,43 +304,43 @@ def info_dir_from_stem(trajectory_path: str) -> str:
 
 
 def source_info_dir(parameters=None, *, game: str, model_name: str, run_name: str,
-                    executor: str, source: str = "attempt") -> str:
+                    executor: str, controller_variant: str, source: str = "attempt") -> str:
     """Info dir for a named source. ``source`` is 'attempt' (aka 'zeroshot') or 'curiosity'."""
     return info_dir_from_stem(
         info_source_stem(parameters, game=game, model_name=model_name, run_name=run_name,
-                         executor=executor, source=source))
+                         executor=executor, controller_variant=controller_variant, source=source))
 
 
 def info_dir(parameters=None, *, game: str, model_name: str, run_name: str,
-             executor: str) -> str:
+             executor: str, controller_variant: str) -> str:
     """The zeroshot/attempt vertical's info dir."""
     return source_info_dir(parameters, game=game, model_name=model_name, run_name=run_name,
-                           executor=executor, source="attempt")
+                           executor=executor, controller_variant=controller_variant, source="attempt")
 
 
 def curiosity_info_dir(parameters=None, *, game: str, model_name: str, run_name: str,
-                       executor: str) -> str:
+                       executor: str, controller_variant: str) -> str:
     """The curiosity vertical's info dir."""
     return source_info_dir(parameters, game=game, model_name=model_name, run_name=run_name,
-                           executor=executor, source="curiosity")
+                           executor=executor, controller_variant=controller_variant, source="curiosity")
 
 
-def info_doc(parameters=None, *, game: str, model_name: str, run_name: str, executor: str,
+def info_doc(parameters=None, *, game: str, model_name: str, run_name: str, executor: str, controller_variant: str,
              source: str = "attempt") -> str:
     return os.path.join(source_info_dir(parameters, game=game, model_name=model_name,
-                                        run_name=run_name, executor=executor, source=source),
+                                        run_name=run_name, executor=executor, controller_variant=controller_variant, source=source),
                         INFO_DOC_FILENAME)
 
 
 def insights_jsonl(parameters=None, *, game: str, model_name: str, run_name: str,
-                   executor: str, source: str = "attempt") -> str:
+                   executor: str, controller_variant: str, source: str = "attempt") -> str:
     return os.path.join(source_info_dir(parameters, game=game, model_name=model_name,
-                                        run_name=run_name, executor=executor, source=source),
+                                        run_name=run_name, executor=executor, controller_variant=controller_variant, source=source),
                         INSIGHTS_FILENAME)
 
 
 def info_available_sources(parameters=None, *, game: str, model_name: str, run_name: str,
-                           executor: str) -> list[str]:
+                           executor: str, controller_variant: str) -> list[str]:
     """Which of {zeroshot, curiosity} actually have build_info inputs on disk for this game.
 
     Replaces the Bash function of the same name. The all-games sweep uses this to pick each
@@ -351,7 +354,7 @@ def info_available_sources(parameters=None, *, game: str, model_name: str, run_n
     found = []
     for source in ("zeroshot", "curiosity"):
         stem = info_source_stem(parameters, game=game, model_name=model_name,
-                                run_name=run_name, executor=executor, source=source)
+                                run_name=run_name, executor=executor, controller_variant=controller_variant, source=source)
         if os.path.isfile(f"{stem}.json") and os.path.isfile(f"{stem}.pkl"):
             found.append(source)
     return found
@@ -381,7 +384,7 @@ def benchmark_dir(parameters=None, *, game: str) -> str:
     return os.path.join(results, "benchmark", game)
 
 
-def benchmark_stem(*, supervisor: str, executor: str, model: str,
+def benchmark_stem(*, supervisor: str, executor: str, controller_variant: str, model: str,
                    n_tasks: Optional[int] = None) -> str:
     """The CSV basename, without extension.
 
@@ -389,24 +392,26 @@ def benchmark_stem(*, supervisor: str, executor: str, model: str,
     run gets its own file, because resuming a full sweep from a 5-task CSV would read the
     first five as done and silently skip them.
     """
-    return (f"{supervisor}_{executor}_{model}_first{n_tasks}" if n_tasks is not None
-            else f"{supervisor}_{executor}_{model}")
+    return (f"{supervisor}_{executor}_{controller_variant}_{model}_first{n_tasks}" if n_tasks is not None
+            else f"{supervisor}_{executor}_{controller_variant}_{model}")
 
 
-def benchmark_session_name(*, supervisor: str, executor: str, model: str) -> str:
+def benchmark_session_name(*, supervisor: str, executor: str, controller_variant: str,
+                           model: str) -> str:
     """The emulator session directory name for one benchmark run.
 
-    Shares ``supervisor``/``executor``/``model`` with :func:`benchmark_stem` on purpose: an
-    episode's CSV row and the session holding its video and archived report have to be
-    findable from each other, and they were previously two f-strings per arm that happened
-    to agree.
+    Shares ``supervisor``/``executor``/``controller_variant``/``model`` with
+    :func:`benchmark_stem` on purpose: an episode's CSV row and the session holding its video
+    and archived report have to be findable from each other, and they were previously two
+    f-strings per arm that happened to agree.
     """
-    return f"benchmark_{supervisor}_{executor}_{model}"
+    return f"benchmark_{supervisor}_{executor}_{controller_variant}_{model}"
 
 
-def benchmark_csv(parameters=None, *, game: str, supervisor: str, executor: str, model: str,
+def benchmark_csv(parameters=None, *, game: str, supervisor: str, executor: str,
+                  controller_variant: str, model: str,
                   n_tasks: Optional[int] = None, create: bool = False) -> str:
-    """``<results>/benchmark/<game>/<supervisor>_<executor>_<model>[_firstN].csv``.
+    """``<results>/benchmark/<game>/<supervisor>_<executor>_<controller_variant>_<model>[_firstN].csv``.
 
     ``model`` is already a save-name here, not a full model name — callers pass either
     :func:`model_save_name` output or :func:`finetuned_model_name` output.
@@ -414,7 +419,9 @@ def benchmark_csv(parameters=None, *, game: str, supervisor: str, executor: str,
     directory = benchmark_dir(parameters, game=game)
     if create:
         os.makedirs(directory, exist_ok=True)
-    return os.path.join(directory, f"{benchmark_stem(supervisor=supervisor, executor=executor, model=model, n_tasks=n_tasks)}.csv")
+    stem = benchmark_stem(supervisor=supervisor, executor=executor,
+                          controller_variant=controller_variant, model=model, n_tasks=n_tasks)
+    return os.path.join(directory, f"{stem}.csv")
 
 
 def benchmark_series_csv(parameters=None, *, game: str) -> str:
@@ -618,7 +625,8 @@ class Paths:
     parameters: Optional[dict] = None
     game: Optional[str] = None
     run_name: str = "my_run"
-    executor: str = "history"
+    executor: str = "single_actions"
+    controller_variant: str = "low_level"
     model_name: Optional[str] = None
     output_dir: Optional[str] = None
     mode: str = "both"
@@ -680,25 +688,27 @@ class Paths:
 
     def attempts_dir(self) -> str:
         return attempts_dir(self.parameters, game=self.game, model_name=self._model,
-                            executor=self.executor)
+                            executor=self.executor, controller_variant=self.controller_variant)
 
     def all_trajectories_csv(self) -> str:
         return all_trajectories_csv(self.parameters, game=self.game, model_name=self._model,
-                                    executor=self.executor)
+                                    executor=self.executor, controller_variant=self.controller_variant)
 
     def success_trajectories_json(self) -> str:
         return success_trajectories_json(self.parameters, game=self.game,
-                                         model_name=self._model, executor=self.executor)
+                                         model_name=self._model, executor=self.executor,
+                                         controller_variant=self.controller_variant)
 
     def success_trajectories_pkl(self) -> str:
         return success_trajectories_pkl(self.parameters, game=self.game,
-                                        model_name=self._model, executor=self.executor)
+                                        model_name=self._model, executor=self.executor,
+                                        controller_variant=self.controller_variant)
 
     # -- info documents ---------------------------------------------------
 
     def _info_kwargs(self) -> dict[str, Any]:
         return dict(game=self.game, model_name=self._model, run_name=self.run_name,
-                    executor=self.executor)
+                    executor=self.executor, controller_variant=self.controller_variant)
 
     def info_source_stem(self, source: str) -> str:
         return info_source_stem(self.parameters, source=source, **self._info_kwargs())
@@ -729,7 +739,7 @@ class Paths:
     def benchmark_csv(self, bench_game: str, model: str, supervisor: str,
                       n_tasks: Optional[int] = None, create: bool = False) -> str:
         return benchmark_csv(self.parameters, game=bench_game, supervisor=supervisor,
-                             executor=self.executor, model=model, n_tasks=n_tasks,
+                             executor=self.executor, controller_variant=self.controller_variant, model=model, n_tasks=n_tasks,
                              create=create)
 
     def benchmark_series_csv(self) -> str:

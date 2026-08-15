@@ -38,6 +38,7 @@ def revision_cmd(obj, max_leg_steps, max_frames_per_slice):
     """Benchmark with a hint revised between short executor legs, and no plan."""
     parameters = obj["parameters"]
     game = obj["game"]
+    controller_variant = obj["controller_variant"]
     executor = obj["executor"]
     executor_class = AVAILABLE_EXECUTORS[executor]
     model_save_name = obj["model_save_name"]
@@ -47,14 +48,14 @@ def revision_cmd(obj, max_leg_steps, max_frames_per_slice):
     emulator_kwargs = {
         "headless": True,
         "save_video": obj["save_video"],
-        "session_name": paths.benchmark_session_name(supervisor=supervisor_name, executor=executor,
+        "session_name": paths.benchmark_session_name(supervisor=supervisor_name, executor=executor, controller_variant=controller_variant,
                                                      model=model_save_name),
         "max_steps": obj["max_steps"],
     }
 
     columns = common.COMMON_COLUMNS + [*SUMMARY_COLUMNS, "step_log", common.SESSION_COLUMN]
     tasks = common.select_tasks(get_benchmark_tasks(game=game), obj["n_tasks"])
-    save_path = common.results_path(parameters, game, supervisor=supervisor_name, executor=executor,
+    save_path = common.results_path(parameters, game, supervisor=supervisor_name, executor=executor, controller_variant=controller_variant,
                                     model=model_save_name, n_tasks=obj["n_tasks"])
     results, n_completed = common.load_checkpoint(save_path, obj["regenerate"],
                                                   columns, parameters)

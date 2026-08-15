@@ -173,7 +173,8 @@ def debug_attempt(obj, model_name, n_frames, max_trajectories):
     """Attempt funnel, hint-escalation analysis, and successful-trajectory strips."""
     paths = Paths(
         parameters=obj["parameters"], game=obj["game"], run_name=obj["run_name"],
-        executor=obj["executor"], model_name=model_name, output_dir=obj["output_dir"], mode=obj["mode"],
+        executor=obj["executor"], controller_variant=obj["controller_variant"],
+        model_name=model_name, output_dir=obj["output_dir"], mode=obj["mode"],
     )
     overwrite = obj["overwrite"]
     report_dir = paths.debug_dir("attempt")

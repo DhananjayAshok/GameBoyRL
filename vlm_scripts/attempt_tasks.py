@@ -300,7 +300,8 @@ def attempt_tasks_cmd(
 
     # The stem rule lives in paths.py, which also exposes the identity-keyed twin
     # (paths.attempts_dir) that the debug tools and Bash use to find what this writes.
-    out_dir = paths.attempts_dir_from_stem(tasks_path, executor=executor_name)
+    out_dir = paths.attempts_dir_from_stem(tasks_path, executor=executor_name,
+                                           controller_variant=controller_variant)
     os.makedirs(out_dir, exist_ok=True)
 
     csv_path = os.path.join(out_dir, paths.ALL_TRAJECTORIES_FILENAME)

@@ -378,6 +378,9 @@ declare -A BUILD_INFO_ALL_DEFAULTS
 populate_dict VLM_DEFAULTS BUILD_INFO_ALL_DEFAULTS
 BUILD_INFO_ALL_DEFAULTS["max_new_tokens"]=3000
 BUILD_INFO_ALL_DEFAULTS["executor"]="single_actions"
+# Paired with executor: the attempts dir the documents are built from is keyed on both, so a
+# variant mismatch reads another variant's trajectories.
+BUILD_INFO_ALL_DEFAULTS["controller_variant"]="low_level"
 BUILD_INFO_ALL_DEFAULTS["mode"]="both"
 BUILD_INFO_ALL_DEFAULTS["stage"]="all"
 BUILD_INFO_ALL_DEFAULTS["n_frames"]=8
@@ -397,6 +400,7 @@ declare -A BENCHMARK_INFO_ALL_DEFAULTS=(
     # different executors) and must not be — the baseline has to be the same executor as
     # the plan run, or the delta mixes the plan effect with a scaffold change.
     ["executor"]="single_actions"
+    ["controller_variant"]="low_level"
     ["mode"]="both"
     ["knowledge_mode"]="both"
     ["baseline"]=true
@@ -494,6 +498,7 @@ populate_array ESSENTIAL_ARGS DEBUG_ESSENTIALS
 declare -A DEBUG_DEFAULTS=(
     ["run_name"]="my_run"
     ["executor"]="single_actions"
+    ["controller_variant"]="low_level"
     ["output_dir"]="none"
     ["mode"]="both"
 )
@@ -521,7 +526,7 @@ DEBUG_MODEL_ARG_KEYS=("${DEBUG_MODEL_ESSENTIALS[@]}" "${!DEBUG_MODEL_DEFAULTS[@]
 #   python debug.py $group_flags curiosity --n_frames 5
 function debug_group_flags() {
     local -n _dict="$1"
-    local result="--game ${_dict["game"]} --run_name ${_dict["run_name"]} --executor ${_dict["executor"]} --mode ${_dict["mode"]} --overwrite"
+    local result="--game ${_dict["game"]} --run_name ${_dict["run_name"]} --executor ${_dict["executor"]} --controller_variant ${_dict["controller_variant"]} --mode ${_dict["mode"]} --overwrite"
     if [[ "${_dict["output_dir"]}" != "none" ]]; then
         result+=" --output_dir ${_dict["output_dir"]}"
     fi
@@ -573,11 +578,13 @@ unset RUN_BENCHMARK_INFO_RETRIEVAL_DEFAULTS["info_docs"]
 # Which documents to read, NOT which model is benchmarked (that is executor_vlm_model).
 # docs_mode picks the legs (same vocabulary as info_mode_sources).
 # docs_run_name selects the CURIOSITY leg's input (curiosity/<run_name>/trajectory_annotation).
-# docs_executor selects the ZEROSHOT leg's input (zeroshot_tasks_<executor>_attempts) and
-# nothing else — the curiosity leg is executor-independent.
+# docs_executor and docs_controller_variant select the ZEROSHOT leg's input
+# (zeroshot_tasks_<executor>_<controller_variant>_attempts) and nothing else — the curiosity
+# leg is executor-independent.
 RUN_BENCHMARK_INFO_RETRIEVAL_DEFAULTS["docs_model"]="google/gemma-4-31b-it"
 RUN_BENCHMARK_INFO_RETRIEVAL_DEFAULTS["docs_mode"]="both"
 RUN_BENCHMARK_INFO_RETRIEVAL_DEFAULTS["docs_run_name"]="my_run"
 RUN_BENCHMARK_INFO_RETRIEVAL_DEFAULTS["docs_executor"]="single_actions"
+RUN_BENCHMARK_INFO_RETRIEVAL_DEFAULTS["docs_controller_variant"]="low_level"
 
 RUN_BENCHMARK_INFO_RETRIEVAL_ARG_KEYS=("${RUN_BENCHMARK_INFO_RETRIEVAL_ESSENTIALS[@]}" "${!RUN_BENCHMARK_INFO_RETRIEVAL_DEFAULTS[@]}")

@@ -14,8 +14,6 @@ REQUIRED_ARGS=()
 populate_array DEBUG_MODEL_ESSENTIALS REQUIRED_ARGS
 populate_dict DEBUG_MODEL_DEFAULTS ARGS
 
-ARGS["controller_variant"]="low_level"
-
 # --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
 USAGE_STR="Usage: $0"
@@ -62,5 +60,4 @@ done
 group_flags=$(debug_group_flags ARGS)
 
 python debug.py $group_flags zeroshot \
-    --model_name "${ARGS["model_name"]}" \
-    --controller_variant "${ARGS["controller_variant"]}" || exit 1
+    --model_name "${ARGS["model_name"]}" || exit 1

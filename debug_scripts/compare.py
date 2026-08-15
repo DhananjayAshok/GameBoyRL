@@ -74,7 +74,8 @@ def debug_compare(obj, csv_a, csv_b, label_a, label_b, n_examples):
     """Four-quadrant comparison of two benchmark CSVs."""
     paths = Paths(
         parameters=obj["parameters"], game=obj["game"], run_name=obj["run_name"],
-        executor=obj["executor"], output_dir=obj["output_dir"], mode=obj["mode"],
+        executor=obj["executor"], controller_variant=obj["controller_variant"],
+        output_dir=obj["output_dir"], mode=obj["mode"],
     )
     report_dir = paths.debug_dir("compare")
 

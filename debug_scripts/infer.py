@@ -73,7 +73,8 @@ def debug_infer(obj, model_name, n_frames, max_tasks, max_traj_per_task):
     """Distilled task strings per curiosity group, with the trajectories each came from."""
     paths = Paths(
         parameters=obj["parameters"], game=obj["game"], run_name=obj["run_name"],
-        executor=obj["executor"], model_name=model_name, output_dir=obj["output_dir"],
+        executor=obj["executor"], controller_variant=obj["controller_variant"],
+        model_name=model_name, output_dir=obj["output_dir"],
         mode=obj["mode"],
     )
     overwrite = obj["overwrite"]
