@@ -111,6 +111,7 @@ def _run(obj, *, mode, info_docs, parametric_categories,
     parameters = obj["parameters"]
     game = obj["game"]
     controller_variant = obj["controller_variant"]
+    extra_name = obj["extra_name"]
     executor = obj["executor"]
     executor_class = AVAILABLE_EXECUTORS[executor]
     model_save_name = obj["model_save_name"]
@@ -157,7 +158,8 @@ def _run(obj, *, mode, info_docs, parametric_categories,
         "headless": True,
         "save_video": obj["save_video"],
         "session_name": paths.benchmark_session_name(supervisor=supervisor_name, executor=executor, controller_variant=controller_variant,
-                                                     model=model_save_name),
+                                                     model=model_save_name,
+                                                     extra_name=extra_name),
         "max_steps": obj["max_steps"],
     }
 
@@ -175,7 +177,8 @@ def _run(obj, *, mode, info_docs, parametric_categories,
     ]
     tasks = common.select_tasks(get_benchmark_tasks(game=game), obj["n_tasks"])
     save_path = common.results_path(parameters, game, supervisor=supervisor_name, executor=executor, controller_variant=controller_variant,
-                                    model=model_save_name, n_tasks=obj["n_tasks"])
+                                    model=model_save_name, extra_name=extra_name,
+                                    n_tasks=obj["n_tasks"])
     results, n_completed = common.load_checkpoint(save_path, obj["regenerate"],
                                                   columns, parameters)
 
@@ -229,6 +232,11 @@ def _run(obj, *, mode, info_docs, parametric_categories,
             controller_variant=obj["controller_variant"],
             executor_name=executor_class.__name__,
             model=model_save_name,
+            extra_name=extra_name,
+            # The one arm that reads documents, so the one arm with a knowledge identity to
+            # archive. Provenance labels rather than paths: a path says where the file sat on
+            # the machine that ran this, the label says what it was distilled from.
+            info_docs=[d.provenance.label or "(no provenance recorded)" for d in documents],
             **emulator_kwargs,
         )
 

@@ -37,6 +37,9 @@ from debug_scripts import (
               help="Executor short name; selects the attempts dirs and benchmark CSVs.")
 @click.option("--controller_variant", default="low_level", show_default=True,
               help="Controller variant; part of the attempts dir and benchmark CSV names.")
+@click.option("--extra_name", default=None, type=str,
+              help="The run's --extra_name, if it used one. Must match what run_benchmark.py "
+                   "was given, or this looks for a CSV nothing wrote under that name.")
 @click.option("--mode", default="both", show_default=True,
               type=click.Choice(["curiosity_only", "zeroshot_only", "both"]),
               help="Which full.sh --mode produced the fine-tuned model; part of its served name.")
@@ -45,13 +48,15 @@ from debug_scripts import (
 @click.option("--overwrite", is_flag=True, default=False,
               help="Re-render images that already exist instead of reusing them.")
 @click.pass_context
-def main(ctx, game, run_name, executor, controller_variant, output_dir, overwrite, mode):
+def main(ctx, game, run_name, executor, controller_variant, extra_name, output_dir, overwrite,
+         mode):
     parameters = load_parameters()
     ctx.obj = dict(
         game=game,
         run_name=run_name,
         executor=executor,
         controller_variant=controller_variant,
+        extra_name=extra_name,
         output_dir=output_dir,
         overwrite=overwrite,
         mode=mode,

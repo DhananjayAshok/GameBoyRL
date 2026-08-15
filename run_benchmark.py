@@ -15,7 +15,7 @@ info arms are separate commands rather than one command with a --mode flag, beca
 separate experiments with different inputs: --info_docs is required by one and rejected by
 the other, which a shared command could not express.
 
-Called by scripts/run_benchmark.sh.
+Called by scripts/benchmark/run_benchmark.sh.
 
 There used to be an ``info`` arm, which spent retrieved knowledge on a single hint written
 once at the opening frame. It has been retired along with ``InfoHintSupervisor``, and its
@@ -87,17 +87,24 @@ from python_scripts.paths import model_save_name
 @click.option("--verbose", is_flag=True, default=False)
 @click.option("--regenerate", is_flag=True, default=False,
               help="Ignore any existing CSV for this run and start over.")
+@click.option("--extra_name", default=None, type=str,
+              help="Free-text discriminator appended to the CSV and session names, for runs "
+                   "this identity cannot otherwise tell apart — two info_subgoal_retrieval "
+                   "runs over different --docs_mode being the case it exists for, since which "
+                   "documents were read reaches no other part of the name. Omit and the name "
+                   "is unchanged. 'none' is accepted as the shell's absent sentinel.")
 @click.pass_context
 def main(ctx, game, controller_variant, executor, executor_vlm_model, executor_vlm_kind,
          supervisor_vlm_model, supervisor_vlm_kind, supervisor_max_new_tokens,
          save_video, max_steps, max_tool_calls, n_tasks,
-         verbose, regenerate):
+         verbose, regenerate, extra_name):
     """Benchmark a frozen VLM on a game, with or without prebuilt knowledge."""
     parameters = load_parameters()
     ctx.obj = dict(
         parameters=parameters,
         game=game,
         controller_variant=controller_variant,
+        extra_name=extra_name,
         executor=executor,
         executor_vlm_model=executor_vlm_model,
         executor_vlm_kind=executor_vlm_kind,

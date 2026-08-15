@@ -72,7 +72,8 @@ def select_tasks(tasks: pd.DataFrame, n_tasks: Optional[int]) -> pd.DataFrame:
 
 
 def results_path(parameters: dict, game: str, *, supervisor: str, executor: str,
-                 controller_variant: str, model: str, n_tasks: Optional[int]) -> str:
+                 controller_variant: str, model: str, extra_name: Optional[str],
+                 n_tasks: Optional[int]) -> str:
     """Where this run's CSV goes, creating the directory.
 
     A subset run gets its own file: resuming a full sweep from a 5-task CSV would read the
@@ -86,7 +87,8 @@ def results_path(parameters: dict, game: str, *, supervisor: str, executor: str,
     """
     return paths.benchmark_csv(parameters, game=game, supervisor=supervisor,
                                executor=executor, controller_variant=controller_variant,
-                               model=model, n_tasks=n_tasks, create=True)
+                               model=model, extra_name=extra_name, n_tasks=n_tasks,
+                               create=True)
 
 
 def load_checkpoint(save_path: str, regenerate: bool, columns: list,
@@ -210,8 +212,9 @@ def session_path_of(environment) -> Optional[str]:
     return getattr(emulator, "session_path", None) if emulator is not None else None
 
 
-def save_report(session_path: str, *, supervisor: str, row, executor_name: str, model: str,
-                report) -> Optional[str]:
+def save_report(session_path: str, *, supervisor: str, row, executor_name: str,
+                controller_variant: str, model: str, extra_name: Optional[str] = None,
+                info_docs: Optional[list] = None, report=None) -> Optional[str]:
     """Archive this episode's :class:`~execution.report.SupervisorReport` beside its video.
 
     The report is what makes an episode reconstructable after the fact. Its ``event_log``
@@ -232,13 +235,23 @@ def save_report(session_path: str, *, supervisor: str, row, executor_name: str, 
     Failure here is logged and swallowed: an unwritable archive must not cost an episode
     that has already been paid for in VLM calls.
     """
+    # controller_variant, extra_name and info_docs are recorded because nothing else on disk
+    # carries them: the CSV has no column for any of the three, and the run name they appear
+    # in is a string a caller typed rather than a fact. Without them an archived report cannot
+    # say which knowledge produced it — two runs of the same arm over different documents are
+    # otherwise byte-comparable in every field here.
     payload = {
         "supervisor": supervisor,
         "game": row["game"],
         "task": row["task"],
         "init_state": row.get("init_state"),
         "executor": executor_name,
+        "controller_variant": controller_variant,
         "model": model,
+        "extra_name": extra_name,
+        # Provenance labels where the documents carry them, else the paths. None for arms that
+        # read no documents, which is a different fact from an empty list (read none of any).
+        "info_docs": info_docs,
         "report": report,
     }
     path = os.path.join(session_path, REPORT_FILENAME)
@@ -253,6 +266,7 @@ def save_report(session_path: str, *, supervisor: str, row, executor_name: str, 
 
 def run_episode(row, play: Callable[[Any], PlayResult], *, supervisor: str,
                 controller_variant: str, executor_name: str, model: str,
+                extra_name: Optional[str] = None, info_docs: Optional[list] = None,
                 **emulator_kwargs) -> EpisodeOutcome:
     """Run one benchmark task, once.
 
@@ -310,7 +324,9 @@ def run_episode(row, play: Callable[[Any], PlayResult], *, supervisor: str,
         if session_path is not None:
             save_report(session_path, supervisor=supervisor, row=row,
                         executor_name=executor_name,
-                        model=model, report=result.report)
+                        controller_variant=controller_variant,
+                        model=model, extra_name=extra_name, info_docs=info_docs,
+                        report=result.report)
             outcome.session_dirs.append(session_path)
 
         environment.close()

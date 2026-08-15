@@ -406,6 +406,7 @@ def debug_benchmark(obj, model_name, compare_model, bench_game, max_episodes, su
     paths = Paths(
         parameters=obj["parameters"], game=obj["game"], run_name=obj["run_name"],
         executor=obj["executor"], controller_variant=obj["controller_variant"],
+        extra_name=obj["extra_name"],
         model_name=model_name, output_dir=obj["output_dir"],
         mode=obj["mode"],
     )

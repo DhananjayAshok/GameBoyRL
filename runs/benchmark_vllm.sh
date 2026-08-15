@@ -27,7 +27,7 @@ for game in "${games[@]}"; do
     for executor in "${executors[@]}"; do
         for supervisor in "${supervisors[@]}"; do
             echo "--- $game | $executor | $supervisor"
-            bash scripts/run_benchmark.sh \
+            bash scripts/benchmark/run_benchmark.sh \
                 --game "$game" \
                 --supervisor "$supervisor" \
                 --executor "$executor" \

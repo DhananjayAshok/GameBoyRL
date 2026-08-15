@@ -560,15 +560,19 @@ def run_stage_b(leaves, out_dir, vlm, game, max_new_tokens, max_concurrency, ver
               type=click.Choice(list(AVAILABLE_EXECUTORS.keys())),
               help="Executor whose trajectories this document is distilled from. Recorded in "
                    "the document's provenance.")
+@click.option("--controller_variant", default="low_level", show_default=True,
+              help="Controller variant those trajectories were driven under. Recorded in the "
+                   "document's provenance beside --executor, which alone does not identify "
+                   "the attempts directory the trajectories came from.")
 @click.option("--source", required=True, type=click.Choice(["curiosity", "zeroshot"]),
               help="The vertical these trajectories came from. Recorded in the document's "
                    "provenance. Required, and never inferred: readers used to reconstruct "
                    "it by parsing the output directory's name, which is the coupling this "
-                   "flag exists to remove. scripts/pipeline/build_info_all.sh has it as a "
+                   "flag exists to remove. scripts/vlm/create_all_info_docs.sh has it as a "
                    "loop variable and passes it through.")
 @click.pass_obj
 def build_info_cmd(obj, trajectory_path, n_frames, max_concurrency, stage, overwrite_from_round,
-                   executor, source):
+                   executor, controller_variant, source):
     """Distil (task, trajectory) pairs into a consolidated info document."""
     game = obj["game"]
     model_name = obj["model_name"]
@@ -628,6 +632,7 @@ def build_info_cmd(obj, trajectory_path, n_frames, max_concurrency, stage, overw
     provenance = Provenance(
         source=source,
         executor=executor,
+        controller_variant=controller_variant,
         model=model_save_name,
         trajectory_stem=os.path.relpath(os.path.abspath(trajectory_path),
                                         os.path.abspath(storage_dir)),

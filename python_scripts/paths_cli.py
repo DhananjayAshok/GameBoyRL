@@ -237,19 +237,6 @@ def insights_jsonl_cmd(obj, game, model_name, run_name, executor, controller_var
                                     run_name=run_name, executor=executor, controller_variant=controller_variant, source=source))
 
 
-@click.command("info_available_sources")
-@_identity
-@click.pass_obj
-def info_available_sources_cmd(obj, game, model_name, run_name, executor, controller_variant):
-    """Which verticals have build_info inputs on disk, space-separated. Replaces the Bash function.
-
-    Prints an empty line when neither exists, which is what the caller tests for.
-    """
-    click.echo(" ".join(paths.info_available_sources(
-        obj["parameters"](), game=game, model_name=model_name, run_name=run_name,
-        executor=executor, controller_variant=controller_variant)))
-
-
 @click.command("parametric_doc")
 @_game
 @_model
@@ -278,14 +265,18 @@ def benchmark_dir_cmd(obj, game):
                    "the CSV and the session dir.")
 @click.option("--model", required=True,
               help="Model SAVE name (already folded), or a finetuned_model_name.")
+@click.option("--extra_name", default=None, type=MAYBE_NONE,
+              help="Free-text discriminator the run used, if any. Must match, or this names a "
+                   "file nothing wrote.")
 @click.option("--n_tasks", default=None, type=MAYBE_NONE,
               help="Subset size, if the run used --n_tasks. Adds the _firstN suffix.")
 @click.pass_obj
-def benchmark_csv_cmd(obj, game, executor, controller_variant, supervisor, model, n_tasks):
-    """<results>/benchmark/<game>/<supervisor>_<executor>_<controller_variant>_<model>[_firstN].csv"""
+def benchmark_csv_cmd(obj, game, executor, controller_variant, supervisor, model, extra_name,
+                      n_tasks):
+    """<results>/benchmark/<game>/<supervisor>_<executor>_<controller_variant>_<model>[_<extra>][_firstN].csv"""
     click.echo(paths.benchmark_csv(obj["parameters"](), game=game, supervisor=supervisor,
                                    executor=executor, controller_variant=controller_variant,
-                                   model=model,
+                                   model=model, extra_name=extra_name,
                                    n_tasks=int(n_tasks) if n_tasks is not None else None))
 
 
@@ -384,7 +375,6 @@ PATH_COMMANDS = [
     source_info_dir_cmd,
     info_doc_cmd,
     insights_jsonl_cmd,
-    info_available_sources_cmd,
     parametric_doc_cmd,
     benchmark_dir_cmd,
     benchmark_csv_cmd,

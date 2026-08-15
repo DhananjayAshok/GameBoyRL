@@ -328,6 +328,8 @@ BUILD_INFO_DEFAULTS["stage"]="all"
 # Recorded in the document's provenance. Names no path: the output dir is info_docs beside
 # the input stem, whose parents already carry the model and (for zeroshot) the executor.
 BUILD_INFO_DEFAULTS["executor"]="single_actions"
+# Paired with executor, and likewise provenance-only here: the caller resolved the stem.
+BUILD_INFO_DEFAULTS["controller_variant"]="low_level"
 BUILD_INFO_DEFAULTS["overwrite_from_round"]=none
 # Override the shared VLM default of 1000: stage A emits six labelled fields plus a bullet
 # list of insights, and the stage-B combine emits a merged list that grows with the entry.
@@ -335,6 +337,28 @@ BUILD_INFO_DEFAULTS["overwrite_from_round"]=none
 BUILD_INFO_DEFAULTS["max_new_tokens"]=3000
 
 BUILD_INFO_ARG_KEYS=("${BUILD_INFO_ESSENTIALS[@]}" "${!BUILD_INFO_DEFAULTS[@]}")
+
+CREATE_INFO_DOC_ESSENTIALS=("source")
+populate_array VLM_ESSENTIALS CREATE_INFO_DOC_ESSENTIALS
+declare -A CREATE_INFO_DOC_DEFAULTS
+populate_dict VLM_DEFAULTS CREATE_INFO_DOC_DEFAULTS
+CREATE_INFO_DOC_DEFAULTS["run_name"]="my_run"
+CREATE_INFO_DOC_DEFAULTS["executor"]="single_actions"
+CREATE_INFO_DOC_DEFAULTS["controller_variant"]="low_level"
+CREATE_INFO_DOC_DEFAULTS["n_frames"]=8
+CREATE_INFO_DOC_DEFAULTS["max_concurrency"]=16
+CREATE_INFO_DOC_DEFAULTS["max_new_tokens"]=3000
+CREATE_INFO_DOC_DEFAULTS["overwrite_from_round"]=none
+
+CREATE_INFO_DOC_ARG_KEYS=("${CREATE_INFO_DOC_ESSENTIALS[@]}" "${!CREATE_INFO_DOC_DEFAULTS[@]}")
+
+CREATE_ALL_INFO_DOCS_ESSENTIALS=()
+populate_array VLM_ESSENTIALS CREATE_ALL_INFO_DOCS_ESSENTIALS
+declare -A CREATE_ALL_INFO_DOCS_DEFAULTS
+populate_dict CREATE_INFO_DOC_DEFAULTS CREATE_ALL_INFO_DOCS_DEFAULTS
+CREATE_ALL_INFO_DOCS_DEFAULTS["mode"]="both"
+
+CREATE_ALL_INFO_DOCS_ARG_KEYS=("${CREATE_ALL_INFO_DOCS_ESSENTIALS[@]}" "${!CREATE_ALL_INFO_DOCS_DEFAULTS[@]}")
 
 # info_mode_sources <mode>
 #
@@ -385,6 +409,9 @@ BUILD_INFO_ALL_DEFAULTS["mode"]="both"
 BUILD_INFO_ALL_DEFAULTS["stage"]="all"
 BUILD_INFO_ALL_DEFAULTS["n_frames"]=8
 BUILD_INFO_ALL_DEFAULTS["max_concurrency"]=16
+# The `none` sentinel, not an integer: build_info.py's --overwrite_from_round is only emitted
+# when set, because passing it at all rebuilds the merge tree from that round.
+BUILD_INFO_ALL_DEFAULTS["overwrite_from_round"]=none
 BUILD_INFO_ALL_DEFAULTS["do_debug"]=true
 
 BUILD_INFO_ALL_ARG_KEYS=("${BUILD_INFO_ALL_ESSENTIALS[@]}" "${!BUILD_INFO_ALL_DEFAULTS[@]}")
@@ -499,6 +526,7 @@ declare -A DEBUG_DEFAULTS=(
     ["run_name"]="my_run"
     ["executor"]="single_actions"
     ["controller_variant"]="low_level"
+    ["extra_name"]="none"
     ["output_dir"]="none"
     ["mode"]="both"
 )
@@ -530,6 +558,11 @@ function debug_group_flags() {
     if [[ "${_dict["output_dir"]}" != "none" ]]; then
         result+=" --output_dir ${_dict["output_dir"]}"
     fi
+    # Same sentinel rule as run_benchmark.sh: omitted when absent, so the debug tool resolves
+    # the unsuffixed name a run without --extra_name wrote.
+    if [[ "${_dict["extra_name"]}" != "none" ]]; then
+        result+=" --extra_name ${_dict["extra_name"]}"
+    fi
     echo "$result"
 }
 
@@ -540,6 +573,9 @@ populate_array ESSENTIAL_ARGS RUN_BENCHMARK_ESSENTIALS
 declare -A RUN_BENCHMARK_DEFAULTS=(
     ["supervisor"]="dummy"
     ["controller_variant"]="low_level"
+    # Free-text discriminator for runs the rest of the identity cannot tell apart. `none`
+    # means absent, and the name is then exactly what it was before the flag existed.
+    ["extra_name"]="none"
     ["executor"]="single_none"
     ["executor_vlm_model"]="Qwen/Qwen3-VL-8B-Instruct"
     ["executor_vlm_kind"]="huggingface"

@@ -87,5 +87,6 @@ python vlm.py \
     --max_concurrency "${ARGS["max_concurrency"]}" \
     --stage "${ARGS["stage"]}" \
     --executor "${ARGS["executor"]}" \
+    --controller_variant "${ARGS["controller_variant"]}" \
     --source "${ARGS["source"]}" \
     $from_round_arg

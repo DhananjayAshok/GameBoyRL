@@ -25,6 +25,11 @@ class Provenance:
         from trajectories, or ``"parametric"`` for one written from the model's own priors
     :param executor: Executor whose trajectories were distilled for insights. ``None`` for a parametric
         document, which distilled nothing.
+    :param controller_variant: Controller variant those trajectories were driven under. Paired
+        with ``executor``, because the attempts directory is keyed on both — two documents
+        distilled from the same executor under different variants are different documents, and
+        recording only the executor would make them indistinguishable here. ``None`` for a
+        parametric document, and for any document written before this field existed.
     :param model: Model that did the distilling, or the writing (the save name, not the
         full path).
     :param trajectory_stem: The input stem, relative to ``storage_dir``. The curiosity
@@ -38,6 +43,7 @@ class Provenance:
 
     source: str = ""
     executor: Optional[str] = None
+    controller_variant: Optional[str] = None
     model: Optional[str] = None
     trajectory_stem: Optional[str] = None
     built_at: Optional[str] = None
@@ -53,6 +59,7 @@ class Provenance:
         return {
             "source": self.source,
             "executor": self.executor,
+            "controller_variant": self.controller_variant,
             "model": self.model,
             "trajectory_stem": self.trajectory_stem,
             "built_at": self.built_at,
@@ -66,6 +73,7 @@ class Provenance:
         return cls(
             source=data.get("source", ""),
             executor=data.get("executor"),
+            controller_variant=data.get("controller_variant"),
             model=data.get("model"),
             trajectory_stem=data.get("trajectory_stem"),
             built_at=data.get("built_at"),

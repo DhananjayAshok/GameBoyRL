@@ -26,6 +26,7 @@ def baseline_cmd(obj):
     game = obj["game"]
     executor = obj["executor"]
     controller_variant = obj["controller_variant"]
+    extra_name = obj["extra_name"]
     executor_class = AVAILABLE_EXECUTORS[executor]
     model_save_name = obj["model_save_name"]
     supervisor_name = "dummy"
@@ -35,14 +36,16 @@ def baseline_cmd(obj):
         "headless": True,
         "save_video": obj["save_video"],
         "session_name": paths.benchmark_session_name(supervisor=supervisor_name, executor=executor, controller_variant=controller_variant,
-                                                     model=model_save_name),
+                                                     model=model_save_name,
+                                                     extra_name=extra_name),
         "max_steps": obj["max_steps"],
     }
 
     columns = common.COMMON_COLUMNS + [common.SESSION_COLUMN]
     tasks = common.select_tasks(get_benchmark_tasks(game=game), obj["n_tasks"])
     save_path = common.results_path(parameters, game, supervisor=supervisor_name, executor=executor, controller_variant=controller_variant,
-                                    model=model_save_name, n_tasks=obj["n_tasks"])
+                                    model=model_save_name, extra_name=extra_name,
+                                    n_tasks=obj["n_tasks"])
     results, n_completed = common.load_checkpoint(save_path, obj["regenerate"],
                                                   columns, parameters)
 
@@ -78,6 +81,7 @@ def baseline_cmd(obj):
             controller_variant=obj["controller_variant"],
             executor_name=executor_class.__name__,
             model=model_save_name,
+            extra_name=extra_name,
             **emulator_kwargs,
         )
 

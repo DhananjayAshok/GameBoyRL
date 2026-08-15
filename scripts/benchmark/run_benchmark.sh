@@ -67,6 +67,11 @@ fi
 if [[ "${ARGS["regenerate"]}" == "true" ]]; then
     optional_flags+=" --regenerate"
 fi
+# Omitted when absent rather than passed as the sentinel, so a run without one keeps exactly
+# the name it had before --extra_name existed.
+if [[ "${ARGS["extra_name"]}" != "none" ]]; then
+    optional_flags+=" --extra_name ${ARGS["extra_name"]}"
+fi
 
 group_flags="--game ${ARGS["game"]}"
 group_flags+=" --controller_variant ${ARGS["controller_variant"]}"

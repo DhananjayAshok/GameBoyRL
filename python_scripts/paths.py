@@ -32,6 +32,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from utils.fundamental import depathify
 from utils.log_handling import log_error
 from utils.parameter_handling import load_parameters
 
@@ -339,27 +340,6 @@ def insights_jsonl(parameters=None, *, game: str, model_name: str, run_name: str
                         INSIGHTS_FILENAME)
 
 
-def info_available_sources(parameters=None, *, game: str, model_name: str, run_name: str,
-                           executor: str, controller_variant: str) -> list[str]:
-    """Which of {zeroshot, curiosity} actually have build_info inputs on disk for this game.
-
-    Replaces the Bash function of the same name. The all-games sweep uses this to pick each
-    game's ``--mode`` rather than assuming both exist: most games have only one vertical, and
-    demanding both would skip them entirely.
-
-    Returned in the Bash vocabulary ('zeroshot', not 'attempt'), zeroshot first, because that is
-    the verified-solution source and reads first in a comma-joined ``--info_docs`` list.
-    """
-    parameters, _, _ = _roots(parameters)
-    found = []
-    for source in ("zeroshot", "curiosity"):
-        stem = info_source_stem(parameters, game=game, model_name=model_name,
-                                run_name=run_name, executor=executor, controller_variant=controller_variant, source=source)
-        if os.path.isfile(f"{stem}.json") and os.path.isfile(f"{stem}.pkl"):
-            found.append(source)
-    return found
-
-
 def parametric_doc(parameters=None, *, game: str, model_name: str) -> str:
     """The parametric document for this game and model.
 
@@ -384,34 +364,54 @@ def benchmark_dir(parameters=None, *, game: str) -> str:
     return os.path.join(results, "benchmark", game)
 
 
+def _extra_part(extra_name: Optional[str]) -> str:
+    """``_<extra_name>`` when set, else empty. ``"none"`` is the shell's absent sentinel."""
+    if extra_name is None or extra_name == "" or extra_name == "none":
+        return ""
+    return f"_{depathify(str(extra_name))}"
+
+
 def benchmark_stem(*, supervisor: str, executor: str, controller_variant: str, model: str,
+                   extra_name: Optional[str] = None,
                    n_tasks: Optional[int] = None) -> str:
     """The CSV basename, without extension.
 
     ``supervisor`` is what the old consumer omitted, and ``n_tasks`` the other half: a subset
     run gets its own file, because resuming a full sweep from a 5-task CSV would read the
     first five as done and silently skip them.
+
+    ``extra_name`` is a free-text discriminator for runs this identity cannot otherwise tell
+    apart — the retrieval arm's ``--docs_mode`` being the case it was added for, since which
+    documents were read is part of that experiment but reaches neither the supervisor name nor
+    any other component here. It sits before ``_firstN`` so the subset marker stays last.
+
+    Omitting it reproduces the old name exactly, so runs that do not need it are unaffected.
     """
-    return (f"{supervisor}_{executor}_{controller_variant}_{model}_first{n_tasks}" if n_tasks is not None
-            else f"{supervisor}_{executor}_{controller_variant}_{model}")
+    extra = _extra_part(extra_name)
+    base = f"{supervisor}_{executor}_{controller_variant}_{model}{extra}"
+    return f"{base}_first{n_tasks}" if n_tasks is not None else base
 
 
 def benchmark_session_name(*, supervisor: str, executor: str, controller_variant: str,
-                           model: str) -> str:
+                           model: str, extra_name: Optional[str] = None) -> str:
     """The emulator session directory name for one benchmark run.
 
-    Shares ``supervisor``/``executor``/``controller_variant``/``model`` with
+    Shares ``supervisor``/``executor``/``controller_variant``/``model``/``extra_name`` with
     :func:`benchmark_stem` on purpose: an episode's CSV row and the session holding its video
     and archived report have to be findable from each other, and they were previously two
     f-strings per arm that happened to agree.
+
+    Carries no ``n_tasks``: a subset run records into the same session tree as the full sweep,
+    keyed per task below this level, so there is nothing to collide.
     """
-    return f"benchmark_{supervisor}_{executor}_{controller_variant}_{model}"
+    return (f"benchmark_{supervisor}_{executor}_{controller_variant}_{model}"
+            f"{_extra_part(extra_name)}")
 
 
 def benchmark_csv(parameters=None, *, game: str, supervisor: str, executor: str,
-                  controller_variant: str, model: str,
+                  controller_variant: str, model: str, extra_name: Optional[str] = None,
                   n_tasks: Optional[int] = None, create: bool = False) -> str:
-    """``<results>/benchmark/<game>/<supervisor>_<executor>_<controller_variant>_<model>[_firstN].csv``.
+    """``<results>/benchmark/<game>/<supervisor>_<executor>_<controller_variant>_<model>[_<extra>][_firstN].csv``.
 
     ``model`` is already a save-name here, not a full model name — callers pass either
     :func:`model_save_name` output or :func:`finetuned_model_name` output.
@@ -420,7 +420,8 @@ def benchmark_csv(parameters=None, *, game: str, supervisor: str, executor: str,
     if create:
         os.makedirs(directory, exist_ok=True)
     stem = benchmark_stem(supervisor=supervisor, executor=executor,
-                          controller_variant=controller_variant, model=model, n_tasks=n_tasks)
+                          controller_variant=controller_variant, model=model,
+                          extra_name=extra_name, n_tasks=n_tasks)
     return os.path.join(directory, f"{stem}.csv")
 
 
@@ -627,6 +628,10 @@ class Paths:
     run_name: str = "my_run"
     executor: str = "single_actions"
     controller_variant: str = "low_level"
+    #: Free-text discriminator appended to benchmark names. See :func:`benchmark_stem`.
+    #: A debug tool must be given the same value the run used, or it looks for a file that
+    #: was never written under that name.
+    extra_name: Optional[str] = None
     model_name: Optional[str] = None
     output_dir: Optional[str] = None
     mode: str = "both"
@@ -728,9 +733,6 @@ class Paths:
     def insights_jsonl(self, source: str = "attempt") -> str:
         return insights_jsonl(self.parameters, source=source, **self._info_kwargs())
 
-    def info_available_sources(self) -> list[str]:
-        return info_available_sources(self.parameters, **self._info_kwargs())
-
     def parametric_doc(self) -> str:
         return parametric_doc(self.parameters, game=self.game, model_name=self._model)
 
@@ -739,7 +741,9 @@ class Paths:
     def benchmark_csv(self, bench_game: str, model: str, supervisor: str,
                       n_tasks: Optional[int] = None, create: bool = False) -> str:
         return benchmark_csv(self.parameters, game=bench_game, supervisor=supervisor,
-                             executor=self.executor, controller_variant=self.controller_variant, model=model, n_tasks=n_tasks,
+                             executor=self.executor,
+                             controller_variant=self.controller_variant,
+                             model=model, extra_name=self.extra_name, n_tasks=n_tasks,
                              create=create)
 
     def benchmark_series_csv(self) -> str:
