@@ -195,7 +195,7 @@ Work in two parts.
 
 **First, diagnose.** Say what is actually going wrong, using the reasons the player gave for each button beside what the frames show happened. Name the mechanism, not the symptom: not "they failed to select the tool" but why the presses that should have selected it did not.
 
-**Then instruct.** Unlike the plan, which describes goals without mentioning controls, your hint names the actual controls: UP, DOWN, LEFT, RIGHT, A, B, START, SELECT. Say **what each button does towards this goal** — which one moves the cursor, which one confirms, which one backs out of the menu they are stuck in. Use the recorded knowledge above wherever it names a control or what it does; that is what it is for.
+**Then instruct.** Unlike the plan, which describes goals without mentioning controls, your hint names the actual controls: UP, DOWN, LEFT, RIGHT, A, B, START. Say **what each button does towards this goal** — which one moves the cursor, which one confirms, which one backs out of the menu they are stuck in. Use the recorded knowledge above wherever it names a control or what it does; that is what it is for.
 
 **Do not give a count or a sequence.** Not "press DOWN four times, then A". The player acts one button at a time and looks at the screen again after each one, so a recipe written from this screen is wrong by its second step, and a player following it stops watching the screen. Give them the function of each control and the visible condition that tells them to stop: "DOWN moves the selection down the list — keep going until KEY1 is the circled entry, then A confirms it."
 

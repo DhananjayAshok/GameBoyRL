@@ -19,6 +19,8 @@ populate_dict DEBUG_MODEL_DEFAULTS ARGS
 ARGS["compare_model"]="none"
 ARGS["bench_game"]="none"
 ARGS["max_episodes"]=0
+ARGS["supervisor"]="dummy"
+ARGS["n_tasks"]="none"
 
 # --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -65,8 +67,15 @@ done
 
 group_flags=$(debug_group_flags ARGS)
 
+if [[ "${ARGS["n_tasks"]}" != "none" ]]; then
+    n_tasks_arg="--n_tasks ${ARGS["n_tasks"]}"
+else
+    n_tasks_arg=""
+fi
+
 python debug.py $group_flags benchmark \
     --model_name "${ARGS["model_name"]}" \
     --compare_model "${ARGS["compare_model"]}" \
     --bench_game "${ARGS["bench_game"]}" \
-    --max_episodes "${ARGS["max_episodes"]}" || exit 1
+    --supervisor "${ARGS["supervisor"]}" \
+    --max_episodes "${ARGS["max_episodes"]}" $n_tasks_arg || exit 1

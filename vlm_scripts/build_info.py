@@ -88,24 +88,24 @@ Insights:
 - <another>
 [STOP]"""
 
-MATCH_PROMPT = """You are consolidating a knowledge base for the game [GAME] and must decide whether a new entry describes something already in it.
+MATCH_PROMPT = """You are consolidating a knowledge base for the game [GAME] and must decide whether a new entry teaches something already in it.
 
-Here is the NEW entry:
+Here is the NEW entry, with its insights:
 [CANDIDATE]
 
-Here are the EXISTING entries, numbered:
+Here are the EXISTING entries, numbered, with their insights:
 [EXISTING]
 
 The images are: first the NEW entry's representative frame, then the representative frame of each existing entry in the order listed above.
 
-Does the new entry match one of the existing entries — do they handle the same or a very similar [KIND]?
+Decide primarily on the INSIGHTS. Two entries match when their insights say the same thing, or say things so close that one consolidated list would be strictly better than two separate ones — the same mechanic, the same cue, the same button at the same moment, the same failure mode. The category, description, examples and frames are supporting evidence for that judgement, not the judgement itself: two entries can carry different category names and still match if the insights teach the same lesson, and two entries can share a category name and NOT match if their insights are about different mechanics.
 
-The frames are your primary evidence. Two entries whose wording sounds alike but whose frames plainly show different situations are NOT a match. Two entries whose wording differs but whose frames show the same situation and the same underlying [KIND] ARE a match.
+Default to NONE. Answer with a number only when the insights are highly similar — essentially the same lesson about the same [KIND], not merely related or adjacent. If you are weighing whether two insight lists are close enough, they are not: say NONE.
 
-Be honest in both directions. Matching things that are genuinely different produces a mushy, useless entry. Refusing to match things that are genuinely the same means knowledge never accumulates.
+Merging entries whose insights are genuinely different produces a mushy, useless entry, and a wrong match is far more damaging than a missed one.
 
 Respond in exactly this format:
-Reasoning: <one or two sentences, referring to the frames>
+Reasoning: <one or two sentences, comparing the insights and referring to the frames>
 Match: <the number of the matching entry, or NONE>
 [STOP]"""
 
@@ -265,12 +265,19 @@ def run_stage_a(task_map, traj_map, out_dir, vlm, game, max_new_tokens, n_frames
             # only because the CLI happens to have cleared the file first.
             os.remove(insights_path)
         else:
+            n_unusable = 0
             with open(insights_path, "r") as handle:
                 for line in handle:
                     if line.strip():
                         row = json.loads(line)
+                        if not isinstance(row.get("document"), dict):
+                            n_unusable += 1
+                            continue
                         done[row["group_idx"]] = row
             log_info(f"Resuming stage A — {len(done)} pairs already extracted.")
+            if n_unusable:
+                log_warn(f"Ignoring {n_unusable} row(s) in {INSIGHTS_FILENAME} whose document "
+                         f"is not a dict; those pairs will be re-extracted.")
 
     pending = []
     for group_idx in sorted(task_map.keys()):
@@ -371,6 +378,15 @@ def fold_section(doc1: InfoDocument, doc2: InfoDocument, section: str, root: str
     accumulator = doc1.entries(section)
     log = []
 
+    def match_block(item: Entry) -> str:
+        # evidence_block() is deliberately insight-free — it is also used by retrieval, where
+        # identity must not be judged on advice. The match call wants both, so it is composed
+        # here rather than by widening evidence_block.
+        block = item.evidence_block()
+        if item.insights:
+            block += "\nInsights:\n" + item.insights_block()
+        return block
+
     for entry in doc2.entries(section):
         if not accumulator:
             accumulator.append(entry)
@@ -378,13 +394,13 @@ def fold_section(doc1: InfoDocument, doc2: InfoDocument, section: str, root: str
             continue
 
         existing_text = "\n\n".join(
-            f"{i + 1}. {item.evidence_block()}" for i, item in enumerate(accumulator)
+            f"{i + 1}. {match_block(item)}" for i, item in enumerate(accumulator)
         )
         prompt = (
             MATCH_PROMPT
             .replace("[GAME]", game)
             .replace("[KIND]", kind)
-            .replace("[CANDIDATE]", entry.evidence_block())
+            .replace("[CANDIDATE]", match_block(entry))
             .replace("[EXISTING]", existing_text)
         )
         images = [img for img in [_frame_image(root, entry)] if img is not None]
