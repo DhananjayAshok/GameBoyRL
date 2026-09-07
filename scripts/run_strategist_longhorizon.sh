@@ -18,11 +18,11 @@ export HF_HOME="/scratch/af3698/huggingface_cache"
 export OPENAI_API_KEY="${OPENAI_API_KEY:-not-required-using-vllm}"
 
 MODEL="Qwen/Qwen2.5-VL-32B-Instruct-AWQ"
-GAME="pokemon_red"
-GOAL="Play through Pokemon Red as far as you can: obtain a Pokemon, explore new towns and routes, and earn gym badges"
+GAME="${GAME:-pokemon_red}"   # pokemon_red | pokemon_prism | pokemon_brown
+GOAL="${GOAL:-Play through the game as far as you can: obtain a Pokemon, explore new towns and routes, and earn gym badges}"
 EXECUTOR="single_actions"
-MAX_TASKS=14      # >10 so compression fires; 14 x ~66min ~= 15h, inside the wall with margin
-MAX_STEPS=175     # same per-attempt budget as the benchmark arms
+MAX_TASKS="${MAX_TASKS:-14}"   # >10 so compression fires; 14 x ~66min ~= 15h, inside the wall
+MAX_STEPS="${MAX_STEPS:-175}"     # same per-attempt budget as the benchmark arms
 
 echo "=== GPU state at job start ==="
 nvidia-smi --query-gpu=index,memory.free,memory.total --format=csv,noheader

@@ -66,7 +66,6 @@ Checkpointing
 import json
 import os
 import pickle
-import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
@@ -400,19 +399,7 @@ def attempt_tasks_cmd(
 
         for future in tqdm(as_completed(future_to_group), total=len(future_to_group), desc="Attempting tasks"):
             group_idx = future_to_group[future]
-            try:
-                result_record, trajectory = future.result()
-            except Exception as exc:
-                tb = traceback.format_exc()
-                log_warn(f"Task {group_idx} crashed with {type(exc).__name__}: {exc}. Marking as failed.")
-                print(f"[CRASH TRACEBACK task={group_idx}]\n{tb}", flush=True)
-                result_record = {
-                    "init_state": None, "task_string": None, "success": False,
-                    "description": "", "reasoning": f"crashed: {exc}",
-                    "n_tries": 0, "final_hint": "", "termination_reason": "error",
-                    "n_env_steps": 0, "max_steps": 0,
-                }
-                trajectory = None
+            result_record, trajectory = future.result()
             results[group_idx] = result_record
             trajectories[group_idx] = trajectory
 

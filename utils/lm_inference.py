@@ -794,7 +794,7 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
                         base64.b64encode(image_file.read()).decode("utf-8")
                     )
         finally:
-            shutil.rmtree(cache_dir, ignore_errors=True)
+            shutil.rmtree(cache_dir)
         return encoded_images
 
     @abstractmethod

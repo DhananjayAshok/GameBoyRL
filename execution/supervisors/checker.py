@@ -113,8 +113,7 @@ class AttemptCheckerSupervisor(Supervisor):
                     .replace("[START_IDX]", "1")
                     .replace("[END_IDX]", str(total))
                     .replace("[TOTAL]", str(total)),
-                images=[all_frames[-1]],
-                max_new_tokens=self._checker_max_new_tokens,
+                images=all_frames,
             )
             return parse_key_value(output, "Description") or output.strip()
 
@@ -178,8 +177,7 @@ class AttemptCheckerSupervisor(Supervisor):
         judge_output = self._vlm_call(
             "judge",
             texts=judge_prompt,
-            images=[final_frames[-1]],
-            max_new_tokens=self._checker_max_new_tokens,
+            images=final_frames,
         )
 
         reasoning = parse_key_value(judge_output, "Reasoning") or ""
@@ -288,10 +286,7 @@ def window_trajectory(
         )
         segment_ranges.append((start, end))
         segment_prompts.append(prompt)
-        # One frame per segment (the last frame of the window) to stay within vLLM's
-        # per-request image limit. Concurrent requests share the tracker, so even
-        # 1-image requests batched together appear as N images collectively.
-        segment_images.append([frames[end - 1]])
+        segment_images.append(frames[start:end])
 
     outputs = call(texts=segment_prompts, images=segment_images,
                    max_new_tokens=max_new_tokens)
