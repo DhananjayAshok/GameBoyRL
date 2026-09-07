@@ -214,7 +214,7 @@ def extract_insights(trajectory, task, vlm, game, max_new_tokens, n_frames=8, ve
     if verbose:
         print(f"EXTRACT prompt:\n{prompt}\n---")
 
-    output = vlm.infer(texts=prompt, images=frames, max_new_tokens=max_new_tokens)["output"]
+    output = vlm.infer(texts=prompt, images=[frames[-1]] if frames else None, max_new_tokens=max_new_tokens)["output"]
     if verbose:
         print(f"EXTRACT output:\n{output}\n---")
 
@@ -393,7 +393,7 @@ def fold_section(doc1: InfoDocument, doc2: InfoDocument, section: str, root: str
 
         if verbose:
             print(f"MATCH prompt ({section}):\n{prompt}\n---")
-        output = vlm.infer(texts=prompt, images=images or None, max_new_tokens=max_new_tokens)["output"]
+        output = vlm.infer(texts=prompt, images=[images[-1]] if images else None, max_new_tokens=max_new_tokens)["output"]
         if verbose:
             print(f"MATCH output:\n{output}\n---")
 

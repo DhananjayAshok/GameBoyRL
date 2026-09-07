@@ -64,7 +64,7 @@ Task: [TASK][HINT_BLOCK]
 
 You are judging whether a task being played on a GameBoy has been FULLY completed.
 
-Image 1 is the screen BEFORE the most recent action. Image 2 is the screen AFTER it.
+The image is the screen AFTER the most recent action.
 
 Most recent action: [LAST_ACTION]
 [REASONING_LABEL]
@@ -74,7 +74,7 @@ Most recent action: [LAST_ACTION]
 
 Respond in exactly this format, with the verdict FIRST:
 Complete: <yes or no>
-Reasoning: <why, referring to what is visible in image 2>
+Reasoning: <why, referring to what is visible in the image>
 [STOP]"""
 
     DONE_CHECK_REASONING_LABEL = "The reasoning given for that action was:"
@@ -442,9 +442,9 @@ Reasoning: <why, referring to what is visible in image 2>
         """
         Ask the VLM whether the task is now fully complete.
 
-        One call, tagged ``"done_check"``, showing the frames either side of *record* along
-        with the task, the hint, the action just taken, the reasoning that chose it and the
-        recent action history. Consumes no environment step and no tool budget.
+        One call, tagged ``"done_check"``, showing the frame *after* *record* along with the
+        task, the hint, the action just taken, the reasoning that chose it and the recent
+        action history. Consumes no environment step and no tool budget.
 
         :param record: The step record just appended by :meth:`_take_action`.
         :return: ``True`` only on an explicit ``Complete: yes``.
@@ -453,7 +453,12 @@ Reasoning: <why, referring to what is visible in image 2>
         response = self._vlm_call(
             "done_check",
             texts=prompt,
-            images=[record.frame_before, record.frame_after],
+            # One image, not the pair either side of the step: vLLM serves a single image
+            # per request and rejects two outright, so the pair made every completion check
+            # a hard 400. Unreached by the benchmark arms, which all run with
+            # allow_self_termination off, and hit immediately by the strategist, which
+            # cannot run without it. The AFTER frame is the one the verdict is about.
+            images=[record.frame_after],
             max_new_tokens=self.DONE_CHECK_MAX_NEW_TOKENS,
         )
         verdict = parse_completion(response)
