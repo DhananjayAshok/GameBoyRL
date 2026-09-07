@@ -88,7 +88,7 @@ fi
 # --- one arm, selected by $ARM ---
 ARM="${ARM:-true}"          # true = control (notebook), false = ablation
 echo ""
-echo "=== LONG-HORIZON pokemon_red | use_notebook=$ARM | $MAX_TASKS tasks x $MAX_STEPS steps ==="
+echo "=== PLAYTHROUGH $GAME | strategist=${STRAT:-subgoal} | notebook=$ARM | $MAX_TASKS x $MAX_STEPS ==="
 python run_strategist.py \
   --game "$GAME" \
   --goal "$GOAL" \
@@ -97,6 +97,7 @@ python run_strategist.py \
   --executor_vlm_kind vllm \
   --max_tasks "$MAX_TASKS" \
   --max_steps_per_task "$MAX_STEPS" \
+  --strategist "${STRAT:-subgoal}" \
   --use_notebook "$ARM" \
   --verify_goal false \
   --stop_on_goal false \
