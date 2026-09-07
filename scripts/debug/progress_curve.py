@@ -23,13 +23,22 @@ import click
 
 from utils import load_parameters
 
-#: Signals worth a column. Ordered roughly by how much progress they represent.
+#: Columns every game has, because they come from the environment's own subgoal metric
+#: rather than from a per-game parser. `subgoals.n_completed` is badges won on any of the
+#: Pokemon games -- Red's are boulder/cascade/..., Brown's marine/hail/..., Prism's
+#: pyre/nature/... -- so the same column means the same thing across all of them.
 TRACKED = [
-    ("badges", "badges"),
+    ("subgoals.n_completed", "objectives"),
+    ("subgoals.next", "working on"),
+    ("core.steps", "steps"),
+]
+
+#: Extra columns shown only when a game publishes them. Red's tracker exposes the starter
+#: and a location count; the ROM hacks do not, and a column of dashes for them would imply
+#: the agent failed at something rather than that the signal does not exist.
+OPTIONAL = [
     ("pokemon_red_starter.current_starter", "starter"),
     ("pokemon_red_location.n_of_unique_locations", "locs"),
-    ("pokemon_red_location.n_walk_steps", "walked"),
-    ("core.steps", "steps"),
 ]
 
 
@@ -38,8 +47,9 @@ def _curve(run: dict) -> None:
     print(f"--- {os.path.basename(run['_path'])}")
     print(f"    arm: {arm} | goal: {run['goal'][:60]}")
     print(f"    reached: {run['goal_achieved']} ({run['stop_reason']})")
-    header = "    " + "task".ljust(6) + "".join(label.rjust(10) for _, label in TRACKED)
-    print(header)
+    present = {k for t in run["tasks"] for k in (t.get("progress") or {})}
+    columns = TRACKED + [(k, lbl) for k, lbl in OPTIONAL if k in present]
+    print("    " + "task".ljust(6) + "".join(label.rjust(13) for _, label in columns))
     seen_any = False
     for task in run["tasks"]:
         prog = task.get("progress") or {}
@@ -47,18 +57,29 @@ def _curve(run: dict) -> None:
             continue
         seen_any = True
         cells = []
-        for key, _ in TRACKED:
+        for key, _ in columns:
             v = prog.get(key)
-            cells.append(("-" if v is None else str(v))[:10].rjust(10))
+            # a badge name is long and only its tail distinguishes it: collect_boulder_badge
+            # and collect_cascade_badge share a prefix, so truncating from the left would
+            # render both as the same string.
+            text = "-" if v is None else str(v).replace("collect_", "").replace("_badge", "")
+            cells.append(text[-12:].rjust(13))
         print("    " + f"#{task['index']}".ljust(6) + "".join(cells))
     if not seen_any:
         print("    (no progress recorded — run predates progress snapshots)")
     # The end state is what a comparison actually turns on.
     last = next((t["progress"] for t in reversed(run["tasks"]) if t.get("progress")), {})
     if last:
-        locs = last.get("pokemon_red_location.unique_locations")
-        print(f"    final: badges={last.get('badges')} starter={last.get('pokemon_red_starter.current_starter')} "
-              f"locations={locs}")
+        done = last.get("subgoals.completed") or []
+        total = last.get("subgoals.n_total")
+        bits = [f"objectives {len(done)}/{total}" if total else "objectives: not published"]
+        if done:
+            bits.append("won: " + ", ".join(g.replace("collect_", "") for g in done))
+        if last.get("pokemon_red_starter.current_starter"):
+            bits.append(f"starter {last['pokemon_red_starter.current_starter']}")
+        if last.get("pokemon_red_location.unique_locations"):
+            bits.append(f"locations {last['pokemon_red_location.unique_locations']}")
+        print("    final: " + " | ".join(bits))
     print()
 
 
