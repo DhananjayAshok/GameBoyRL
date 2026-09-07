@@ -127,6 +127,11 @@ GAME_START = {
                    "disables the ledger heuristic, which is what a progression goal wants: "
                    "'play as far as you can' has no completion condition and the ledger will "
                    "answer yes to the first sign of progress.")
+@click.option("--reflect_n_frames", default=1, show_default=True, type=int,
+              help="Frames of the attempt the reflection call sees. vLLM serves ONE image "
+                   "per request and returns a 400 on two, so >1 needs a backend that "
+                   "permits it. More frames give reflection more to build the world map "
+                   "from — with none it recorded no map facts for an entire run.")
 @click.option("--verbose", is_flag=True, default=False)
 def main(game, goal, benchmark_task, strategist, executor, controller_variant, executor_vlm_model,
          executor_vlm_kind, strategist_vlm_model, strategist_vlm_kind, max_tasks,
@@ -242,6 +247,7 @@ def main(game, goal, benchmark_task, strategist, executor, controller_variant, e
             # the thing being accumulated.
             reset_between_tasks=benchmark_task is not None,
             goal_ledger_key=goal_ledger_key,
+            reflect_n_frames=reflect_n_frames,
             parameters=parameters,
             verbose=verbose,
             on_task_complete=_checkpoint,

@@ -83,6 +83,11 @@ class Strategist:
         a Pokemon key baked into it made that untrue.
     :param goal_check_instruction: What the screen check should look for. Defaults to the
         Pokemon party-menu instruction.
+    :param reflect_n_frames: How many frames of the attempt the reflection call sees. One by
+        default, which is what vLLM serves per request — asking for more against a backend
+        that permits one is a hard 400, not a truncation, so this raises loudly rather than
+        silently sending fewer. More frames give reflection more to build the world map
+        from; the map stayed empty for a whole run when it had none.
     :param parameters: Parameter overrides, from ``load_parameters``.
     :param verbose: Print each task and outcome as it happens.
     :param on_task_complete: Optional callable invoked with :attr:`report` after each task,
@@ -136,6 +141,7 @@ class Strategist:
         reset_between_tasks: bool = False,
         goal_ledger_key: str = "",
         goal_check_instruction: str = "",
+        reflect_n_frames: int = 1,
         parameters: Optional[dict] = None,
         verbose: bool = False,
         on_task_complete: Optional[Any] = None,
@@ -158,6 +164,7 @@ class Strategist:
         self._reset_between_tasks = reset_between_tasks
         self._goal_ledger_key = goal_ledger_key.strip().lower()
         self._goal_check_instruction = goal_check_instruction
+        self._reflect_n_frames = max(1, int(reflect_n_frames))
         self._parameters = load_parameters(parameters)
         self._verbose = verbose
         #: Called with this report after every task. A long run writes its record only when
@@ -202,6 +209,7 @@ class Strategist:
             "stop_on_goal": self._stop_on_goal,
             "reset_between_tasks": self._reset_between_tasks,
             "goal_ledger_key": self._goal_ledger_key,
+            "reflect_n_frames": self._reflect_n_frames,
         }
 
     # ------------------------------------------------------------------ model
@@ -512,9 +520,9 @@ class Strategist:
         # place from and answers "none" every time, leaving the world map — the entire
         # substitute for coordinates — permanently empty. One image, which is all vLLM
         # serves per request, and the last one, which is where the player actually is.
-        frame = self._current_frame()
+        frames = self._reflection_frames()
         facts, updates, lesson = parse_reflection(
-            self._call("reflect", prompt, images=[frame] if frame is not None else None)
+            self._call("reflect", prompt, images=frames or None)
         )
 
         self.notebook.add_world_facts(facts)
@@ -538,6 +546,41 @@ class Strategist:
             termination_reason=outcome,
             lesson=record.lesson,
         )
+
+    def _reflection_frames(self) -> list:
+        """
+        The frames the reflection call sees, honouring :attr:`_reflect_n_frames`.
+
+        The last frame is always included and is always last, because "where the player
+        ended up" is what the prompt asks about. Earlier frames are drawn from the executor's
+        recorded steps when more than one is requested.
+        """
+        latest = self._current_frame()
+        if self._reflect_n_frames <= 1:
+            return [latest] if latest is not None else []
+
+        earlier: list = []
+        try:
+            record = self.report.tasks[-1] if self.report.tasks else None
+            legs = record.report.executor_reports if record and record.report else []
+            steps = legs[-1].steps if legs else []
+            for step in steps:
+                frame = getattr(step, "frame_after", None)
+                if frame is not None:
+                    earlier.append(frame)
+        except Exception as error:  # noqa: BLE001
+            log_warn(f"Could not collect earlier frames for reflection: {error}",
+                     self._parameters)
+
+        # Evenly spaced across the attempt rather than the last n, which would all show the
+        # same stuck screen on a task that failed by not moving.
+        wanted = self._reflect_n_frames - 1
+        if earlier and wanted:
+            stride = max(1, len(earlier) // wanted)
+            earlier = earlier[::stride][:wanted]
+        else:
+            earlier = []
+        return earlier + ([latest] if latest is not None else [])
 
     def _narrative(self, report: Optional[SupervisorReport]) -> str:
         """

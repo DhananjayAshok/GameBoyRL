@@ -62,6 +62,55 @@ Hint: <one sentence of advice for this attempt, drawn from past lessons, or the 
 [STOP]"""
 
 
+# --- Planning against a standing objective ------------------------------------------------
+# The playthrough planner. Differs from PLAN_PROMPT in one way that matters: it is told the
+# CURRENT OBJECTIVE, which the environment supplies and which does not change until that
+# objective is actually won. Without it the planner re-derives what to aim at from the
+# notebook every turn and drifts -- a run given "play as far as you can" wandered for
+# fourteen tasks because nothing held it to a target.
+#
+# The objective is ground truth from the testbed's subgoal metric, not a belief the model
+# wrote, which is what makes it safe to hold the planner to it.
+
+PLAN_TOWARD_OBJECTIVE_PROMPT = """You are the strategist for a player working through a game of [GAME].
+
+The overall goal: "[GOAL]"
+
+## CURRENT OBJECTIVE
+[OBJECTIVE]
+
+Objectives completed so far: [COMPLETED]
+Objectives remaining: [REMAINING]
+
+Here is your notebook — everything you have established so far:
+[NOTEBOOK]
+
+You will now issue ONE task that makes progress toward the CURRENT OBJECTIVE above. A
+separate player will attempt it. That player:
+- CANNOT see this notebook, the objective, or any previous task.
+- Sees only the current screen and the sentence you write.
+- Has roughly [MAX_STEPS] button presses before the attempt is cut off.
+- Can walk, interact with things and people, use menus, and fight battles.
+
+Rules for the task you write:
+- It must be ONE imperative sentence that stands entirely on its own.
+- It must serve the CURRENT OBJECTIVE. Do not switch to a different objective: this one is
+  not finished until the game itself says so, and the notebook cannot overrule that.
+- It must be reachable in [MAX_STEPS] presses from where the player is now. A long objective
+  is reached by a sequence of such tasks, not by one instruction that describes all of it.
+- Describe places by what they look like on screen, never by coordinates or map numbers.
+- If a previous attempt failed, do not reissue it unchanged. Use its Lesson to write a
+  different task, or a smaller one.
+- If the notebook shows the player is lost or stuck, it is legitimate to spend a task
+  exploring or asking an NPC rather than pushing at the same obstacle again.
+
+Respond in exactly this format:
+Reasoning: <one or two sentences on how this task advances the current objective>
+Task: <the single imperative sentence for the player>
+Hint: <one sentence of advice for this attempt, drawn from past lessons, or the word none>
+[STOP]"""
+
+
 # --- Reflection ---------------------------------------------------------------------------
 # Run after every attempt. Three jobs at once — extend the map, update the beliefs, state the
 # lesson — because they are one act of reading the same trajectory, and splitting them into

@@ -24,6 +24,7 @@ from execution.strategists.report import (
     TaskRecord,
 )
 from execution.strategists.strategist import Strategist
+from execution.strategists.subgoal import SubgoalStrategist
 from execution.strategists.tracker_goal import TrackerGoalStrategist
 from execution.strategists.supervisor import HintedSupervisor
 
@@ -35,11 +36,15 @@ AVAILABLE_STRATEGISTS: dict[str, type[Strategist]] = {
     # variant whose control-vs-ablation numbers are comparable, and the only one on the
     # same scale as run_benchmark.py's executor arms.
     "tracker": TrackerGoalStrategist,
+    # The playthrough planner: aims at the environment's own subgoals (the eight badges)
+    # rather than re-deriving a target from the notebook every turn.
+    "subgoal": SubgoalStrategist,
 }
 
 __all__ = [
     "Strategist",
     "TrackerGoalStrategist",
+    "SubgoalStrategist",
     "HintedSupervisor",
     "Notebook",
     "AttemptEntry",
