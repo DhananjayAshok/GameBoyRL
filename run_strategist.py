@@ -225,6 +225,25 @@ def main(game, goal, benchmark_task, strategist, executor, controller_variant, e
     log_info(f"Strategist run: {run_name} on {game}", parameters)
     log_info(f'Goal: "{goal}"', parameters)
 
+    out_dir = os.path.join(parameters["storage_dir"], "strategist", game)
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"{run_name}_{stamp}.json")
+
+    def _checkpoint(report) -> None:
+        """Write the record after every task.
+
+        A playthrough runs for hours and can be killed by the wall clock, an OOM on a shared
+        GPU, or a crash in any one task. Writing only at the end means all of that work
+        leaves nothing behind; the last completed task is worth keeping even when the run
+        never reaches its own end. Failures here are logged and swallowed -- a checkpoint
+        that cannot be written must not take the run down with it.
+        """
+        try:
+            with open(out_path, "w") as handle:
+                json.dump(_serialise(report), handle, indent=2)
+        except Exception as error:  # noqa: BLE001
+            log_info(f"Could not checkpoint the record: {error}", parameters)
+
     try:
         agent = strategist_class(
             goal=goal,
