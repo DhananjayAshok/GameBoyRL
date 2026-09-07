@@ -160,7 +160,8 @@ def setup_sync(parameters, file_set, dry_run):
     for set_name in set_names:
         local_dir = set_root(set_name, parameters)
         if not os.path.exists(local_dir):
-            log_error(f"Root directory {local_dir} for set '{set_name}' does not exist, please check your configuration.", parameters)
+            os.makedirs(local_dir)
+            log_info(f"Created root directory {local_dir} for set '{set_name}'.", parameters)
         allow_patterns, ignore_patterns = set_patterns(set_name)
         result = api.snapshot_download(
             repo_id=repo_id,
