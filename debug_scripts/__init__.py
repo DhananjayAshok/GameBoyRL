@@ -22,6 +22,7 @@ from debug_scripts.attempt import debug_attempt
 from debug_scripts.benchmark import debug_benchmark
 from debug_scripts.compare import debug_compare
 from debug_scripts.info import debug_info
+from debug_scripts.practice import debug_practice
 
 __all__ = [
     "check_paths",
@@ -32,4 +33,5 @@ __all__ = [
     "debug_benchmark",
     "debug_compare",
     "debug_info",
+    "debug_practice",
 ]
