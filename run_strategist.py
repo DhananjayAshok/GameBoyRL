@@ -136,7 +136,8 @@ GAME_START = {
 def main(game, goal, benchmark_task, strategist, executor, controller_variant, executor_vlm_model,
          executor_vlm_kind, strategist_vlm_model, strategist_vlm_kind, max_tasks,
          max_steps_per_task, max_tool_calls, strategist_max_new_tokens, use_notebook,
-         verify_goal, stop_on_goal, save_video, extra_name, done_check_every_k, verbose):
+         verify_goal, stop_on_goal, save_video, extra_name, done_check_every_k,
+         goal_ledger_key, reflect_n_frames, verbose):
     """Pursue one long-horizon goal with a strategist."""
     parameters = load_parameters()
     if game not in GAME_START:
