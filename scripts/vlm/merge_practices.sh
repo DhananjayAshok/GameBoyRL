@@ -1,26 +1,23 @@
 #!/usr/bin/env bash
-# Reports the benchmark stage. Writes two markdowns under
-# <results_dir>/debug/<game>/benchmark/:
-#   episodes_<model>.md  every episode step by step, read from the archived supervisor
-#                        report beside that episode's video (per model, unlike the per-call
-#                        PNGs which are keyed on the executor class and overwritten by
-#                        whichever run finished last)
-#   comparison.md        paired base vs fine-tuned: success rates, subgoal fractions, and
-#                        every task solved by one model but not the other
+# Merges the train/validation datasets of several practice dirs into one pair, tagging every
+# row with the practice dir it came from (a `source` column). Used by
+# curiosity_and_zeroshot_all.sh to combine the curiosity and zeroshot verticals into
+# a single fine-tuning set.
+#
+# Images are referenced, not copied — the dataset CSVs hold absolute paths into each source's
+# images/ dir, so the merged CSV points at the originals.
+#
+# NOTE: "none" is a legitimate value of --balance here (no downsampling), not the usual
+# "argument absent" sentinel. There is no --overwrite: the merge always regenerates, since it
+# costs seconds against upstream legs that take days, and a stale merge would be trained on.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 
 declare -A ARGS
 REQUIRED_ARGS=()
 
-populate_array DEBUG_MODEL_ESSENTIALS REQUIRED_ARGS
-populate_dict DEBUG_MODEL_DEFAULTS ARGS
-
-ARGS["compare_model"]="none"
-ARGS["bench_game"]="none"
-ARGS["max_episodes"]=0
-ARGS["supervisor"]="dummy"
-ARGS["n_tasks"]="none"
+populate_array MERGE_PRACTICES_ESSENTIALS REQUIRED_ARGS
+populate_dict MERGE_PRACTICES_DEFAULTS ARGS
 
 # --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -65,17 +62,8 @@ for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
-group_flags=$(debug_group_flags ARGS)
-
-if [[ "${ARGS["n_tasks"]}" != "none" ]]; then
-    n_tasks_arg="--n_tasks ${ARGS["n_tasks"]}"
-else
-    n_tasks_arg=""
-fi
-
-python debug.py $group_flags benchmark \
-    --model_name "${ARGS["model_name"]}" \
-    --compare_model "${ARGS["compare_model"]}" \
-    --bench_game "${ARGS["bench_game"]}" \
-    --supervisor "${ARGS["supervisor"]}" \
-    --max_episodes "${ARGS["max_episodes"]}" $n_tasks_arg || exit 1
+python create_dataset.py merge_practices \
+    --practice_paths "${ARGS["practice_paths"]}" \
+    --save_path "${ARGS["save_path"]}" \
+    --balance "${ARGS["balance"]}" \
+    --seed "${ARGS["seed"]}" || exit 1

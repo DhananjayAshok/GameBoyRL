@@ -1,26 +1,16 @@
 #!/usr/bin/env bash
-# Reports the benchmark stage. Writes two markdowns under
-# <results_dir>/debug/<game>/benchmark/:
-#   episodes_<model>.md  every episode step by step, read from the archived supervisor
-#                        report beside that episode's video (per model, unlike the per-call
-#                        PNGs which are keyed on the executor class and overwritten by
-#                        whichever run finished last)
-#   comparison.md        paired base vs fine-tuned: success rates, subgoal fractions, and
-#                        every task solved by one model but not the other
+# Uses the VLM to annotate a trajectory file with step-by-step guidance, producing
+# a guidance file that practice_tasks.sh can use for guided practice sessions.
+# Input is a trajectory path (--trajectory_path); controls observation window size
+# via --max_obs_at_once.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 
 declare -A ARGS
 REQUIRED_ARGS=()
 
-populate_array DEBUG_MODEL_ESSENTIALS REQUIRED_ARGS
-populate_dict DEBUG_MODEL_DEFAULTS ARGS
-
-ARGS["compare_model"]="none"
-ARGS["bench_game"]="none"
-ARGS["max_episodes"]=0
-ARGS["supervisor"]="dummy"
-ARGS["n_tasks"]="none"
+populate_array INFER_GUIDANCE_ESSENTIALS REQUIRED_ARGS
+populate_dict INFER_GUIDANCE_DEFAULTS ARGS
 
 # --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -59,23 +49,30 @@ done
 if [ "$FAILED" = true ]; then usage; fi
 # --- End argument parsing ---
 
-# Print active variables
 echo "Script: $0 Active variables:"
 for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
-group_flags=$(debug_group_flags ARGS)
-
-if [[ "${ARGS["n_tasks"]}" != "none" ]]; then
-    n_tasks_arg="--n_tasks ${ARGS["n_tasks"]}"
+if [[ "${ARGS["overwrite"]}" == "true" || "${ARGS["overwrite"]}" == "yes" || "${ARGS["overwrite"]}" == "y" ]]; then
+    overwrite_flag="--overwrite"
 else
-    n_tasks_arg=""
+    overwrite_flag=""
 fi
 
-python debug.py $group_flags benchmark \
+if [[ "${ARGS["verbose"]}" == "true" || "${ARGS["verbose"]}" == "yes" || "${ARGS["verbose"]}" == "y" ]]; then
+    verbose_flag="--verbose"
+else
+    verbose_flag=""
+fi
+
+python vlm.py \
+    --game "${ARGS["game"]}" \
     --model_name "${ARGS["model_name"]}" \
-    --compare_model "${ARGS["compare_model"]}" \
-    --bench_game "${ARGS["bench_game"]}" \
-    --supervisor "${ARGS["supervisor"]}" \
-    --max_episodes "${ARGS["max_episodes"]}" $n_tasks_arg || exit 1
+    --vlm_kind "${ARGS["vlm_kind"]}" \
+    --max_new_tokens "${ARGS["max_new_tokens"]}" \
+    $overwrite_flag $verbose_flag \
+    infer_guidance \
+    --trajectory_path "${ARGS["trajectory_path"]}" \
+    --max_obs_at_once "${ARGS["max_obs_at_once"]}" \
+    --max_concurrency "${ARGS["max_concurrency"]}"

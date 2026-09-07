@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
-# Reports the benchmark stage. Writes two markdowns under
-# <results_dir>/debug/<game>/benchmark/:
-#   episodes_<model>.md  every episode step by step, read from the archived supervisor
-#                        report beside that episode's video (per model, unlike the per-call
-#                        PNGs which are keyed on the executor class and overwritten by
-#                        whichever run finished last)
-#   comparison.md        paired base vs fine-tuned: success rates, subgoal fractions, and
-#                        every task solved by one model but not the other
+# Reports the practice stage: judged success vs the environment-verified benchmark rate
+# (the optimism gap), per-task judged success, the safe_success_point cutoff that decides
+# how many calls each episode contributes, clean-filter accept rates, and a stratified
+# judge-audit image pack for manual scoring. Writes
+# <results_dir>/debug/<game>/practice/report.md.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 
@@ -16,11 +13,10 @@ REQUIRED_ARGS=()
 populate_array DEBUG_MODEL_ESSENTIALS REQUIRED_ARGS
 populate_dict DEBUG_MODEL_DEFAULTS ARGS
 
-ARGS["compare_model"]="none"
-ARGS["bench_game"]="none"
-ARGS["max_episodes"]=0
-ARGS["supervisor"]="dummy"
-ARGS["n_tasks"]="none"
+ARGS["leg"]="both"
+ARGS["n_audit"]=40
+ARGS["n_frames"]=8
+ARGS["seed"]=0
 
 # --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -67,15 +63,9 @@ done
 
 group_flags=$(debug_group_flags ARGS)
 
-if [[ "${ARGS["n_tasks"]}" != "none" ]]; then
-    n_tasks_arg="--n_tasks ${ARGS["n_tasks"]}"
-else
-    n_tasks_arg=""
-fi
-
-python debug.py $group_flags benchmark \
+python debug.py $group_flags practice \
     --model_name "${ARGS["model_name"]}" \
-    --compare_model "${ARGS["compare_model"]}" \
-    --bench_game "${ARGS["bench_game"]}" \
-    --supervisor "${ARGS["supervisor"]}" \
-    --max_episodes "${ARGS["max_episodes"]}" $n_tasks_arg || exit 1
+    --leg "${ARGS["leg"]}" \
+    --n_audit "${ARGS["n_audit"]}" \
+    --n_frames "${ARGS["n_frames"]}" \
+    --seed "${ARGS["seed"]}" || exit 1

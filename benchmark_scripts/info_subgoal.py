@@ -204,6 +204,7 @@ def _run(obj, *, mode, info_docs, parametric_categories,
                 parameters=parameters,
                 vlm_model=obj["executor_vlm_model"],
                 vlm_kind=obj["executor_vlm_kind"],
+                **obj["executor_kwargs"],
             )
             result = supervisor.evaluate()
             report = result["report"]

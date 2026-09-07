@@ -2,7 +2,8 @@
 Called by scripts/vlm/{attempt_tasks,build_info,infer_tasks,propose_zeroshot,propose_all_zeroshot}.sh.
 Use --help for CLI options.
 """
-from vlm_scripts import infer_tasks, propose_tasks_zeroshot, attempt_tasks, build_info
+from vlm_scripts import (infer_tasks, propose_tasks_zeroshot, attempt_tasks, build_info,
+                         infer_guidance, practice_tasks, clean_practice)
 import numpy as np
 import click
 from utils import load_parameters
@@ -53,6 +54,9 @@ main.add_command(infer_tasks, name="infer_tasks")
 main.add_command(propose_tasks_zeroshot, name="propose_tasks_zeroshot")
 main.add_command(attempt_tasks, name="attempt_tasks")
 main.add_command(build_info, name="build_info")
+main.add_command(infer_guidance, name="infer_guidance")
+main.add_command(practice_tasks, name="practice_tasks")
+main.add_command(clean_practice, name="clean_practice")
 
 if __name__ == "__main__":
     main()

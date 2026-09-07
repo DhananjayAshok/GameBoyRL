@@ -195,7 +195,7 @@ Work in two parts.
 
 **First, diagnose.** Say what is actually going wrong, using the reasons the player gave for each button beside what the frames show happened. Name the mechanism, not the symptom: not "they failed to select the tool" but why the presses that should have selected it did not.
 
-**Then instruct.** Unlike the plan, which describes goals without mentioning controls, your hint names the actual controls: UP, DOWN, LEFT, RIGHT, A, B, START, SELECT. Say **what each button does towards this goal** — which one moves the cursor, which one confirms, which one backs out of the menu they are stuck in. Use the recorded knowledge above wherever it names a control or what it does; that is what it is for.
+**Then instruct.** Unlike the plan, which describes goals without mentioning controls, your hint names the actual controls: UP, DOWN, LEFT, RIGHT, A, B, START. Say **what each button does towards this goal** — which one moves the cursor, which one confirms, which one backs out of the menu they are stuck in. Use the recorded knowledge above wherever it names a control or what it does; that is what it is for.
 
 **Do not give a count or a sequence.** Not "press DOWN four times, then A". The player acts one button at a time and looks at the screen again after each one, so a recipe written from this screen is wrong by its second step, and a player following it stops watching the screen. Give them the function of each control and the visible condition that tells them to stop: "DOWN moves the selection down the list — keep going until KEY1 is the circled entry, then A confirms it."
 
@@ -275,9 +275,7 @@ A player attempted to complete this task. Here is a description of what happened
 The images show only the FINAL frames of the trajectory. Task completion may have occurred earlier and may not be visible in these images.
 
 Did the player successfully complete the task at any point during the trajectory? Use the description as your primary evidence — if it mentions something that closely matches task completion, count it as success even if it is not visible in the final frames shown.
-
-The goal condition is a strict guide, and only if the player has basically achieved the task with only minor, trivial differences from the goal condition should you consider it a success.
-
+[GOAL_CONDITION_NOTE]
 The description references frame ranges (e.g. "frames 11-20"). Using these, identify the safe success point: the single frame number by which the task has SURELY been achieved. Pick the earliest frame you are confident the task is already complete. If the task was never completed, or you cannot tell from the description, respond with N/A.
 
 Respond in exactly this format:
@@ -285,6 +283,17 @@ Reasoning: <your reasoning, referencing the description and any visual evidence>
 Success: <yes or no>
 Safe success point: <frame number, or N/A if never completed or unknown>
 [STOP]"""
+
+# Fills [GOAL_CONDITION_NOTE] when the caller supplied a goal condition. When it did not,
+# the slot is replaced with the empty string instead: the judge must never be told to treat
+# "the goal condition" as a strict guide while none is shown, which is what the prompt did
+# before this slot existed. Carries its own surrounding blank lines so the paragraph spacing
+# is right in both cases.
+JUDGE_GOAL_CONDITION_NOTE = """
+The goal condition for this task is: "[GOAL_CONDITION]"
+
+The goal condition is a strict guide, and only if the player has basically achieved the task with only minor, trivial differences from the goal condition should you consider it a success.
+"""
 
 
 # --- Knowledge selection (InfoSubgoalSupervisor) ------------------------------------------

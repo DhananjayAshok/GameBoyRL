@@ -72,6 +72,11 @@ fi
 if [[ "${ARGS["extra_name"]}" != "none" ]]; then
     optional_flags+=" --extra_name ${ARGS["extra_name"]}"
 fi
+# Only the world_model executor reads this; omitted when absent so no other arm records a
+# world-model knob it never used.
+if [[ "${ARGS["world_model_run_name"]}" != "none" ]]; then
+    optional_flags+=" --world_model_run_name ${ARGS["world_model_run_name"]}"
+fi
 
 group_flags="--game ${ARGS["game"]}"
 group_flags+=" --controller_variant ${ARGS["controller_variant"]}"

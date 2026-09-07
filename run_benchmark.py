@@ -93,11 +93,15 @@ from python_scripts.paths import model_save_name
                    "runs over different --docs_mode being the case it exists for, since which "
                    "documents were read reaches no other part of the name. Omit and the name "
                    "is unchanged. 'none' is accepted as the shell's absent sentinel.")
+@click.option("--world_model_run_name", default=None, type=str,
+              help="RL run_name whose trained world model and observation encoder drive "
+                   "the 'world_model' executor. Required by that executor, ignored by the "
+                   "others. 'none' is accepted as the shell's absent sentinel.")
 @click.pass_context
 def main(ctx, game, controller_variant, executor, executor_vlm_model, executor_vlm_kind,
          supervisor_vlm_model, supervisor_vlm_kind, supervisor_max_new_tokens,
          save_video, max_steps, max_tool_calls, n_tasks,
-         verbose, regenerate, extra_name):
+         verbose, regenerate, extra_name, world_model_run_name):
     """Benchmark a frozen VLM on a game, with or without prebuilt knowledge."""
     parameters = load_parameters()
     ctx.obj = dict(
@@ -123,6 +127,14 @@ def main(ctx, game, controller_variant, executor, executor_vlm_model, executor_v
         n_tasks=n_tasks,
         verbose=verbose,
         regenerate=regenerate,
+        # Spread into every arm's supervisor call, which forwards it verbatim to the
+        # executor. Built here rather than per-arm so the four arms cannot disagree about
+        # what the executor was given, and left empty unless actually set so a world-model
+        # knob never lands in the init_kwargs of a run that has no world model.
+        executor_kwargs=(
+            {"world_model_run_name": world_model_run_name}
+            if world_model_run_name and world_model_run_name != "none" else {}
+        ),
     )
 
 
