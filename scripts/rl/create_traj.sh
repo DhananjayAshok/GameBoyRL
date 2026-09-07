@@ -109,7 +109,11 @@ echo "Setting replay_buffer_save_folder to $replay_buffer_save_folder for iterat
 # z_kind is not an arg here; group_trajectories defaults to global, so the output is always the global file.
 grouped_file=$(path_of grouped_file --game "${ARGS["game"]}" \
                  --run_name "${ARGS["run_name"]}" --init_state "${init_state_group}")
-if [[ "${ARGS["overwrite"]}" != "true" && -f "$grouped_file" ]]; then
+# Only meaningful when we are actually going to group: with --group_trajectories false the
+# grouped file is not this run's output, so its presence says nothing about whether the
+# replay buffers this run exists to collect are already on disk.
+if [[ "${ARGS["group_trajectories"]}" == "true" \
+      && "${ARGS["overwrite"]}" != "true" && -f "$grouped_file" ]]; then
     echo "Grouped trajectories already exist at $grouped_file. Skipping (pass --overwrite true to regenerate)."
     exit 0
 fi
@@ -127,6 +131,11 @@ else
     bash scripts/rl/iterative_training.sh $argstring
 fi
 
+if [ "${ARGS["group_trajectories"]}" != "true" ]; then
+    echo "Skipping grouping as per --group_trajectories false. Replay buffers retained at $storage_dir/replay_buffers/${ARGS["game"]}/$replay_buffer_save_folder"
+    exit 0
+fi
+
 bash scripts/rl/group_trajectories.sh --game ${ARGS["game"]} --replay_buffer_folder $replay_buffer_save_folder --save_path "$(path_of grouped_dir --game "${ARGS["game"]}" --run_name "${ARGS["run_name"]}")/${init_state_group}/" --z_min ${ARGS["z_min"]}
 group_status=$?
 
@@ -136,6 +145,11 @@ group_status=$?
 if [[ $group_status -ne 0 || ! -f "$grouped_file" ]]; then
     echo "Grouping failed (exit $group_status) or output missing at $grouped_file; NOT clearing replay buffers/models."
     exit $group_status
+fi
+
+if [ "${ARGS["keep_buffers"]}" == "true" ]; then
+    echo "Grouping succeeded. Retaining replay buffers at $storage_dir/replay_buffers/${ARGS["game"]}/$replay_buffer_save_folder (--keep_buffers true)."
+    exit 0
 fi
 
 echo "Grouping succeeded. Clearing replay buffers for ${ARGS["game"]}/${ARGS["run_name"]}/${init_state_group}..."

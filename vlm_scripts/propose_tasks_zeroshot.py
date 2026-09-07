@@ -94,7 +94,7 @@ def _propose_for_init_state(
 
     output = vlm.infer(
         texts=prompt, images=[first_frame], max_new_tokens=max_new_tokens
-    ).lower()
+    )["output"].lower()
 
     if verbose:
         print(f"PROPOSE output for '{init_state}':\n{output}\n---")

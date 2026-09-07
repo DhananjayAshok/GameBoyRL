@@ -100,14 +100,17 @@ if [[ "${ARGS["latest_replay_buffer_folder"]}" != "none" ]]; then
 fi
 
 if [[ "${ARGS["buffer_save_path"]}" != "none" ]]; then
-    extra_arg_part+="--buffer_save_path $storage_dir/curiosity_buffers/world_model/${ARGS["game"]}/${ARGS["buffer_save_path"]} "
+    buffer_save_dir=$(path_of world_model_dir --game "${ARGS["game"]}" --run_name "${ARGS["buffer_save_path"]}")
+    extra_arg_part+="--buffer_save_path $buffer_save_dir "
 fi
 
 if [[ "${ARGS["buffer_load_path"]}" != "none" ]]; then
-    extra_arg_part+="--buffer_load_path $storage_dir/curiosity_buffers/world_model/${ARGS["game"]}/${ARGS["buffer_load_path"]} "
+    buffer_load_dir=$(path_of world_model_dir --game "${ARGS["game"]}" --run_name "${ARGS["buffer_load_path"]}")
+    extra_arg_part+="--buffer_load_path $buffer_load_dir "
 fi
 if [[ "${ARGS["embedder_load_path"]}" != "none" ]]; then
-    extra_arg_part+="--embedder_load_path $storage_dir/observation_embedders/${ARGS["game"]}/${ARGS["embedder_load_path"]} "
+    embedder_load_dir=$(path_of observation_embedder_dir --game "${ARGS["game"]}" --run_name "${ARGS["embedder_load_path"]}")
+    extra_arg_part+="--embedder_load_path $embedder_load_dir "
 fi
 
 

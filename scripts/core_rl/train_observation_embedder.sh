@@ -93,7 +93,7 @@ if [[ "${ARGS["subfolder"]}" != "none" ]]; then
 fi
 
 replay_buffer_folder=$storage_dir/replay_buffers/${ARGS["game"]}/${subfolder}/
-save_path=$storage_dir/observation_embedders/${ARGS["game"]}/global/
+save_path=$(path_of observation_embedder_dir --game "${ARGS["game"]}" --run_name global)
 
 
 echo "Training Observation Embedder Model:"

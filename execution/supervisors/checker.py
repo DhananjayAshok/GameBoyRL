@@ -17,6 +17,7 @@ from execution.supervisors.prompts import (
     DESCRIBE_CONSOLIDATE_PROMPT,
     DESCRIBE_SLICE_PROMPT,
     JUDGE_BINARY_PROMPT,
+    JUDGE_GOAL_CONDITION_NOTE,
 )
 from utils import parse_int, parse_key_value, parse_yes_no, sum_meta, zero_meta, VLM
 
@@ -35,6 +36,9 @@ class AttemptCheckerSupervisor(Supervisor):
     :param max_steps: Env-step budget forwarded to the executor.
     :param max_tool_calls: Tool-call budget forwarded to the executor.
     :param evaluation_lookback: Number of final env-step frames passed to the checker VLM.
+    :param goal_condition: Visual description of the state that means the task is done, shown
+        to the judge as a strict guide. ``None`` for a task that has none (a proposed task,
+        say), in which case the judge is told nothing about goal conditions at all.
     :param supervisor_vlm_model: The one model this supervisor reasons with — both the
         describe and the judge stage use it.
     :param supervisor_vlm_kind: VLM kind for that model (``"openai"``, ``"anthropic"``, …).
@@ -53,6 +57,7 @@ class AttemptCheckerSupervisor(Supervisor):
         max_tool_calls: int,
         evaluation_lookback: int = 8,
         hint: Optional[str] = None,
+        goal_condition: Optional[str] = None,
         allow_self_termination: bool = False,
         supervisor_vlm_model: Optional[str] = None,
         supervisor_vlm_kind: Optional[str] = None,
@@ -62,6 +67,10 @@ class AttemptCheckerSupervisor(Supervisor):
     ) -> None:
         self._evaluation_lookback = evaluation_lookback
         self._hint = hint
+        # Judge-side only. Deliberately not forwarded to the executor: the goal condition is
+        # the success criterion, and handing the actor the exact thing it is graded against
+        # is a different experiment from the one this supervisor runs.
+        self._goal_condition = goal_condition
         self._allow_self_termination = allow_self_termination
         # Keyword arguments, not positional: this used to pass ten in a row, so reordering
         # the base signature would have rebound them silently rather than raising.
@@ -155,10 +164,15 @@ class AttemptCheckerSupervisor(Supervisor):
 
         # Stage 2: judge using final k frames + full description
         final_frames = [s.frame_after for s in env_steps[-k:]]
+        goal_note = (
+            JUDGE_GOAL_CONDITION_NOTE.replace("[GOAL_CONDITION]", self._goal_condition)
+            if self._goal_condition else ""
+        )
         judge_prompt = (
             JUDGE_BINARY_PROMPT
             .replace("[TASK]", self._task)
             .replace("[DESCRIPTION]", description)
+            .replace("[GOAL_CONDITION_NOTE]", goal_note)
         )
         judge_output = self._vlm_call(
             "judge",

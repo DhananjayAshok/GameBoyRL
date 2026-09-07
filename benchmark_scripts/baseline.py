@@ -68,6 +68,7 @@ def baseline_cmd(obj):
                 parameters=parameters,
                 vlm_model=obj["executor_vlm_model"],
                 vlm_kind=obj["executor_vlm_kind"],
+                **obj["executor_kwargs"],
             )
             result = supervisor.evaluate()
             if obj["verbose"]:

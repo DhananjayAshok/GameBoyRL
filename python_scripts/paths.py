@@ -46,6 +46,8 @@ PRODUCERS = {
     "benchmark": "scripts/benchmark.sh (via scripts/pipeline/serve_and_benchmark.sh)",
     "info": "scripts/vlm/build_info.sh",
     "insights": "scripts/vlm/build_info.sh (stage A)",
+    "world_model": "scripts/core_rl/train_world_model.sh",
+    "observation_encoder": "scripts/core_rl/train_observation_embedder.sh",
 }
 
 GROUPED_FILENAME = "grouped_global_high_reward_trajectories.pkl"
@@ -56,6 +58,8 @@ TASKS_FILENAME = "zeroshot_tasks.jsonl"
 CURIOSITY_ANNOTATION_STEM = "trajectory_annotation"
 ALL_TRAJECTORIES_FILENAME = "all_trajectories.csv"
 SUCCESS_TRAJECTORIES_STEM = "success_trajectories"
+WORLD_MODEL_FILENAME = "world_model.pt"
+OBSERVATION_ENCODER_FILENAME = "observation_encoder.pt"
 
 #: Pickled per-episode executor report, written into an emulator session dir beside videos/0.mp4.
 REPORT_FILENAME = "report.pkl.gz"
@@ -202,6 +206,33 @@ def init_states(parameters=None, *, game: str, run_name: str) -> list[str]:
         log_error(f"No grouped trajectory files under {root}.\n"
                   f"  Produced by: {PRODUCERS['grouped']}", parameters)
     return states
+
+
+# ---------------------------------------------------------------------------
+# World model / observation encoder
+# ---------------------------------------------------------------------------
+
+
+def world_model_dir(parameters=None, *, game: str, run_name: str) -> str:
+    """Directory holding ``world_model.pt`` and its ``action_space.json``."""
+    _, storage, _ = _roots(parameters)
+    return os.path.join(storage, "curiosity_buffers", "world_model", game, run_name)
+
+
+def world_model_file(parameters=None, *, game: str, run_name: str) -> str:
+    return os.path.join(world_model_dir(parameters, game=game, run_name=run_name),
+                        WORLD_MODEL_FILENAME)
+
+
+def observation_embedder_dir(parameters=None, *, game: str, run_name: str) -> str:
+    """Directory holding ``observation_encoder.pt``."""
+    _, storage, _ = _roots(parameters)
+    return os.path.join(storage, "observation_embedders", game, run_name)
+
+
+def observation_embedder_file(parameters=None, *, game: str, run_name: str) -> str:
+    return os.path.join(observation_embedder_dir(parameters, game=game, run_name=run_name),
+                        OBSERVATION_ENCODER_FILENAME)
 
 
 # ---------------------------------------------------------------------------
@@ -438,23 +469,6 @@ def benchmark_series_csv(parameters=None, *, game: str) -> str:
         if game in set(pd.read_csv(path)["game"].unique()):
             return path
     log_error(f"No series CSV under {tests_dir} contains game '{game}'.", parameters)
-
-
-def train_games(*, game: str) -> list[str]:
-    """The games in *game*'s series that declare train states, sorted.
-
-    A list, not a single game: a series may declare more than one, and *game* itself is in it
-    when *game* is one of them. This is where *game*'s info documents come from — every other
-    title in the series borrows theirs.
-
-    Delegates to ``gameboy_worlds.get_train_games`` rather than reading the series CSV here, so
-    the ``can_train_from_init_state`` rule has one implementation. Deliberately called with no
-    ``parameters``: that argument is passed straight through to GameBoyWorlds'
-    ``load_parameters``, and handing it *our* dict would point its ``project_root`` at this
-    project and make it look for benchmark CSVs that live in the submodule.
-    """
-    from gameboy_worlds import get_train_games
-    return sorted(get_train_games(game))
 
 
 #: Column in a series CSV marking a game whose init_states can be trained/explored from.

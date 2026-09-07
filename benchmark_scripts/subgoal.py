@@ -110,6 +110,7 @@ def subgoal_cmd(obj, max_leg_steps, max_attempts_per_step, max_replans,
                 parameters=parameters,
                 vlm_model=obj["executor_vlm_model"],
                 vlm_kind=obj["executor_vlm_kind"],
+                **obj["executor_kwargs"],
             )
             result = supervisor.evaluate()
             report = result["report"]

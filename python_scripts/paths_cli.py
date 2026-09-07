@@ -85,6 +85,25 @@ def grouped_dir_cmd(obj, game, run_name):
     click.echo(paths.grouped_dir(obj["parameters"](), game=game, run_name=run_name))
 
 
+@click.command("world_model_dir")
+@_game
+@_run
+@click.pass_obj
+def world_model_dir_cmd(obj, game, run_name):
+    """<storage>/curiosity_buffers/world_model/<game>/<run_name>"""
+    click.echo(paths.world_model_dir(obj["parameters"](), game=game, run_name=run_name))
+
+
+@click.command("observation_embedder_dir")
+@_game
+@_run
+@click.pass_obj
+def observation_embedder_dir_cmd(obj, game, run_name):
+    """<storage>/observation_embedders/<game>/<run_name>"""
+    click.echo(paths.observation_embedder_dir(obj["parameters"](), game=game,
+                                              run_name=run_name))
+
+
 @click.command("grouped_file")
 @_game
 @_run
@@ -290,14 +309,6 @@ def benchmark_series_csv_cmd(obj, game):
 
 @click.command("train_games")
 @_game
-def train_games_cmd(game):
-    """The games in --game's series that declare train states, one per line."""
-    for train_game in paths.train_games(game=game):
-        click.echo(train_game)
-
-
-@click.command("train_games")
-@_game
 @click.pass_obj
 def train_games_cmd(obj, game):
     """The games in --game's series that source data can be collected from, one per line.
@@ -361,6 +372,8 @@ PATH_COMMANDS = [
     model_save_name_cmd,
     finetuned_model_name_cmd,
     grouped_dir_cmd,
+    world_model_dir_cmd,
+    observation_embedder_dir_cmd,
     grouped_file_cmd,
     init_states_cmd,
     proposed_tasks_dir_cmd,
@@ -379,7 +392,6 @@ PATH_COMMANDS = [
     benchmark_dir_cmd,
     benchmark_csv_cmd,
     benchmark_series_csv_cmd,
-    train_games_cmd,
     train_games_cmd,
     gameboy_worlds_storage_cmd,
     sessions_dir_cmd,

@@ -268,6 +268,11 @@ populate_dict ITERATIVE_TRAINING_DEFAULTS CREATE_TRAJ_DEFAULTS
 CREATE_TRAJ_DEFAULTS["skip_training"]=false
 CREATE_TRAJ_DEFAULTS["z_min"]=6.0
 CREATE_TRAJ_DEFAULTS["overwrite"]=false
+CREATE_TRAJ_DEFAULTS["keep_buffers"]=false
+# When false, the run stops after training and the replay buffers are the output. Grouping is
+# what consumes them and what the buffer deletion is conditioned on, so skipping it also
+# forces the buffers to be kept regardless of --keep_buffers.
+CREATE_TRAJ_DEFAULTS["group_trajectories"]=true
 
 CREATE_TRAJ_ARG_KEYS=("${CREATE_TRAJ_ESSENTIALS[@]}" "${!CREATE_TRAJ_DEFAULTS[@]}")
 
@@ -311,6 +316,93 @@ INFER_TASKS_DEFAULTS["max_trajectories_per_group"]=3
 INFER_TASKS_DEFAULTS["describe_pairs"]=false
 
 INFER_TASKS_ARG_KEYS=("${INFER_TASKS_ESSENTIALS[@]}" "${!INFER_TASKS_DEFAULTS[@]}")
+
+# --- Practice pipeline: infer_guidance -> practice_tasks -> clean_practice -> create_dataset
+# Both verticals feed this. trajectory_path is the annotation stem of whichever leg is being
+# run — the curiosity leg's trajectory_annotation or the zeroshot leg's success_trajectories —
+# since infer_guidance reads the same {group_idx: task} json + trajectory pkl pair from either.
+
+# infer_guidance: annotates each task group with gold step-by-step guidance, written to
+# {trajectory_path}_guidance.json.
+INFER_GUIDANCE_ESSENTIALS=("trajectory_path")
+populate_array VLM_ESSENTIALS INFER_GUIDANCE_ESSENTIALS
+declare -A INFER_GUIDANCE_DEFAULTS
+populate_dict VLM_DEFAULTS INFER_GUIDANCE_DEFAULTS
+INFER_GUIDANCE_DEFAULTS["max_obs_at_once"]=8
+INFER_GUIDANCE_DEFAULTS["max_concurrency"]=16
+
+INFER_GUIDANCE_ARG_KEYS=("${INFER_GUIDANCE_ESSENTIALS[@]}" "${!INFER_GUIDANCE_DEFAULTS[@]}")
+
+# practice_tasks: repeated guided attempts per task, into {dirname guidance_path}/practice_<executor>.
+# executor and controller_variant match ATTEMPT_TASKS so a practice dir sits beside the attempts
+# dir that produced its tasks, and so merge_practices' source labels stay comparable.
+PRACTICE_TASKS_ESSENTIALS=("guidance_path")
+populate_array VLM_ESSENTIALS PRACTICE_TASKS_ESSENTIALS
+declare -A PRACTICE_TASKS_DEFAULTS
+populate_dict VLM_DEFAULTS PRACTICE_TASKS_DEFAULTS
+PRACTICE_TASKS_DEFAULTS["n_attempts"]=3
+PRACTICE_TASKS_DEFAULTS["max_total_practice_runs"]=4000
+PRACTICE_TASKS_DEFAULTS["n_random_actions"]=5
+PRACTICE_TASKS_DEFAULTS["max_steps"]=50
+PRACTICE_TASKS_DEFAULTS["max_tool_calls"]=10
+PRACTICE_TASKS_DEFAULTS["lookback"]=8
+PRACTICE_TASKS_DEFAULTS["executor"]="single_actions"
+PRACTICE_TASKS_DEFAULTS["controller_variant"]="low_level"
+PRACTICE_TASKS_DEFAULTS["checker_max_new_tokens"]=2000
+PRACTICE_TASKS_DEFAULTS["max_concurrency"]=16
+
+PRACTICE_TASKS_ARG_KEYS=("${PRACTICE_TASKS_ESSENTIALS[@]}" "${!PRACTICE_TASKS_DEFAULTS[@]}")
+
+# clean_practice: paraphrases + accept/reject decisions over a practice dir.
+# safety_margin must match CREATE_DATASET's: the two slice each episode's call log at the same
+# point, so a mismatch would judge a different set of calls than the dataset emits.
+CLEAN_PRACTICE_ESSENTIALS=("practice_path")
+populate_array VLM_ESSENTIALS CLEAN_PRACTICE_ESSENTIALS
+declare -A CLEAN_PRACTICE_DEFAULTS
+populate_dict VLM_DEFAULTS CLEAN_PRACTICE_DEFAULTS
+CLEAN_PRACTICE_DEFAULTS["k"]=3
+CLEAN_PRACTICE_DEFAULTS["safety_margin"]=2
+CLEAN_PRACTICE_DEFAULTS["max_concurrency"]=16
+
+CLEAN_PRACTICE_ARG_KEYS=("${CLEAN_PRACTICE_ESSENTIALS[@]}" "${!CLEAN_PRACTICE_DEFAULTS[@]}")
+
+# create_dataset: train/validation CSVs from the practice dir. Makes no VLM calls, so it takes
+# none of VLM_DEFAULTS beyond overwrite.
+CREATE_DATASET_ESSENTIALS=("practice_path")
+declare -A CREATE_DATASET_DEFAULTS
+CREATE_DATASET_DEFAULTS["overwrite"]=false
+CREATE_DATASET_DEFAULTS["safety_margin"]=2
+CREATE_DATASET_DEFAULTS["val_frac"]=0.2
+CREATE_DATASET_DEFAULTS["seed"]=0
+
+CREATE_DATASET_ARG_KEYS=("${CREATE_DATASET_ESSENTIALS[@]}" "${!CREATE_DATASET_DEFAULTS[@]}")
+
+# merge_practices: combines several practice dirs' datasets into one, tagging rows by source.
+# "none" is a real value of balance (no downsampling), not an absent-argument sentinel.
+MERGE_PRACTICES_ESSENTIALS=("practice_paths" "save_path")
+declare -A MERGE_PRACTICES_DEFAULTS
+MERGE_PRACTICES_DEFAULTS["balance"]="none"
+MERGE_PRACTICES_DEFAULTS["seed"]=0
+
+MERGE_PRACTICES_ARG_KEYS=("${MERGE_PRACTICES_ESSENTIALS[@]}" "${!MERGE_PRACTICES_DEFAULTS[@]}")
+
+# guidance_and_practice: the pipeline driver. Takes the union of the four legs' arguments, minus
+# the paths it derives itself — guidance_path is {trajectory_path}_guidance.json and practice_path
+# is {dirname guidance_path}/practice_<executor>, so neither is a user argument here.
+# The three toggles select how much of the chain runs: guidance_only stops after guidance,
+# practice_only reuses an existing guidance file, and do_clean gates the clean+dataset tail.
+GUIDANCE_AND_PRACTICE_ESSENTIALS=("trajectory_path")
+populate_array VLM_ESSENTIALS GUIDANCE_AND_PRACTICE_ESSENTIALS
+declare -A GUIDANCE_AND_PRACTICE_DEFAULTS
+populate_dict INFER_GUIDANCE_DEFAULTS GUIDANCE_AND_PRACTICE_DEFAULTS
+populate_dict PRACTICE_TASKS_DEFAULTS GUIDANCE_AND_PRACTICE_DEFAULTS
+populate_dict CLEAN_PRACTICE_DEFAULTS GUIDANCE_AND_PRACTICE_DEFAULTS
+populate_dict CREATE_DATASET_DEFAULTS GUIDANCE_AND_PRACTICE_DEFAULTS
+GUIDANCE_AND_PRACTICE_DEFAULTS["guidance_only"]=false
+GUIDANCE_AND_PRACTICE_DEFAULTS["practice_only"]=false
+GUIDANCE_AND_PRACTICE_DEFAULTS["do_clean"]=true
+
+GUIDANCE_AND_PRACTICE_ARG_KEYS=("${GUIDANCE_AND_PRACTICE_ESSENTIALS[@]}" "${!GUIDANCE_AND_PRACTICE_DEFAULTS[@]}")
 
 # build_info: distils (task, trajectory) pairs into an info document, beside its own input
 # stem. --stage a is enough for benchmark_info --mode
@@ -616,6 +708,9 @@ declare -A RUN_BENCHMARK_DEFAULTS=(
     ["parametric_categories"]=10
     ["max_concurrency"]=8
     ["executor_max_new_tokens"]=8000
+    # RL run_name whose world model and observation encoder drive the `world_model`
+    # executor. `none` means absent, and every other executor ignores it.
+    ["world_model_run_name"]=none
 )
 
 RUN_BENCHMARK_ARG_KEYS=("${RUN_BENCHMARK_ESSENTIALS[@]}" "${!RUN_BENCHMARK_DEFAULTS[@]}")
