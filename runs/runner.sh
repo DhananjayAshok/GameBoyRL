@@ -1,0 +1,53 @@
+source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
+
+MODEL="google/gemma-4-31b-it"
+VLM_KIND="vllm"
+EXECUTOR="single_visual"
+CONTROLLER_VARIANT="low_level"
+MAX_STEPS=175
+
+BENCH_GAMES="bomberman_pocket bomberman_quest \
+             deja_vu_1 deja_vu_2 \
+             harvest_moon_1 harvest_moon_2 \
+             legend_of_zelda_links_awakening legend_of_zelda_the_oracle_of_seasons \
+             pokemon_crystal pokemon_red \
+             sword_of_hope_1 sword_of_hope_2"
+
+bash ~/vllm_scripts/serve_vllm_auto.sh "$MODEL"
+
+for GAME in $BENCH_GAMES; do
+    echo ""
+    echo "############################################################"
+    echo "# $GAME  —  no-doc subgoal benchmark"
+    echo "############################################################"
+    if ! bash scripts/benchmark/run_benchmark.sh \
+            --game "$GAME" \
+            --supervisor subgoal \
+            --executor "$EXECUTOR" \
+            --controller_variant "$CONTROLLER_VARIANT" \
+            --executor_vlm_model "$MODEL" \
+            --executor_vlm_kind "$VLM_KIND" \
+            --max_steps "$MAX_STEPS"; then
+        echo "FAILED: $GAME | subgoal"
+    fi
+done
+
+for GAME in $BENCH_GAMES; do
+    echo ""
+    echo "############################################################"
+    echo "# $GAME  —  info parametric benchmark"
+    echo "############################################################"
+    if ! bash scripts/benchmark/run_benchmark.sh \
+            --game "$GAME" \
+            --supervisor info_subgoal_parametric \
+            --executor "$EXECUTOR" \
+            --controller_variant "$CONTROLLER_VARIANT" \
+            --executor_vlm_model "$MODEL" \
+            --executor_vlm_kind "$VLM_KIND" \
+            --parametric_categories 10 \
+            --max_steps "$MAX_STEPS"; then
+        echo "FAILED: $GAME | parametric"
+    fi
+done
+
+echo "DONE ALL"
