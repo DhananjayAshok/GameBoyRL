@@ -23,46 +23,48 @@ from datetime import datetime
 
 import click
 
-from gameboy_worlds import (AVAILABLE_GAMES, get_benchmark_tasks, get_environment,
-                            get_test_environment)
+from gameboy_worlds import AVAILABLE_GAMES, get_benchmark_tasks, get_test_environment
 
 from execution.registry import AVAILABLE_EXECUTORS
 from execution.strategists import AVAILABLE_STRATEGISTS
 from python_scripts import paths
 from utils import load_parameters, log_info
 
-#: Where a strategist run begins, per game. Not taken from a benchmark row: a strategist
-#: pursues a goal spanning many tasks, not one benchmark task.
+#: Where a strategist PLAYTHROUGH begins, per game, and which tracker scores it.
 #:
 #: **The state must match the goal.** This is the single most expensive thing to get wrong
-#: here, and it fails silently. ``pokemon_red``'s ``default`` state is Viridian City with no
-#: starter — Oak's lab is several screens south, past a boundary the planner is explicitly
-#: told not to cross ("prefer a single room, a single doorway, a single conversation"). Six
-#: runs were spent against it on the goal "obtain your first Pokemon". Nothing errored. The
-#: reflection call simply hallucinated a professor onto an empty street, the planner
-#: faithfully issued twelve variants of "walk to Professor Oak and press A", and every one
-#: failed — which reads exactly like an executor that cannot interact, and is not.
+#: here and it fails silently, twice over in this project's history:
 #:
-#: ``starter`` puts the player inside Oak's Lab beside the three Poke Balls, with
-#: ``current_starter: None``. The goal is then reachable in a handful of presses, which is
-#: what makes a result about the *strategist* rather than about map distance.
+#: - `default` on pokemon_red is Viridian City with no starter, several screens from Oak's
+#:   lab. Six runs were spent there on "obtain your first Pokemon". Nothing errored; the
+#:   reflection call simply hallucinated a professor onto an empty street.
+#: - `starter` puts the agent INSIDE Oak's Lab beside the Poke Balls. The milestone is then
+#:   a few button presses away, so the agent never walks downstairs, never leaves the house
+#:   and never meets Oak — it measures the last ten seconds of the opening, not a playthrough.
 #:
-#: The tracker stays the plain one rather than a goal-specific tracker: a tracker that
-#: detects the goal would be a second, privileged success signal available only on games
-#: that have one, and the screen check has to carry that weight on the ROM hacks anyway.
+#: Verify a start state by SCREENSHOT before running anything against it.
 GAME_START = {
-    # `starter_example` rather than `default`: it adds the PokemonRedStarter and
-    # PokemonRedLocation METRICS, which is what makes a long run scoreable (badges,
-    # unique locations, starter held) instead of a binary "not reached". Metrics are
-    # observation-side bookkeeping — the executor still sees only frames and agent_state,
-    # so this does not hand the agent a privileged signal, it only lets us score the run.
-    "pokemon_red": {"init_state": "starter", "state_tracker_class": "starter_example"},
-    "pokemon_crystal": {"init_state": "default", "state_tracker_class": "default"},
-    # Verified by screenshot: an interior with an NPC and bookshelves. NOT `starter`,
-    # which in Prism is a dark mine and does not mean what the Red state of that name
-    # means — the names do not carry across ROM hacks and must be looked at, not assumed.
-    "pokemon_prism": {"init_state": "professor_house", "state_tracker_class": "default"},
-    "pokemon_brown": {"init_state": "default", "state_tracker_class": "default"},
+    # `initial` is the TRUE start of the game: Player's House Second Floor, the bedroom,
+    # `current_starter: None`. Verified by screenshot.
+    #
+    # It replaces `starter`, which put the agent INSIDE Oak's Lab beside the three Poke
+    # Balls. That made "obtain a Pokemon" reachable in a few presses and so made the
+    # milestone cheap: the agent never walked downstairs, never left the house, never met
+    # Oak. A playthrough has to start where the player starts.
+    #
+    # `collect_championship_test` rather than a plain tracker: it exposes all eight badges
+    # as SUBGOALS and terminates only on beating the Champion, so progress is ground truth
+    # from the environment instead of a number this code scrapes out of RAM itself.
+    "pokemon_red": {"init_state": "initial",
+                    "state_tracker_class": "collect_championship_test"},
+    "pokemon_crystal": {"init_state": "initial",
+                        "state_tracker_class": "collect_championship_test"},
+    # Prism and Brown use the init_state their own playthrough benchmark row uses, so a
+    # run here is comparable to that row.
+    "pokemon_prism": {"init_state": "post_intro",
+                      "state_tracker_class": "collect_championship_test"},
+    "pokemon_brown": {"init_state": "location_merson_city",
+                      "state_tracker_class": "collect_championship_test"},
 }
 
 
@@ -120,6 +122,11 @@ GAME_START = {
                    "(MAX_CONSECUTIVE_INVALID=4). A run at k=5 died with tasks lasting 26 "
                    "seconds each. Safe only where tasks are never satisfied early. Leave "
                    "unset for anything compared against run_benchmark.py numbers.")
+@click.option("--goal_ledger_key", default="has_pokemon", show_default=True, type=str,
+              help="Ledger key whose truthiness means the goal is reached. Empty string "
+                   "disables the ledger heuristic, which is what a progression goal wants: "
+                   "'play as far as you can' has no completion condition and the ledger will "
+                   "answer yes to the first sign of progress.")
 @click.option("--verbose", is_flag=True, default=False)
 def main(game, goal, benchmark_task, strategist, executor, controller_variant, executor_vlm_model,
          executor_vlm_kind, strategist_vlm_model, strategist_vlm_kind, max_tasks,
@@ -191,44 +198,23 @@ def main(game, goal, benchmark_task, strategist, executor, controller_variant, e
 
     else:
         start = GAME_START[game]
-        # The "default" environment variant, not "test". A test environment carries a
-        # task-specific termination metric that ends the episode the moment its one
-        # benchmark task is done — meaningless for a goal spanning many tasks, and it also
-        # demands a TestTracker, which would tie the run to whichever benchmark task that
-        # tracker was built for. (In MEASURED mode above that metric is exactly what we
-        # want, which is why that branch uses `test`.) No `parameters=` for the same reason
-        # run_episode omits it: the ROM data paths live in GameBoyWorlds' own config.
-        environment = get_environment(
-            game=game,
-            environment_variant="default",
+        # The TEST environment, not "default". A playthrough is scored on the eight badge
+        # SUBGOALS that `collect_championship_test` exposes, and only a TestTracker
+        # surfaces `subgoals` in get_info(). The earlier objection to test environments --
+        # that they truncate once their one task is unwinnable -- does not apply here:
+        # PokemonRedChampionshipTerminateMetric defines termination only (beat the
+        # Champion) and never truncates, so a long run is safe in it.
+        environment = get_test_environment(
+            row={"game": game, **start},
             controller_variant=controller_variant,
-            init_state=start["init_state"],
-            state_tracker_class=start["state_tracker_class"],
             headless=True,
             save_video=save_video,
             session_name=f"strategist/{game}/{run_name}/{stamp}/",
-            # One emulator session spans every task, so the budget is the sum of theirs
-            # plus room for the goal-check probes.
             max_steps=max_tasks * max_steps_per_task + 1000,
             wait_ticks=20,
         )
-
-    out_dir = os.path.join(parameters["storage_dir"], "strategist", game)
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"{run_name}_{stamp}.json")
-
-    def _checkpoint(report) -> None:
-        """Write the record after every task.
-
-        A 20-task run takes ~22 hours and previously wrote its record only on completion, so
-        a wall-clock kill at task 19 would have destroyed the whole experiment. Written to
-        a temp file and moved into place, because a kill DURING the write would otherwise
-        leave a truncated JSON where a complete earlier one used to be.
-        """
-        tmp = out_path + ".tmp"
-        with open(tmp, "w") as handle:
-            json.dump(_serialise(report), handle, indent=2)
-        os.replace(tmp, out_path)
+        log_info(f"PLAYTHROUGH: {game} from '{start['init_state']}' "
+                 f"scored by {start['state_tracker_class']}", parameters)
 
     log_info(f"Strategist run: {run_name} on {game}", parameters)
     log_info(f'Goal: "{goal}"', parameters)
@@ -255,6 +241,7 @@ def main(game, goal, benchmark_task, strategist, executor, controller_variant, e
             # dead episode. An open-goal run must NOT reset: progress through the world is
             # the thing being accumulated.
             reset_between_tasks=benchmark_task is not None,
+            goal_ledger_key=goal_ledger_key,
             parameters=parameters,
             verbose=verbose,
             on_task_complete=_checkpoint,

@@ -6,11 +6,17 @@ loop is deliberately small — plan, run, reflect, maybe compress, maybe verify 
 part of it that could be clever is a part that could be wrong in a way no benchmark number
 would reveal.
 
-Nothing here is game-specific. The strategist knows a game's *name*, and nothing else about
-it: no memory addresses, no coordinates, no tile maps. That is not an accident of the first
-implementation but the point of the design — Pokemon Brown and Prism are ROM hacks whose RAM
-does not match the games they were built from, so anything learned from an address would be
-wrong there. What the strategist knows, it knows because a model described a screen.
+Nothing the agent *acts on* is game-specific. The strategist knows a game's name and nothing
+else about it: no memory addresses, no coordinates, no tile maps. That is the point of the
+design, not an accident of the first implementation — Pokemon Brown and Prism are ROM hacks
+whose RAM does not match the games they were built from, so anything learned from an address
+would be wrong there. What the strategist knows, it knows because a model described a screen.
+
+The one exception is :meth:`Strategist._progress_snapshot`, which reads whatever progression
+signals the environment publishes purely so a run can be SCORED. The agent never sees them.
+Keeping that line clear matters: a whole-game goal is otherwise a binary that reads "not
+reached" for hours and cannot distinguish an agent that explored six towns from one that
+never left the first room.
 """
 
 from __future__ import annotations
@@ -69,6 +75,14 @@ class Strategist:
         dead environment, so a three-attempt run consumed 26 steps where the bare executor
         used 52 on the same task. Off for an open-goal run, where progress through the world
         is exactly what must be preserved between tasks.
+    :param goal_ledger_key: Ledger key whose truthiness means "goal reached", e.g.
+        ``has_pokemon``. Seeded false at start so reflection has something to flip, and used
+        as the cheap half of the goal check. Empty disables the ledger heuristic entirely,
+        which is what a game with no such key, or a tracker-graded run, wants. Parameterised
+        rather than hardcoded: this class knows a game's name and nothing else about it, and
+        a Pokemon key baked into it made that untrue.
+    :param goal_check_instruction: What the screen check should look for. Defaults to the
+        Pokemon party-menu instruction.
     :param parameters: Parameter overrides, from ``load_parameters``.
     :param verbose: Print each task and outcome as it happens.
     :param on_task_complete: Optional callable invoked with :attr:`report` after each task,
@@ -120,6 +134,8 @@ class Strategist:
         verify_goal: bool = True,
         stop_on_goal: bool = True,
         reset_between_tasks: bool = False,
+        goal_ledger_key: str = "",
+        goal_check_instruction: str = "",
         parameters: Optional[dict] = None,
         verbose: bool = False,
         on_task_complete: Optional[Any] = None,
@@ -140,6 +156,8 @@ class Strategist:
         self._verify_goal = verify_goal
         self._stop_on_goal = stop_on_goal
         self._reset_between_tasks = reset_between_tasks
+        self._goal_ledger_key = goal_ledger_key.strip().lower()
+        self._goal_check_instruction = goal_check_instruction
         self._parameters = load_parameters(parameters)
         self._verbose = verbose
         #: Called with this report after every task. A long run writes its record only when
@@ -150,12 +168,13 @@ class Strategist:
         self._vlm_instance: Optional[VLM] = None
         self._planning_failures = 0
 
-        #: The strategist's memory. Seeded with the one belief the goal check reads, because
-        #: reflection only reports keys whose value changed and so may never mention it at
-        #: all — one real run ended with a ledger holding neither the goal key nor anything
-        #: like it, leaving `_goal_looks_reached` armed only by luck.
+        #: The strategist's memory. Seeded with the goal key, because reflection only reports
+        #: keys whose value CHANGED and so may never mention it at all — one real run ended
+        #: with a ledger holding neither the goal key nor anything like it, leaving
+        #: :meth:`_goal_looks_reached` armed only by luck.
         self.notebook = Notebook()
-        self.notebook.update_ledger({"has_pokemon": "false"})
+        if self._goal_ledger_key:
+            self.notebook.update_ledger({self._goal_ledger_key: "false"})
 
         #: This run's record, built here and appended to as it proceeds so a run that raises
         #: still leaves a partial account of what it did.
@@ -182,6 +201,7 @@ class Strategist:
             "verify_goal": self._verify_goal,
             "stop_on_goal": self._stop_on_goal,
             "reset_between_tasks": self._reset_between_tasks,
+            "goal_ledger_key": self._goal_ledger_key,
         }
 
     # ------------------------------------------------------------------ model
@@ -324,15 +344,33 @@ class Strategist:
         except Exception:  # noqa: BLE001
             pass
 
-        # Badges are THE canonical progression measure for a Pokemon whole-game run and are
-        # not surfaced through get_info, so they are read off the parser directly. Reaching
-        # through the emulator like this is deliberate and confined to scoring.
+        # Badge progress, from the environment's own SUBGOAL metric. A championship tracker
+        # publishes the eight badges as subgoals and marks them completed as they are won,
+        # which is ground truth supplied by the testbed rather than a number this code
+        # scrapes out of RAM. `subgoals` only appears under a TestTracker, so an open-goal
+        # run outside one falls back to the parser read below.
         try:
-            parser = self._env._emulator.state_tracker.state_parser
-            if hasattr(parser, "get_badges"):
-                snapshot["badges"] = int(sum(parser.get_badges()))
+            subgoals = self._env.get_info().get("subgoals") or {}
+            done = list(subgoals.get("completed") or [])
+            every = list(subgoals.get("all") or [])
+            if every:
+                snapshot["subgoals.completed"] = done
+                snapshot["subgoals.n_completed"] = len(done)
+                snapshot["subgoals.n_total"] = len(every)
+                snapshot["badges"] = len(done)
+                remaining = [g for g in every if g not in done]
+                snapshot["subgoals.next"] = remaining[0] if remaining else None
         except Exception:  # noqa: BLE001
             pass
+
+        # Fallback for environments with no subgoal metric.
+        if "badges" not in snapshot:
+            try:
+                parser = self._env._emulator.state_tracker.state_parser
+                if hasattr(parser, "get_badges"):
+                    snapshot["badges"] = int(sum(parser.get_badges()))
+            except Exception:  # noqa: BLE001
+                pass
         return snapshot
 
     def _checkpoint(self) -> None:
@@ -542,8 +580,10 @@ class Strategist:
         worth running, never on its own: it is written by the same model that wants the goal
         met, so a run that stopped here would stop early and score itself a success.
         """
+        if not self._goal_ledger_key:
+            return False
         for key, value in self.notebook.ledger.items():
-            if "has_pokemon" in key.lower() or "goal" in key.lower():
+            if self._goal_ledger_key in key.lower() or "goal" in key.lower():
                 if str(value).strip().lower() in ("true", "yes", "1", "reached", "done"):
                     return True
         return False
@@ -592,7 +632,8 @@ class Strategist:
             prompts.GOAL_CHECK_PROMPT,
             game=self._game,
             goal=self._goal,
-            check_instruction=prompts.PARTY_CHECK_INSTRUCTION,
+            check_instruction=(self._goal_check_instruction
+                               or prompts.PARTY_CHECK_INSTRUCTION),
         )
         return parse_goal_check(self._call("goal_check", prompt, images=[frame]))
 
