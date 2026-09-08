@@ -33,8 +33,9 @@ CSV can carry the same `task`. Episodes are therefore keyed on **row position** 
 
 Output
 ------
-<results_dir>/debug/<game>/benchmark/episodes_<model>.md   (one per model)
-<results_dir>/debug/<game>/benchmark/comparison.md
+<results_dir>/debug/<game>/benchmark/<arm>/episodes_<model>.md   (one per model)
+<results_dir>/debug/<game>/benchmark/<arm>/comparison.md
+where <arm> is the --supervisor, suffixed with --extra_name when the run used one.
 Frames go to <storage_dir>/tmp/debug_frames/<game>/benchmark/<model>/<task>/ — on storage,
 not beside the markdown, because there are thousands of them per report.
 """
@@ -410,7 +411,11 @@ def debug_benchmark(obj, model_name, compare_model, bench_game, max_episodes, su
         model_name=model_name, output_dir=obj["output_dir"],
         mode=obj["mode"],
     )
-    report_dir = paths.debug_dir("benchmark")
+    # Keyed on the arm being read: every supervisor writes its own CSV for the same game,
+    # executor and model, and --extra_name splits one supervisor further (the retrieval arm's
+    # docs_mode). Without both in the path, two arms overwrite each other's episodes_<model>.md.
+    arm = supervisor if obj["extra_name"] is None else f"{supervisor}_{obj['extra_name']}"
+    report_dir = paths.debug_dir("benchmark", arm)
     overwrite = obj["overwrite"]
     game = paths.game if bench_game == "none" else bench_game
 

@@ -26,6 +26,7 @@ from debug_scripts import (
     debug_benchmark,
     debug_compare,
     debug_info,
+    debug_retrieval,
     debug_practice,
 )
 
@@ -73,6 +74,7 @@ main.add_command(debug_attempt, name="attempt")
 main.add_command(debug_benchmark, name="benchmark")
 main.add_command(debug_compare, name="compare")
 main.add_command(debug_info, name="info")
+main.add_command(debug_retrieval, name="retrieval")
 main.add_command(debug_practice, name="practice")
 
 

@@ -32,7 +32,7 @@ Input (all produced by scripts/vlm/build_info.sh)
 
 Output
 ------
-<results_dir>/debug/<game>/info/report.md, plus figures beside it.
+<results_dir>/debug/<game>/info/<model_name>/<source>/report.md, plus figures beside it.
 """
 
 import glob
@@ -186,8 +186,11 @@ def debug_info(obj, model_name, source, max_entries):
         model_name=model_name, output_dir=obj["output_dir"],
         mode=obj["mode"],
     )
-    report_dir = paths.debug_dir("info")
-    images_dir = paths.debug_dir("info", "images")
+    # Keyed on model and source: one game has an 'attempt' and a 'curiosity' document, and two
+    # models may each have built both. They are different documents and must not overwrite each
+    # other's report.
+    report_dir = paths.debug_dir("info", model_name, source)
+    images_dir = paths.debug_dir("info", model_name, source, "images")
 
     info_dir = paths.source_info_dir(source)
     insights_path = paths.require(os.path.join(info_dir, "insights.jsonl"), "insights")
@@ -196,6 +199,36 @@ def debug_info(obj, model_name, source, max_entries):
 
     leaf_docs = [InfoDocument.from_dict(row["document"]) for row in rows]
     leaf_stats = _document_stats(leaf_docs)
+
+    # --- Raw pre-merge insights (the leaves) -------------------------------
+    # One leaf per stage-A pair, straight from insights.jsonl, before any merge round
+    # has run. This is the literal extraction output; the funnel/merge-tree sections below
+    # only ever show aggregate stats over these, never the insight text itself.
+    leaf_render_blocks = [
+        md.h2("Raw insights (pre-merge leaves)"),
+        md.para(f"**{len(rows)}** leaves — one per stage-A pair, before any merge round "
+                f"consolidates them."),
+    ]
+    leaf_render_rows = rows[:max_entries] if max_entries else rows
+    for i, row in enumerate(leaf_render_rows):
+        doc = leaf_docs[i]
+        title = f"leaf {i} — init_state={row.get('init_state')}"
+        if row.get("task"):
+            title += f" — {row['task']}"
+        parts = []
+        for label, entries in (("Task entry", doc.task_entries), ("Image entry", doc.image_entries)):
+            for entry in entries:
+                parts.append(
+                    f"**{label}: {entry.category}**\n\n"
+                    f"Description: {entry.description}\n\n"
+                    f"Examples:\n{md.bullets(entry.examples)}\n"
+                    f"Insights:\n{md.bullets(entry.insights)}"
+                )
+        leaf_render_blocks.append(md.details(title, "\n\n".join(parts)))
+    if max_entries and len(rows) > max_entries:
+        leaf_render_blocks.append(md.warn(
+            f"Showing {max_entries}/{len(rows)} leaves — pass --max_entries 0 for all."
+        ))
 
     # --- Funnel -----------------------------------------------------------
     # The number of pairs that went in is the annotation json's length; insights.jsonl only
@@ -354,6 +387,7 @@ def debug_info(obj, model_name, source, max_entries):
     blocks = [
         md.h1(f"Info document — {paths.game} / {paths.model_save_name} / source={source}"),
         md.para(f"Source: `{info_dir}`"),
+        *leaf_render_blocks,
         md.h2("Yield funnel"),
         md.bullets(funnel),
         md.note("If most pairs return NONE, or the final document has a handful of entries, "

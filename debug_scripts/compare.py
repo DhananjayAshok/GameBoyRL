@@ -27,7 +27,7 @@ What is left here is the part that needs no frames: the pairing and the quadrant
 
 Output
 ------
-<results_dir>/debug/<game>/compare/<label_a>__vs__<label_b>.md
+<results_dir>/debug/<game>/compare/<executor>_<controller_variant>/<label_a>__vs__<label_b>.md
 """
 
 import os
@@ -42,9 +42,9 @@ from debug_scripts.benchmark import _load, _paired_index
 from python_scripts.paths import Paths
 
 QUADRANTS = [
-    ("both_pass", "Both pass"),
     ("a_only", "{a} passes, {b} fails"),
     ("b_only", "{b} passes, {a} fails"),
+    ("both_pass", "Both pass"),
     ("both_fail", "Both fail"),
 ]
 
@@ -77,7 +77,10 @@ def debug_compare(obj, csv_a, csv_b, label_a, label_b, n_examples):
         executor=obj["executor"], controller_variant=obj["controller_variant"],
         output_dir=obj["output_dir"], mode=obj["mode"],
     )
-    report_dir = paths.debug_dir("compare")
+    # Keyed on the executor variant: the same two arms are benchmarked under several executors
+    # for one game (sword_of_hope_2 has single_actions / single_none / single_visual), and the
+    # labels below name the arms only, so without this all of them write one file.
+    report_dir = paths.debug_dir("compare", f"{paths.executor}_{paths.controller_variant}")
 
     label_a = label_a or os.path.splitext(os.path.basename(csv_a))[0]
     label_b = label_b or os.path.splitext(os.path.basename(csv_b))[0]
@@ -162,9 +165,9 @@ def debug_compare(obj, csv_a, csv_b, label_a, label_b, n_examples):
         md.bullets([
             f"A success: **{hits_a}/{n}** ({hits_a / n * 100:.1f}%)",
             f"B success: **{hits_b}/{n}** ({hits_b / n * 100:.1f}%)",
-            f"both pass: **{len(quadrant_tasks['both_pass'])}** · "
             f"A only: **{len(quadrant_tasks['a_only'])}** · "
             f"B only: **{len(quadrant_tasks['b_only'])}** · "
+            f"both pass: **{len(quadrant_tasks['both_pass'])}** · "
             f"both fail: **{len(quadrant_tasks['both_fail'])}**",
         ]),
         md.note(

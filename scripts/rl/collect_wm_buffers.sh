@@ -90,7 +90,7 @@ echo "Train games for $game: ${train_games[*]}"
 # collection run rather than a task-discovery one.
 ARGS["n_agents"]=1                  # no iterative self-improvement; still 2 agent rounds
 ARGS["sweep"]=false                 # not the seed/gamma/algorithm sweep
-ARGS["combination_buffer_sweep"]=true
+ARGS["combination_buffer_sweep"]=false
 ARGS["keep_buffers"]=true           # the buffers ARE the output
 ARGS["group_trajectories"]=false    # nothing downstream of grouping is wanted here
 

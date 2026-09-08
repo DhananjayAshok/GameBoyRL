@@ -58,6 +58,17 @@ ALLOWED_SETS = {
         "allow_patterns": ["benchmark/*.csv"],
         "ignore_patterns": [],
     },
+    "world_models": {
+        "root": "storage_dir",
+        "subdir": "",
+        "allow_patterns": [
+            "observation_embedders/*/*/observation_encoder.pt",
+            "curiosity_buffers/world_model/*/*/world_model.pt",
+            "curiosity_buffers/world_model/*/*/action_space.json",
+            "curiosity_buffers/world_model/*/*/buffer_metadata.txt",
+        ],
+        "ignore_patterns": [],
+    },
 }
 
 
