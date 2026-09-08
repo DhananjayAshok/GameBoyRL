@@ -16,7 +16,9 @@
 #   2. Otherwise, fall back to the generic path below: assume `vllm` is already
 #      on PATH in the current environment and launch `vllm serve` directly,
 #      backgrounded, waiting for the /health endpoint. If your environment just
-#      works with a plain `vllm serve`, this is all you need.
+#      works with a plain `vllm serve`, this is all you need. Like the cluster
+#      path, it defaults -tp to the visible GPU count (CUDA_VISIBLE_DEVICES if
+#      set, else nvidia-smi); an explicit -tp from the caller wins.
 #
 # Outputs (generic path):
 #   Tracking files live in $VLLM_STATE_DIR (default ~/vllm_state), keyed on
@@ -53,6 +55,29 @@ for ((i=0; i<${#ARGS[@]}; i++)); do
     fi
 done
 
+HAS_TP=0
+for arg in "$@"; do
+    case "$arg" in
+        -tp|--tensor-parallel-size|-tp=*|--tensor-parallel-size=*) HAS_TP=1 ;;
+    esac
+done
+
+if [ "$HAS_TP" -eq 0 ]; then
+    NUM_GPUS=""
+    if [ -n "$CUDA_VISIBLE_DEVICES" ] && [ "$CUDA_VISIBLE_DEVICES" != "-1" ]; then
+        NUM_GPUS=$(echo "$CUDA_VISIBLE_DEVICES" | tr ',' '\n' | grep -c .)
+    elif command -v nvidia-smi > /dev/null 2>&1; then
+        NUM_GPUS=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | grep -c .)
+    fi
+
+    if [ -n "$NUM_GPUS" ] && [ "$NUM_GPUS" -gt 0 ] 2>/dev/null; then
+        ARGS+=(-tp "$NUM_GPUS")
+        echo "No -tp given; defaulting to visible GPU count: $NUM_GPUS"
+    else
+        echo "No -tp given and no GPUs detected; leaving vLLM's default (-tp 1)"
+    fi
+fi
+
 STATE_DIR="${VLLM_STATE_DIR:-$HOME/vllm_state}"
 mkdir -p "$STATE_DIR"
 HOST=$(hostname -s)
@@ -65,7 +90,7 @@ echo "  pid: $PID_FILE"
 
 # Start vLLM in its own session/process group so the whole tree (APIServer +
 # EngineCore workers, which hold the VRAM) can be killed together later.
-setsid nohup vllm serve "$@" > "$LOG_FILE" 2>&1 &
+setsid nohup vllm serve "${ARGS[@]}" > "$LOG_FILE" 2>&1 &
 VLLM_PID=$!
 
 # Block until the health endpoint responds or the process crashes

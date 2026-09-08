@@ -12,7 +12,7 @@ Processing
 Each (group_idx, attempt) pair is an independent episode (no hint derivation
 between attempts), so all of them are flattened into one job pool:
   1. Create a fresh environment for the group's init_state.
-  2. Reset with seed=(base_seed + hash(group_idx) + attempt) for reproducibility.
+  2. Reset with a deterministic per-episode seed (see _episode_seed).
   3. Take n_random_actions random low-level steps to perturb the start state.
   4. Run AttemptCheckerSupervisor with the task, the formatted guidance (passed as
      the executor's hint), and the goal_condition (passed to the judge).
@@ -48,11 +48,18 @@ Directory: same directory as guidance_path, under a "practice/" subfolder.
     List[ExecutorVLMCallRecord] — all executor VLM calls made during that episode.
 
   practice/results.csv
-    Columns: group_idx, attempt, task_string, success, safe_success_point, and the
+    Columns: group_idx, attempt, task_string, success, safe_success_point, seed, the
     provenance fields (used_retry, derived_hint, guidance, goal_condition,
-    judge_description, judge_reasoning).
+    judge_description, judge_reasoning), and the run diagnostics the checker
+    reports (termination_reason, n_env_steps) — which separate a failure the
+    judge ruled against from one that merely exhausted its step budget.
     Rows are sorted by (group_idx, attempt) order from guidance_path,
     regardless of completion order.
+
+  practice/config.json
+    The settings this practice dir was produced under, so it is self-describing
+    after the fact. Includes n_attempts_requested vs n_attempts_effective, which
+    differ when max_total_practice_runs truncated the run.
 
 Checkpointing
 -------------
@@ -96,7 +103,26 @@ def _format_guidance(guidance_dict: dict) -> str:
 
 
 def _episode_seed(base_seed: int, group_idx: str, attempt: int) -> int:
-    return base_seed + hash(group_idx) % (2**16) + attempt
+    """Deterministic per-episode seed, laid out as decimal place values.
+
+    Two id shapes reach practice: the curiosity leg's plain integer (from enumerate
+    over trajectory groups) and the zeroshot leg's "{line_number}_{task_index}".
+    Both occupy the same place values, so each leg is injective on its own given
+    task_index < 100 and attempt < 100 — bounds that hold for every run the proposal
+    and cap logic can currently produce. The legs are NOT disjoint from each other
+    ("7" and "7_0" both map to base_seed + 70000), which costs nothing because a
+    practice run reads one guidance file and so sees only one id shape.
+
+    Not hash(): string hashing is salted per process, so that made the same episode
+    draw a different perturbation on every invocation, including a checkpoint resume.
+    """
+    group_idx = str(group_idx)
+    if "_" in group_idx:
+        head, _, tail = group_idx.partition("_")
+        major, minor = int(head), int(tail)
+    else:
+        major, minor = int(group_idx), 0
+    return base_seed + major * 10000 + minor * 100 + attempt
 
 
 def _report_env_steps(report) -> list:
@@ -172,7 +198,8 @@ def _practice_episode(
             if guidance_str:
                 print(f"  Guidance: {guidance_str}")
 
-        env.reset(seed=_episode_seed(base_seed, group_idx, attempt))
+        seed = _episode_seed(base_seed, group_idx, attempt)
+        env.reset(seed=seed)
         random_actions = [env.action_space.sample() for _ in range(n_random_actions)]
 
         for action in random_actions:
@@ -243,6 +270,9 @@ def _practice_episode(
             "task_string": task_str,
             "success": result["success"],
             "safe_success_point": result.get("safe_success_point"),
+            # Stored rather than re-derived so _episode_seed stays a changeable
+            # implementation detail: a later scheme cannot orphan existing dirs.
+            "seed": seed,
             # Everything below describes *how* this episode was produced. Without it the
             # retained data is indistinguishable from an unaided run: used_retry says
             # whether the kept episode is the first draw or the hint-carried second one,
@@ -255,6 +285,8 @@ def _practice_episode(
             "goal_condition": goal_condition or "",
             "judge_description": result.get("description", ""),
             "judge_reasoning": result.get("reasoning", ""),
+            "termination_reason": result.get("termination_reason"),
+            "n_env_steps": result.get("n_env_steps"),
         }
         # The call log comes off the FINAL result's executor leg, so it is the post-retry
         # episode the row describes. clean_practice reads each record's own steps for the
@@ -399,6 +431,7 @@ def practice_tasks_cmd(
     # past the cap, shrink n_attempts to the largest value that keeps the total under
     # max_total_practice_runs, keeping at least 1 attempt per task.
     n_tasks = len(guidance_data)
+    n_attempts_requested = n_attempts
     if n_tasks > 0 and n_tasks * n_attempts > max_total_practice_runs:
         revised_n_attempts = max(1, max_total_practice_runs // n_tasks)
         log_warn(
@@ -420,6 +453,37 @@ def practice_tasks_cmd(
     # both fall back to max_workers=1, which processes jobs one at a time in
     # submission order (i.e. identical to a sequential loop).
     effective_workers = 1 if (verbose or isinstance(vlm._vlm, HuggingFaceModel)) else max_concurrency
+
+    # Written before the run rather than after, so a killed or crashed run still leaves a
+    # dir that says what it was trying to do. Rewritten on every invocation, including a
+    # checkpoint resume, so it always reflects the settings the surviving episodes ran under.
+    config = {
+        "guidance_path": os.path.abspath(guidance_path),
+        "game": game,
+        "model_name": model_name,
+        "vlm_kind": vlm_kind,
+        "executor": executor_name,
+        "controller_variant": controller_variant,
+        "n_tasks": n_tasks,
+        "n_attempts_requested": n_attempts_requested,
+        "n_attempts_effective": n_attempts,
+        "max_total_practice_runs": max_total_practice_runs,
+        "n_random_actions": n_random_actions,
+        "max_steps": max_steps,
+        "max_tool_calls": max_tool_calls,
+        "lookback": lookback,
+        "checker_max_new_tokens": checker_max_new_tokens,
+        "max_new_tokens": max_new_tokens,
+        "base_seed": base_seed,
+        "max_concurrency": max_concurrency,
+        "effective_workers": effective_workers,
+        "n_episodes_planned": len(all_jobs),
+        "n_episodes_already_done": len(done),
+    }
+    config_tmp = os.path.join(out_dir, "config.json.tmp")
+    with open(config_tmp, "w") as f:
+        json.dump(config, f, indent=2)
+    os.replace(config_tmp, os.path.join(out_dir, "config.json"))
 
     with ThreadPoolExecutor(max_workers=effective_workers) as pool:
         future_to_job = {

@@ -184,5 +184,7 @@ tmp*
 scripts/core/all_train_states.sh
 vllm*.pid
 slurm/
+storage/
+
 # Local job-submission wrappers: grid queue flags, HF_HOME, GPU pinning — machine-specific
 scripts/run_strategist_*.sh
