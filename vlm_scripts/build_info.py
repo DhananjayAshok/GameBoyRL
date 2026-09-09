@@ -68,7 +68,7 @@ Extract only the KEY, NON-OBVIOUS insights — the things that would genuinely h
 - A positioning or orientation requirement that is easy to get wrong.
 - A failure mode and how to avoid it.
 
-Do NOT state the obvious. "Press the direction you want to walk", "the player must reach the goal", "press A to interact" with no further condition — these are worthless. If nothing non-obvious can be learned from this trajectory, reply with exactly NONE on the Insights line.
+Do NOT state the obvious. "Press the direction you want to walk", "press START to open the menu" ,"the player must reach the goal", "press A to interact or speak to an NPC or pick up an object, Press B to go close a dialogue or menu" with no further condition — these are worthless. If nothing non-obvious can be learned from this trajectory, reply with exactly NONE on the Insights line.
 
 Every insight must be concrete and actionable: name the actual button, the actual visual cue, the actual object, the actual condition.
 
