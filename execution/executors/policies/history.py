@@ -188,8 +188,175 @@ def _first_sentence(response: str) -> str:
     return "(no description)"
 
 
+#: Pixel-difference floor below which a frame is treated as unchanged no matter what the
+#: adaptive estimate says. Calibrated on hardware: on Red a genuine dialogue-text advance
+#: measures ~1.1 mean absolute difference while its idle flicker measures ~0.26, so the
+#: constant sits between them.
+ABSOLUTE_FLOOR = 0.6
+
+#: How far above the measured idle floor a difference must sit to count as a real change.
+#: Prism's sprites animate every frame at ~0.2-1.5; genuine movement there measures 7-17,
+#: so a 5x margin separates them. Measured on Prism after real movement, where the
+#: quietest animation is 0.178 and the loudest 1.686.
+FLOOR_MULTIPLE = 5.0
+
+#: The estimated floor is never allowed above this. Two reasons, both found by test:
+#: a stretch where every action works would otherwise pull the floor up until it masked
+#: the very changes that raised it, and before any idle frame has been seen there is
+#: nothing to estimate from. Sits above Prism's loudest animation (1.512) and below its
+#: quietest genuine movement (6.685).
+MAX_FLOOR = 4.0
+
+#: Differences needed before the floor estimate is trusted. Below this the threshold is
+#: :data:`ABSOLUTE_FLOOR` and **no action is ever called dead**. Pinning the warm-up high
+#: instead looks safer and is not: Red advances dialogue in steps of ~0.5-1.6, so a high
+#: warm-up threshold reads a normal conversation as three dead presses of A and tells the
+#: model to stop pressing it. Being permissive early costs nothing, because the ban -- the
+#: only part with teeth -- stays switched off until the floor is known.
+MIN_SAMPLES = 6
+
+#: Percentile of recent differences taken as the idle floor. The low end of the
+#: distribution is what animation looks like; the median drifts upward as soon as the
+#: agent starts making real progress.
+FLOOR_PERCENTILE = 20
+
+#: Consecutive dead repeats of one action before it is called out by name.
+REPEATS_BEFORE_ESCAPE = 3
+
+#: Recent differences kept for the idle-floor estimate.
+FLOOR_WINDOW = 30
+
+
+def _mean_abs_diff(before, after) -> Optional[float]:
+    """Mean absolute pixel difference, or ``None`` if it cannot be computed.
+
+    Cast to a signed type first. The frames are ``uint8``, and ``numpy`` subtraction on
+    ``uint8`` wraps modulo 256, so a difference of -10 reads as 246 — which inflates small
+    differences into large ones and biases every comparison toward "something changed".
+    """
+    try:
+        import numpy as np
+        return float(np.abs(before.astype(np.int16) - after.astype(np.int16)).mean())
+    except Exception:  # noqa: BLE001 - a diagnostic must never end a run
+        return None
+
+
+class EscapeHistoryPolicy(ActionHistoryPolicy):
+    """
+    Action history that measures "no change" itself, and names a dead action out loud.
+
+    Two defects in :class:`ActionHistoryPolicy` show up only on hardware, and only the
+    first is a bug in the tag:
+
+    **The environment's flag is not usable on every game.** ``core.frame_changed`` fires
+    when any frame since the last step differs by more than 0.001 on a ``uint8`` image —
+    roughly one fully-flipped pixel. Pokemon Red has no idle animation, so the flag is
+    accurate there. Prism runs a Gen-2 engine whose sprites animate in place, so *every*
+    frame differs and the flag is ``True`` unconditionally: across 2,170 history blocks in
+    one run it never once reported no change, while the agent pressed a direction into a
+    wall for its whole budget. The animation floor is game-specific — Red's is ~0.26 and
+    Prism's is ~1.5, and Red's smallest *genuine* change is ~1.1, inside Prism's floor — so
+    no fixed threshold separates them and the floor is estimated per run instead.
+
+    **Being told does not stop the repetition.** On Red, where the flag *is* accurate, 87%
+    of steps followed an action that did nothing and the model repeated that same action
+    86% of the time, despite a paragraph telling it not to. So the dead action is named
+    explicitly and singled out, rather than left to a general warning the model reads past.
+
+    This is a separate arm (``*_escape``) rather than a change to ``actions``: the existing
+    policy is what every published benchmark number was measured with.
+    """
+
+    name = "escape"
+
+    def __init__(self, history_k: int = DEFAULT_HISTORY_K, **kwargs) -> None:
+        super().__init__(history_k=history_k, **kwargs)
+        self._diffs: List[float] = []
+        self._changed: dict = {}
+
+    def reset(self) -> None:
+        super().reset()
+        self._diffs = []
+        self._changed = {}
+
+    def _threshold(self) -> float:
+        """How large a difference must be, given the idle animation seen so far."""
+        if len(self._diffs) < MIN_SAMPLES:
+            return ABSOLUTE_FLOOR
+        ordered = sorted(self._diffs[-FLOOR_WINDOW:])
+        floor = ordered[min(len(ordered) - 1, (len(ordered) * FLOOR_PERCENTILE) // 100)]
+        return min(MAX_FLOOR, max(ABSOLUTE_FLOOR, FLOOR_MULTIPLE * floor))
+
+    def observe(self, steps: List[StepRecord]) -> None:
+        super().observe(steps)
+        for record in steps:
+            if not isinstance(record, EnvironmentStepRecord):
+                continue
+            diff = _mean_abs_diff(record.frame_before, record.frame_after)
+            if diff is None:
+                # Fall back to the environment's own flag rather than guessing.
+                self._changed[id(record)] = record.frame_changed
+                continue
+            # The threshold is taken BEFORE this difference joins the window.
+            self._changed[id(record)] = diff > self._threshold()
+            self._diffs.append(diff)
+
+    def changed(self, record: StepRecord) -> bool:
+        """Whether this step actually moved the screen, by our own measurement."""
+        return self._changed.get(id(record), getattr(record, "frame_changed", True))
+
+    def _dead_action(self) -> Optional[str]:
+        """The action repeated to no effect, if there is one to call out."""
+        # Never accuse an action while the floor is still a guess -- see MIN_SAMPLES.
+        if len(self._diffs) < MIN_SAMPLES:
+            return None
+        steps = [r for r in self._records if isinstance(r, EnvironmentStepRecord)]
+        if len(steps) < REPEATS_BEFORE_ESCAPE:
+            return None
+        name = steps[-1].action_class.get_action_name(**steps[-1].kwargs)
+        streak = 0
+        for record in reversed(steps):
+            if record.action_class.get_action_name(**record.kwargs) != name:
+                break
+            if self.changed(record):
+                break
+            streak += 1
+        return name if streak >= REPEATS_BEFORE_ESCAPE else None
+
+    def render(self) -> str:
+        if not self._records:
+            return ""
+        recent = self._records[-self._history_k:]
+        lines = ["Recent actions (oldest first):"]
+        for record in recent:
+            if isinstance(record, ExecutorToolCallRecord):
+                lines.append(f"  {tool_call_string(record)} -> {record.result}")
+            else:
+                action = record.action_class.get_action_name(**record.kwargs)
+                lines.append(f"  {action}" + ("" if self.changed(record) else " [no change]"))
+
+        dead = self._dead_action()
+        if dead is not None:
+            streak = sum(1 for r in self._records
+                         if isinstance(r, EnvironmentStepRecord)
+                         and r.action_class.get_action_name(**r.kwargs) == dead
+                         and not self.changed(r))
+            tail = (f"\n\nSTOP. You have pressed {dead} {streak} times without the screen "
+                    f"changing at all. {dead} is BLOCKED - a wall, a counter or a ledge is "
+                    f"in that direction, and pressing it again will do nothing.\n"
+                    f"Do NOT answer {dead} this step. Pick a DIFFERENT action and go around "
+                    f"the obstacle. If you are trying to talk to somebody or use something, "
+                    f"you are facing the wrong way: step to one side and approach it from "
+                    f"another direction.")
+        else:
+            tail = STUCK_HINT if any(isinstance(r, EnvironmentStepRecord)
+                                     and not self.changed(r) for r in recent) else ""
+        return "\n".join(lines) + tail + "\n\n"
+
+
 AVAILABLE_HISTORY_POLICIES = {
     policy.name: policy
-    for policy in (NoHistoryPolicy, ActionHistoryPolicy, VisualHistoryPolicy)
+    for policy in (NoHistoryPolicy, ActionHistoryPolicy, VisualHistoryPolicy,
+                   EscapeHistoryPolicy)
 }
 """ History policies by registry name — the second half of an arm's identity. """
