@@ -36,6 +36,8 @@ PLAN_PROMPT = """You are the strategist for a player working through a game of [
 The overall goal, which will take several tasks to reach:
 "[GOAL]"
 
+The image is the screen EXACTLY as it looks right now. Read it before you write the task: what room or area is this, which way do the exits and paths run, who or what is standing nearby. Your notebook is what you remember; the image is what is actually true this turn, and it wins where they disagree.
+
 Here is your notebook — everything you have established so far:
 [NOTEBOOK]
 
@@ -81,6 +83,8 @@ The overall goal: "[GOAL]"
 
 Objectives completed so far: [COMPLETED]
 Objectives remaining: [REMAINING]
+
+The image is the screen EXACTLY as it looks right now. Read it before you write the task: what room or area is this, which way do the exits and paths run, who or what is standing nearby. Your notebook is what you remember; the image is what is actually true this turn, and it wins where they disagree.
 
 Here is your notebook — everything you have established so far:
 [NOTEBOOK]

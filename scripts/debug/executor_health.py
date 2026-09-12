@@ -34,6 +34,16 @@ from typing import Dict, List, Optional, Tuple
 
 VALID_ACTIONS = {"UP", "DOWN", "LEFT", "RIGHT", "A", "B", "START", "SELECT"}
 
+#: A high-level call as the state_wise controllers advertise it, e.g. ``move(right 5)`` or
+#: ``interact()``. Without this the parser sees no actions at all on those runs and every
+#: rate comes back as ``nan`` -- which reads like a broken run rather than a wrong parser.
+HIGH_LEVEL_ACTION = re.compile(r"^[a-z][a-z_]*\([^)]*\)$", re.IGNORECASE)
+
+
+def is_action(token: str) -> bool:
+    """Whether a parsed ``Action:`` value names an action, at either level."""
+    return token in VALID_ACTIONS or bool(HIGH_LEVEL_ACTION.match(token))
+
 #: Words carrying no information about *what* a task is, so they must not count toward
 #: adherence -- "the go to and" overlaps with every task ever written.
 STOP_WORDS = {
@@ -80,7 +90,12 @@ def parse_leg(text: str) -> Dict:
             recent, in_recent = [], True
             continue
         if in_recent:
-            entry = re.match(r"^([A-Z]+)(\s*\[no change\])?$", stripped)
+            # Accepts both levels: "RIGHT [no change]" and "move(up 1) [no change]".
+            # Three renderings appear in the wild: the low_level token ("RIGHT"), the
+            # advertised call ("move(up 1)"), and get_action_name's prose ("Move up 1").
+            entry = re.match(
+                r"^([A-Za-z][A-Za-z_]*(?:\([^)]*\)|(?:\s+[A-Za-z0-9_]+){0,3})?)"
+                r"(\s*\[no change\])?$", stripped)
             if entry:
                 recent.append((entry.group(1), bool(entry.group(2))))
                 continue
@@ -95,11 +110,12 @@ def parse_leg(text: str) -> Dict:
             continue
 
         if stripped.startswith("Action:"):
-            action = stripped.split("Action:", 1)[1].strip().upper().strip('.<>"')
+            action = stripped.split("Action:", 1)[1].strip().strip('.<>"')
+            action = action.upper() if action.upper() in VALID_ACTIONS else action
             # The prompt template carries a literal 'Action: <one environment action>'.
             # Only a real action closes a decision; anything else leaves state alone so
             # the template line cannot consume the history block meant for the next one.
-            if action in VALID_ACTIONS:
+            if is_action(action):
                 decisions.append({"action": action,
                                   "reasoning": " ".join(reasoning),
                                   "recent": list(recent)})

@@ -223,6 +223,15 @@ FLOOR_PERCENTILE = 20
 #: Consecutive dead repeats of one action before it is called out by name.
 REPEATS_BEFORE_ESCAPE = 3
 
+#: The movement actions.
+DIRECTIONS = ("UP", "DOWN", "LEFT", "RIGHT")
+
+#: Dead steps in a row before movement is judged blocked outright. Counted since the last
+#: step that changed anything, not over a fixed window: a model that favours one or two
+#: directions (a real run pressed UP 203 times and LEFT 9) may never try all four inside a
+#: window, and waiting for it to means the message never fires at all.
+BLOCKED_AFTER = 6
+
 #: Recent differences kept for the idle-floor estimate.
 FLOOR_WINDOW = 30
 
@@ -305,10 +314,53 @@ class EscapeHistoryPolicy(ActionHistoryPolicy):
         """Whether this step actually moved the screen, by our own measurement."""
         return self._changed.get(id(record), getattr(record, "frame_changed", True))
 
+    def _stuck_span(self) -> List[StepRecord]:
+        """The run of environment steps since the last one that changed the screen."""
+        span = []
+        for record in reversed(self._records):
+            if not isinstance(record, EnvironmentStepRecord):
+                continue
+            if self.changed(record):
+                break
+            span.append(record)
+        return span
+
+    def _movement_blocked(self) -> bool:
+        """Whether the pad is inert: a long dead run of directions, with A and B untried.
+
+        A wall blocks one direction. When several directions are dead and nothing has
+        changed for a while, the cause is usually not spatial: a dialogue box, sign or menu
+        is open and movement is disabled until it is dismissed. Telling the model to "go
+        around the obstacle" then is worse than silence, because the only actions that help
+        -- A and B -- are the two it is being steered away from.
+
+        Found on hardware: a Gemma 3 run opened a town sign on Pokemon Brown and spent its
+        whole 2,263-step budget cycling directions against the open box, taking 464
+        single-direction bans and pressing A exactly once. One screen, zero effective steps.
+
+        Deliberately does NOT require all four directions to have been tried -- the first
+        attempt at this fix did, and never fired, because that run pressed UP 203 times and
+        LEFT 9. Two distinct dead directions separate a blocked pad from a single wall.
+        """
+        if len(self._diffs) < MIN_SAMPLES:
+            return False
+        span = self._stuck_span()
+        if len(span) < BLOCKED_AFTER:
+            return False
+        names = {r.action_class.get_action_name(**r.kwargs) for r in span}
+        if not names <= set(DIRECTIONS):
+            # A, B or START already tried in this dead run: a text box is not the story.
+            return False
+        return len(names) >= 2
+
     def _dead_action(self) -> Optional[str]:
         """The action repeated to no effect, if there is one to call out."""
         # Never accuse an action while the floor is still a guess -- see MIN_SAMPLES.
         if len(self._diffs) < MIN_SAMPLES:
+            return None
+        # When nothing moves at all, banning one direction just rotates the model onto the
+        # next dead one. :meth:`_movement_blocked` speaks to that case instead.
+        if self._movement_blocked():
             return None
         steps = [r for r in self._records if isinstance(r, EnvironmentStepRecord)]
         if len(steps) < REPEATS_BEFORE_ESCAPE:
@@ -334,6 +386,16 @@ class EscapeHistoryPolicy(ActionHistoryPolicy):
             else:
                 action = record.action_class.get_action_name(**record.kwargs)
                 lines.append(f"  {action}" + ("" if self.changed(record) else " [no change]"))
+
+        if self._movement_blocked():
+            return "\n".join(lines) + (
+                "\n\nSTOP. Several different directions have done nothing at all. This is "
+                "NOT a wall - when movement itself is dead, a dialogue box, a sign, a menu "
+                "or a battle prompt is open on screen and the arrow keys are disabled until "
+                "it is cleared.\n"
+                "Do NOT answer a direction this step. Press A to advance or confirm what is "
+                "on screen, or B to close it. Look at the bottom of the screen for a text box."
+            ) + "\n\n"
 
         dead = self._dead_action()
         if dead is not None:

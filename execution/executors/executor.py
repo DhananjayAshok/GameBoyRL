@@ -23,6 +23,8 @@ invalid handling and the completion check, each subtly differently.
 
 from __future__ import annotations
 
+import re
+
 from typing import Any, List, Optional, Type
 
 from gameboy_worlds.interface import HighLevelAction
@@ -31,6 +33,65 @@ from execution.executors.base import MAX_CONSECUTIVE_INVALID, Executor
 from execution.executors.policies import (AVAILABLE_ACTION_POLICIES,
                                           AVAILABLE_HISTORY_POLICIES)
 from execution.report import EnvironmentStepRecord, StepRecord
+
+
+
+#: Angle-bracket placeholders as they appear in the action list a controller advertises,
+#: e.g. ``move(<up, down, right or left> <steps: int>)``. A model asked to fill one in often
+#: keeps the brackets -- ``move(<up> 1)``.
+_PLACEHOLDER_BRACKETS = re.compile(r"[<>]")
+
+
+def _advertised_verbs(action_strings) -> set:
+    """The call names a controller advertises, e.g. {"move", "interact", "openmenu"}.
+
+    Read off the advertised strings rather than hardcoded, so this follows whatever the
+    controller offers for the current game and state.
+    """
+    verbs = set()
+    for text in (action_strings or {}).values():
+        head = str(text).split("(", 1)[0].strip().lower()
+        if head and head.isidentifier():
+            verbs.add(head)
+    return verbs
+
+
+def normalise_action_string(action_str: str, verbs=()) -> str:
+    """Repair the ways a model mis-renders an advertised call, and nothing else.
+
+    Every failure below was observed on hardware in one 407-step state_wise run, which lost
+    19.4% of its steps to them -- all of them a correctly *chosen* action written in the
+    wrong shape:
+
+        move(<up> 1)      brackets copied from the advertised format
+        move(<right>, 1)  brackets, plus a comma between arguments
+        Move right 1      prose: capitalised, no parentheses
+        Interact          prose: no parentheses, no arguments
+        openmenu<trainer> brackets used *as* the parentheses
+
+    An action whose verb the controller does not advertise is returned untouched, so a
+    genuinely unrecognised action still fails and is reported rather than silently rewritten.
+    """
+    text = _PLACEHOLDER_BRACKETS.sub(" ", action_str or "").strip()
+    if not text:
+        return ""
+    verbs = set(verbs)
+
+    if "(" in text:
+        head, _, rest = text.partition("(")
+        head = head.strip().lower()
+        if head not in verbs:
+            return action_str.strip()
+        args = " ".join(rest.rsplit(")", 1)[0].replace(",", " ").split())
+        return f"{head}({args})"
+
+    # No parentheses: "Move right 1" / "Interact" / "openmenu trainer".
+    parts = text.split()
+    head = parts[0].strip().lower()
+    if head not in verbs:
+        return action_str.strip()
+    args = " ".join(" ".join(parts[1:]).replace(",", " ").split())
+    return f"{head}({args})"
 
 
 class PolicyExecutor(Executor):
@@ -270,7 +331,9 @@ You are playing a GameBoy game. The current screen is shown in the image.
                     aborted = True
                     break
 
-            action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
+            action_class, action_kwargs = self._env.string_to_high_level_action(
+                normalise_action_string(action_str,
+                                        _advertised_verbs(self._get_action_strings())))
             if action_class is None:
                 self._record_invalid(f"Unrecognised action string: {action_str!r}",
                                      reason="unrecognised action")

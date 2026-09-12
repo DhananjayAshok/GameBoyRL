@@ -234,9 +234,46 @@ class Strategist:
             image per request, and every strategist call that needs one needs only the last.
         :return: The raw response text.
         """
+        # `is not None` and an explicit length: reflection may pass a numpy array of
+        # frames, and a bare truth test on one raises "truth value of an array ... is
+        # ambiguous" rather than doing anything sensible.
+        if images is not None and len(images) > 0:
+            # The strategist shares a GPU (and, on the HuggingFace backend, a process) with
+            # the executor that just ran hundreds of steps. Its image-bearing call is the
+            # largest single allocation in the loop, and one run died at its first sighted
+            # plan with 6.3GB reserved but unallocated. Releasing the cached blocks first
+            # costs a few milliseconds and is a no-op when there is no CUDA in play.
+            try:
+                # gc.collect() FIRST. empty_cache() only returns blocks the allocator has
+                # already reclaimed; tensors still referenced by uncollected Python objects
+                # keep their memory. Measured on hardware: the model itself is 22.7GB, but
+                # a run showed 41.5GB live -- ~19GB of executor activations and KV cache
+                # awaiting collection, which is far more than the 2.67GB the image needs.
+                import gc
+                import torch
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:  # noqa: BLE001 - never let a housekeeping call end a run
+                pass
         try:
-            inferred = self._vlm.infer(texts=prompt, images=images,
-                                       max_new_tokens=self._max_new_tokens)
+            try:
+                inferred = self._vlm.infer(texts=prompt, images=images,
+                                           max_new_tokens=self._max_new_tokens)
+            except Exception as image_error:  # noqa: BLE001
+                # Sight is an improvement, not a precondition. When the planner shares a
+                # card with the executor its image-bearing call is the largest allocation
+                # in the loop, and it can be a few hundred MB short of fitting -- a run
+                # died at its first plan with 41.5GB live of a 44GB card. Falling back to
+                # the text-only prompt costs the planner its eyes for one turn; failing
+                # costs the whole episode, because two unparsed plans end the run.
+                if images is None or "out of memory" not in str(image_error).lower():
+                    raise
+                log_warn("Planner could not fit an image this turn; planning blind. "
+                         "Consider --strategist_vlm_model on a smaller model.",
+                         self._parameters)
+                inferred = self._vlm.infer(texts=prompt, images=None,
+                                           max_new_tokens=self._max_new_tokens)
             output, meta = inferred["output"], inferred["meta"]
         except Exception as error:  # noqa: BLE001
             # One failed call must not end a multi-hour episode. Every parser here already
@@ -408,6 +445,23 @@ class Strategist:
 
     # --------------------------------------------------------------- planning
 
+    def _current_frame(self) -> Optional[list]:
+        """The screen as it is right now, as a one-frame list for :meth:`_call`.
+
+        The planner ran blind until 2026-09-10: it saw the goal, the tracked objective and
+        the notebook, but never the screen. With nothing to look at, a planner whose
+        notebook says little can only write a compass direction, and one run's fourteen
+        tasks degenerated to "move right along the path" four times over -- 97.9% of the
+        executor's moves were up or right, faithfully obeying it.
+
+        One frame, not a history: vLLM serves a single image per request.
+        """
+        try:
+            frame = self._env.get_info()["core"]["current_frame"]
+            return [frame] if frame is not None else None
+        except Exception:  # noqa: BLE001 - planning must not die for want of a screenshot
+            return None
+
     def _plan_next(self) -> Tuple[Optional[str], Optional[str]]:
         """Ask for the next task. Returns ``(task, hint)``, either possibly ``None``."""
         prompt = render(
@@ -417,7 +471,7 @@ class Strategist:
             notebook=self._planner_context(),
             max_steps=self._max_steps_per_task,
         )
-        return parse_plan(self._call("plan", prompt))
+        return parse_plan(self._call("plan", prompt, images=self._current_frame()))
 
     def _planner_context(self) -> str:
         """

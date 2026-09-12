@@ -82,7 +82,7 @@ class SubgoalStrategist(Strategist):
             notebook=self._planner_context(),
             max_steps=self._max_steps_per_task,
         )
-        return parse_plan(self._call("plan", prompt))
+        return parse_plan(self._call("plan", prompt, images=self._current_frame()))
 
     def _reflect(self, record) -> None:
         """

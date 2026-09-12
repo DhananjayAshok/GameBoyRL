@@ -70,7 +70,13 @@ class VLM:
         elif self._vlm_kind == "openrouter":
             self._vlm = OpenRouterModel(model=self._model_name)
         elif self._vlm_kind == "huggingface":
-            self._vlm = HuggingFaceModel(model=self._model_name, model_kind="vlm")
+            # dtype="auto" honours the dtype the checkpoint declares in its config.
+            # Left unset, `from_pretrained` loads float32 regardless of what the weights
+            # are, which doubles the footprint of every bf16 checkpoint: Gemma 3 27B needs
+            # ~54GB in bfloat16 and ~108GB in float32, so it fits two 46GB A40s in the
+            # first case and no arrangement of them in the second.
+            self._vlm = HuggingFaceModel(model=self._model_name, model_kind="vlm",
+                                         dtype="auto")
         elif self._vlm_kind == "anthropic":
             self._vlm = AnthropicModel(model=self._model_name)
         elif self._vlm_kind == "vllm":
