@@ -80,6 +80,10 @@ class StrategistReport:
     :param goal_achieved: Whether the screen check confirmed the goal.
     :param stop_reason: Why the loop ended — ``goal_achieved``, ``max_tasks``,
         ``planning_failed`` or ``error``.
+    :param frame_memory: Summary of every screen seen this episode -- total frames,
+        distinct screens, and the share that were revisits. The per-screen counts are not
+        included: they are hashes, and there are thousands of them.
+    :type frame_memory: Dict[str, Any]
     :param notebook: The notebook's final state, as a plain dict.
     """
 
@@ -91,6 +95,7 @@ class StrategistReport:
     vlm_calls: List[StrategistVLMCallRecord] = field(default_factory=list)
     goal_achieved: bool = False
     stop_reason: str = "incomplete"
+    frame_memory: Dict[str, Any] = field(default_factory=dict)
     notebook: Dict[str, Any] = field(default_factory=dict)
 
     @property

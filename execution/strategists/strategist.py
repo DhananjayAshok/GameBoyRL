@@ -26,6 +26,8 @@ from typing import Any, Optional, Tuple
 from execution.executors import Executor
 from execution.report import SupervisorReport
 from execution.strategists import prompts
+from execution.strategists.action_repair import ActionRepairingEnvironment
+from execution.strategists.frame_memory import FrameMemory
 from execution.strategists._parsing import (parse_goal_check, parse_plan,
                                             parse_reflection, parse_summary, render)
 from execution.strategists.notebook import Notebook
@@ -159,6 +161,9 @@ class Strategist:
         self._max_tool_calls = max_tool_calls
         self._max_new_tokens = max_new_tokens
         self._use_notebook = use_notebook
+        self.frames = FrameMemory()
+        """Every screen seen this episode. Fed from the step records of each completed
+        task, so it holds the frame after EVERY emulator step, not one per task."""
         self._verify_goal = verify_goal
         self._stop_on_goal = stop_on_goal
         self._reset_between_tasks = reset_between_tasks
@@ -347,6 +352,7 @@ class Strategist:
             self.report.stop_reason = "max_tasks"
 
         self.report.notebook = self.notebook.to_dict()
+        self.report.frame_memory = self.frames.to_dict()
         return self.report
 
     #: Info groups too bulky or too volatile to snapshot. ``core`` holds the frame arrays;
@@ -445,23 +451,6 @@ class Strategist:
 
     # --------------------------------------------------------------- planning
 
-    def _current_frame(self) -> Optional[list]:
-        """The screen as it is right now, as a one-frame list for :meth:`_call`.
-
-        The planner ran blind until 2026-09-10: it saw the goal, the tracked objective and
-        the notebook, but never the screen. With nothing to look at, a planner whose
-        notebook says little can only write a compass direction, and one run's fourteen
-        tasks degenerated to "move right along the path" four times over -- 97.9% of the
-        executor's moves were up or right, faithfully obeying it.
-
-        One frame, not a history: vLLM serves a single image per request.
-        """
-        try:
-            frame = self._env.get_info()["core"]["current_frame"]
-            return [frame] if frame is not None else None
-        except Exception:  # noqa: BLE001 - planning must not die for want of a screenshot
-            return None
-
     def _plan_next(self) -> Tuple[Optional[str], Optional[str]]:
         """Ask for the next task. Returns ``(task, hint)``, either possibly ``None``."""
         prompt = render(
@@ -469,9 +458,27 @@ class Strategist:
             game=self._game,
             goal=self._goal,
             notebook=self._planner_context(),
+            exploration_note=self._exploration_note(),
             max_steps=self._max_steps_per_task,
         )
-        return parse_plan(self._call("plan", prompt, images=self._current_frame()))
+        # One frame, wrapped: _current_frame returns the raw array, and the VLM layer
+        # expects a list of images.
+        frame = self._current_frame()
+        return parse_plan(self._call("plan", prompt,
+                                     images=[frame] if frame is not None else None))
+
+    def _exploration_note(self) -> str:
+        """A warning when the screen the planner is looking at is one it keeps returning to.
+
+        Without it the planner has no way to know it is circling: 86% of one run's steps
+        were spent on already-seen screens while its notebook recorded only unanchored
+        nouns, and its tasks degenerated into compass directions.
+        """
+        try:
+            frame = self._env.get_info()["core"]["current_frame"]
+            return self.frames.note_for(frame) if frame is not None else ""
+        except Exception:  # noqa: BLE001 - never let this end a run
+            return ""
 
     def _planner_context(self) -> str:
         """
@@ -497,10 +504,20 @@ class Strategist:
         A new supervisor per task, always: ``evaluate()`` is single-use, and reusing one
         would merge two episodes into a single report.
         """
+        # The planner's hint is the only channel to the executor, so the revisit warning
+        # rides along with it: the executor cannot see the notebook or the frame memory.
+        try:
+            frame = self._env.get_info()["core"]["current_frame"]
+            revisit = self.frames.hint_for(frame) if frame is not None else ""
+        except Exception:  # noqa: BLE001
+            revisit = ""
+        if revisit:
+            hint = f"{hint} {revisit}".strip() if hint else revisit
+
         supervisor = HintedSupervisor(
             task=task,
             executor_class=self._executor_class,
-            env=self._env,
+            env=ActionRepairingEnvironment(self._env),
             game=self._game,
             max_steps=self._max_steps_per_task if max_steps is None else max_steps,
             max_tool_calls=self._max_tool_calls,
@@ -549,8 +566,21 @@ class Strategist:
 
     # ------------------------------------------------------------- reflection
 
+    def _record_frames(self, record: TaskRecord) -> None:
+        """Add the screen after every emulator step of this task to the frame memory.
+
+        Harvested from the report rather than observed live: the strategist never sees the
+        executor's loop, but the report carries an EnvironmentStepRecord per step, each
+        holding the frame after its action. Every frame reaches the memory; they simply
+        arrive in a batch at the end of the task rather than one at a time.
+        """
+        legs = record.report.executor_reports if record and record.report else []
+        for leg in legs or ():
+            self.frames.add_steps(getattr(leg, "steps", None))
+
     def _reflect(self, record: TaskRecord) -> None:
         """Read the attempt, extend the notebook, and file the entry."""
+        self._record_frames(record)
         report = record.report
         leg = report.executor_reports[-1] if report and report.executor_reports else None
         outcome = leg.termination_reason if leg else "error"
