@@ -5,8 +5,6 @@ How one decision produces action(s).
 
 from __future__ import annotations
 
-import re
-
 from dataclasses import dataclass
 from typing import List, Optional, Protocol, Tuple
 
@@ -26,32 +24,6 @@ class Decision:
 
     actions: List[str]
     reasoning: Optional[str] = None
-
-
-#: Markdown and list decoration the model wraps action names in when it is asked to
-#: enumerate them: "2. **DOWN**", "- START". Stripped before the name is resolved.
-_DECORATION = re.compile(r"^[\s\-*#>]*(?:\d+[.)]\s*)?|[\s*`]+$")
-
-#: A parenthesised single token, as in "Arrow Keys (DOWN)". The controller describes the
-#: pad as prose -- "Arrow Keys (UP for up, DOWN for down, ...)" -- and a model asked to
-#: score every action by name echoes that phrasing back rather than the bare token. The
-#: single-action policy never notices, because it emits one `Action:` line and writes the
-#: token plainly; the scored policy must name all seven and fails on every directional one.
-_PARENTHESISED = re.compile(r"\(([A-Za-z]+)\)")
-
-
-def normalise_action_name(text: str) -> str:
-    """Reduce a model-written action label to the bare action string.
-
-    Leaves anything it does not recognise untouched, so a genuinely unknown action still
-    reaches :meth:`unknown_action_error` and is reported rather than silently rewritten.
-    """
-    cleaned = _DECORATION.sub("", (text or "").strip()).strip()
-    cleaned = cleaned.strip("*`").strip()
-    inner = _PARENTHESISED.search(cleaned)
-    if inner and len(cleaned.split()) > 1:
-        return inner.group(1).strip()
-    return cleaned
 
 
 class ActionPolicy(Protocol):
@@ -188,7 +160,7 @@ class ScoredActionPolicy:
         first, last = stripped.find(":"), stripped.rfind(":")
         if first == -1:
             return None
-        action = normalise_action_name(stripped[:first])
+        action = stripped[:first].strip()
         reasoning = stripped[first + 1:last].strip() if last > first else ""
         # Scored through a synthetic keyed line so parse_int only ever sees the score
         # field. Handing it the whole line would search the justification for digits too,

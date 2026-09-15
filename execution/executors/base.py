@@ -77,23 +77,6 @@ Complete: <yes or no>
 Reasoning: <why, referring to what is visible in image 2>
 [STOP]"""
 
-    #: The same judgement, phrased for one image.
-    #:
-    #: Some backends accept only a single image per request -- vLLM rejects two with a hard
-    #: 400 rather than dropping one -- and the completion check is not optional for a caller
-    #: that relies on self-termination. Selected by :meth:`_uses_single_image_vlm`; the
-    #: two-image prompt above remains the default everywhere else.
-    DONE_CHECK_PROMPT_SINGLE_IMAGE = DONE_CHECK_PROMPT.replace(
-        "Image 1 is the screen BEFORE the most recent action. Image 2 is the screen AFTER it.",
-        "The image is the screen AFTER the most recent action.",
-    ).replace(
-        "referring to what is visible in image 2",
-        "referring to what is visible in the image",
-    )
-
-    #: Backends that serve exactly one image per request.
-    SINGLE_IMAGE_VLM_KINDS = ("vllm",)
-
     DONE_CHECK_REASONING_LABEL = "The reasoning given for that action was:"
 
     #: Env actions shown to the completion check as history.
@@ -442,19 +425,11 @@ Reasoning: <why, referring to what is visible in image 2>
             lines.append(f"  {step.action_class.get_action_name(**step.kwargs)}")
         return "\n".join(lines) + "\n\n"
 
-    def _uses_single_image_vlm(self) -> bool:
-        """Whether this run's backend accepts only one image per request."""
-        kind = str(self._parameters.get("executor_vlm_kind") or "").lower()
-        return kind in self.SINGLE_IMAGE_VLM_KINDS
-
-    def _build_done_check_prompt(self, record: EnvironmentStepRecord,
-                                 single_image: bool = False) -> str:
+    def _build_done_check_prompt(self, record: EnvironmentStepRecord) -> str:
         last_action = record.action_class.get_action_name(**record.kwargs)
         reasoning = self._last_reasoning or "(no reasoning was recorded for this action)"
-        template = (self.DONE_CHECK_PROMPT_SINGLE_IMAGE if single_image
-                    else self.DONE_CHECK_PROMPT)
         return (
-            template
+            self.DONE_CHECK_PROMPT
             .replace("[TASK]", self._task)
             .replace("[HINT_BLOCK]", self._hint_block())
             .replace("[LAST_ACTION]", last_action)
@@ -469,20 +444,16 @@ Reasoning: <why, referring to what is visible in image 2>
 
         One call, tagged ``"done_check"``, showing the frames either side of *record* along
         with the task, the hint, the action just taken, the reasoning that chose it and the
-        recent action history. On a backend that serves one image per request only the AFTER
-        frame is sent, since that is the one the verdict is about. Consumes no environment
-        step and no tool budget.
+        recent action history. Consumes no environment step and no tool budget.
 
         :param record: The step record just appended by :meth:`_take_action`.
         :return: ``True`` only on an explicit ``Complete: yes``.
         """
-        single = self._uses_single_image_vlm()
-        prompt = self._build_done_check_prompt(record, single_image=single)
+        prompt = self._build_done_check_prompt(record)
         response = self._vlm_call(
             "done_check",
             texts=prompt,
-            images=([record.frame_after] if single
-                    else [record.frame_before, record.frame_after]),
+            images=[record.frame_before, record.frame_after],
             max_new_tokens=self.DONE_CHECK_MAX_NEW_TOKENS,
         )
         verdict = parse_completion(response)
