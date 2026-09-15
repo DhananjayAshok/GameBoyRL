@@ -26,6 +26,8 @@ from typing import Any, Optional, Tuple
 from execution.executors import Executor
 from execution.report import SupervisorReport
 from execution.strategists import prompts
+from execution.strategists.action_repair import ActionRepairingEnvironment
+from execution.strategists.frame_memory import FrameMemory
 from execution.strategists._parsing import (parse_goal_check, parse_plan,
                                             parse_reflection, parse_summary, render)
 from execution.strategists.notebook import Notebook
@@ -159,6 +161,9 @@ class Strategist:
         self._max_tool_calls = max_tool_calls
         self._max_new_tokens = max_new_tokens
         self._use_notebook = use_notebook
+        self.frames = FrameMemory()
+        """Every screen seen this episode. Fed from the step records of each completed
+        task, so it holds the frame after EVERY emulator step, not one per task."""
         self._verify_goal = verify_goal
         self._stop_on_goal = stop_on_goal
         self._reset_between_tasks = reset_between_tasks
@@ -234,9 +239,46 @@ class Strategist:
             image per request, and every strategist call that needs one needs only the last.
         :return: The raw response text.
         """
+        # `is not None` and an explicit length: reflection may pass a numpy array of
+        # frames, and a bare truth test on one raises "truth value of an array ... is
+        # ambiguous" rather than doing anything sensible.
+        if images is not None and len(images) > 0:
+            # The strategist shares a GPU (and, on the HuggingFace backend, a process) with
+            # the executor that just ran hundreds of steps. Its image-bearing call is the
+            # largest single allocation in the loop, and one run died at its first sighted
+            # plan with 6.3GB reserved but unallocated. Releasing the cached blocks first
+            # costs a few milliseconds and is a no-op when there is no CUDA in play.
+            try:
+                # gc.collect() FIRST. empty_cache() only returns blocks the allocator has
+                # already reclaimed; tensors still referenced by uncollected Python objects
+                # keep their memory. Measured on hardware: the model itself is 22.7GB, but
+                # a run showed 41.5GB live -- ~19GB of executor activations and KV cache
+                # awaiting collection, which is far more than the 2.67GB the image needs.
+                import gc
+                import torch
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:  # noqa: BLE001 - never let a housekeeping call end a run
+                pass
         try:
-            inferred = self._vlm.infer(texts=prompt, images=images,
-                                       max_new_tokens=self._max_new_tokens)
+            try:
+                inferred = self._vlm.infer(texts=prompt, images=images,
+                                           max_new_tokens=self._max_new_tokens)
+            except Exception as image_error:  # noqa: BLE001
+                # Sight is an improvement, not a precondition. When the planner shares a
+                # card with the executor its image-bearing call is the largest allocation
+                # in the loop, and it can be a few hundred MB short of fitting -- a run
+                # died at its first plan with 41.5GB live of a 44GB card. Falling back to
+                # the text-only prompt costs the planner its eyes for one turn; failing
+                # costs the whole episode, because two unparsed plans end the run.
+                if images is None or "out of memory" not in str(image_error).lower():
+                    raise
+                log_warn("Planner could not fit an image this turn; planning blind. "
+                         "Consider --strategist_vlm_model on a smaller model.",
+                         self._parameters)
+                inferred = self._vlm.infer(texts=prompt, images=None,
+                                           max_new_tokens=self._max_new_tokens)
             output, meta = inferred["output"], inferred["meta"]
         except Exception as error:  # noqa: BLE001
             # One failed call must not end a multi-hour episode. Every parser here already
@@ -310,6 +352,7 @@ class Strategist:
             self.report.stop_reason = "max_tasks"
 
         self.report.notebook = self.notebook.to_dict()
+        self.report.frame_memory = self.frames.to_dict()
         return self.report
 
     #: Info groups too bulky or too volatile to snapshot. ``core`` holds the frame arrays;
@@ -415,9 +458,27 @@ class Strategist:
             game=self._game,
             goal=self._goal,
             notebook=self._planner_context(),
+            exploration_note=self._exploration_note(),
             max_steps=self._max_steps_per_task,
         )
-        return parse_plan(self._call("plan", prompt))
+        # One frame, wrapped: _current_frame returns the raw array, and the VLM layer
+        # expects a list of images.
+        frame = self._current_frame()
+        return parse_plan(self._call("plan", prompt,
+                                     images=[frame] if frame is not None else None))
+
+    def _exploration_note(self) -> str:
+        """A warning when the screen the planner is looking at is one it keeps returning to.
+
+        Without it the planner has no way to know it is circling: 86% of one run's steps
+        were spent on already-seen screens while its notebook recorded only unanchored
+        nouns, and its tasks degenerated into compass directions.
+        """
+        try:
+            frame = self._env.get_info()["core"]["current_frame"]
+            return self.frames.note_for(frame) if frame is not None else ""
+        except Exception:  # noqa: BLE001 - never let this end a run
+            return ""
 
     def _planner_context(self) -> str:
         """
@@ -443,10 +504,20 @@ class Strategist:
         A new supervisor per task, always: ``evaluate()`` is single-use, and reusing one
         would merge two episodes into a single report.
         """
+        # The planner's hint is the only channel to the executor, so the revisit warning
+        # rides along with it: the executor cannot see the notebook or the frame memory.
+        try:
+            frame = self._env.get_info()["core"]["current_frame"]
+            revisit = self.frames.hint_for(frame) if frame is not None else ""
+        except Exception:  # noqa: BLE001
+            revisit = ""
+        if revisit:
+            hint = f"{hint} {revisit}".strip() if hint else revisit
+
         supervisor = HintedSupervisor(
             task=task,
             executor_class=self._executor_class,
-            env=self._env,
+            env=ActionRepairingEnvironment(self._env),
             game=self._game,
             max_steps=self._max_steps_per_task if max_steps is None else max_steps,
             max_tool_calls=self._max_tool_calls,
@@ -495,8 +566,21 @@ class Strategist:
 
     # ------------------------------------------------------------- reflection
 
+    def _record_frames(self, record: TaskRecord) -> None:
+        """Add the screen after every emulator step of this task to the frame memory.
+
+        Harvested from the report rather than observed live: the strategist never sees the
+        executor's loop, but the report carries an EnvironmentStepRecord per step, each
+        holding the frame after its action. Every frame reaches the memory; they simply
+        arrive in a batch at the end of the task rather than one at a time.
+        """
+        legs = record.report.executor_reports if record and record.report else []
+        for leg in legs or ():
+            self.frames.add_steps(getattr(leg, "steps", None))
+
     def _reflect(self, record: TaskRecord) -> None:
         """Read the attempt, extend the notebook, and file the entry."""
+        self._record_frames(record)
         report = record.report
         leg = report.executor_reports[-1] if report and report.executor_reports else None
         outcome = leg.termination_reason if leg else "error"

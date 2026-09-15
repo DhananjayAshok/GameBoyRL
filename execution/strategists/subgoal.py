@@ -80,9 +80,12 @@ class SubgoalStrategist(Strategist):
             completed=", ".join(done) if done else "none yet",
             remaining=", ".join(remaining) if remaining else "none",
             notebook=self._planner_context(),
+            exploration_note=self._exploration_note(),
             max_steps=self._max_steps_per_task,
         )
-        return parse_plan(self._call("plan", prompt))
+        frame = self._current_frame()
+        return parse_plan(self._call("plan", prompt,
+                                     images=[frame] if frame is not None else None))
 
     def _reflect(self, record) -> None:
         """
