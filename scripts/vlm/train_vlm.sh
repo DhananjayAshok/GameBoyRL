@@ -9,7 +9,7 @@ source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
 # Define defaults and required args.
 # These should be specific to this script and not shared across scripts (that is handled below).
 declare -A ARGS
-ARGS["batch_size"]="8"
+ARGS["batch_size"]="4"
 ARGS["num_train_epochs"]="2"
 ARGS["lora_rank"]="64"
 ARGS["lora_alpha"]="128"
@@ -18,7 +18,7 @@ ARGS["weight_decay"]="0.01"
 ARGS["overwrite"]=false
 ARGS["push_to_hub"]=false
 ARGS["validation_file"]=none
-ARGS["action_loss_weight"]=0.25
+ARGS["action_loss_weight"]=none
 
 REQUIRED_ARGS=("train_file" "model_name" "run_name")
 

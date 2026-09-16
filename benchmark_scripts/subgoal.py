@@ -13,6 +13,8 @@ from gameboy_worlds import get_benchmark_tasks
 from execution.registry import AVAILABLE_EXECUTORS, AVAILABLE_SUPERVISORS
 from execution.supervisors import PLAN_SEPARATOR
 
+from utils import log_info
+
 from benchmark_scripts import common
 from python_scripts import paths
 
@@ -58,11 +60,18 @@ def _summary(result: dict, report) -> dict:
                    "the risk of thrashing between two readings of the same screen.")
 @click.option("--max_frames_per_slice", default=8, show_default=True, type=int,
               help="Trajectory frames per judging call.")
+@click.option("--executor_max_new_tokens", default=8000, show_default=True, type=int,
+              help="Token budget per executor action call. Overrides the project-wide "
+                   "executor_vlm_max_new_tokens for this process only.")
 @click.pass_obj
 def subgoal_cmd(obj, max_leg_steps, max_attempts_per_step, max_replans,
-                max_frames_per_slice):
+                max_frames_per_slice, executor_max_new_tokens):
     """Benchmark with a plan written from the task alone, supervised step by step."""
     parameters = obj["parameters"]
+    previous = parameters.get("executor_vlm_max_new_tokens")
+    parameters["executor_vlm_max_new_tokens"] = executor_max_new_tokens
+    log_info(f"Executor token budget: {previous} -> {executor_max_new_tokens} "
+             f"(this run only). Supervisor calls: {obj['supervisor_max_new_tokens']}.")
     game = obj["game"]
     controller_variant = obj["controller_variant"]
     extra_name = obj["extra_name"]

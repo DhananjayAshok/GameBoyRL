@@ -96,13 +96,15 @@ case "${ARGS["supervisor"]}" in
     revision)
         subcommand="revision"
         arm_flags="--max_leg_steps ${ARGS["max_leg_steps"]}"
-        arm_flags+=" --max_frames_per_slice ${ARGS["max_frames_per_slice"]}" ;;
+        arm_flags+=" --max_frames_per_slice ${ARGS["max_frames_per_slice"]}"
+        arm_flags+=" --executor_max_new_tokens ${ARGS["executor_max_new_tokens"]}" ;;
     subgoal)
         subcommand="subgoal"
         arm_flags="--max_leg_steps ${ARGS["max_leg_steps"]}"
         arm_flags+=" --max_attempts_per_step ${ARGS["max_attempts_per_step"]}"
         arm_flags+=" --max_replans ${ARGS["max_replans"]}"
-        arm_flags+=" --max_frames_per_slice ${ARGS["max_frames_per_slice"]}" ;;
+        arm_flags+=" --max_frames_per_slice ${ARGS["max_frames_per_slice"]}"
+        arm_flags+=" --executor_max_new_tokens ${ARGS["executor_max_new_tokens"]}" ;;
     info_subgoal_retrieval)
         subcommand="info_subgoal_retrieval"
         arm_flags="--max_concurrency ${ARGS["max_concurrency"]}"
