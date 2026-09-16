@@ -55,7 +55,6 @@ class Strategist:
     :param max_tasks: Planned tasks before the run gives up. The budget that matters most:
         each task is a whole supervised episode, so this multiplies the cost of everything.
     :param max_steps_per_task: Step budget handed to each task's executor.
-    :param max_tool_calls: Tool-call budget per task.
     :param max_new_tokens: Token budget for the strategist's own calls.
     :param use_notebook: When ``False`` the planner sees only the most recent attempt
         instead of the accumulated notebook. The ablation arm: the gap between this and the
@@ -135,7 +134,6 @@ class Strategist:
         executor_vlm_kind: Optional[str] = None,
         max_tasks: int = 8,
         max_steps_per_task: int = 175,
-        max_tool_calls: int = 0,
         max_new_tokens: int = 1200,
         use_notebook: bool = True,
         verify_goal: bool = True,
@@ -158,7 +156,6 @@ class Strategist:
         self._executor_vlm_kind = executor_vlm_kind or vlm_kind
         self._max_tasks = max_tasks
         self._max_steps_per_task = max_steps_per_task
-        self._max_tool_calls = max_tool_calls
         self._max_new_tokens = max_new_tokens
         self._use_notebook = use_notebook
         self.frames = FrameMemory()
@@ -207,7 +204,6 @@ class Strategist:
             "executor_class": self._executor_class.__name__,
             "max_tasks": self._max_tasks,
             "max_steps_per_task": self._max_steps_per_task,
-            "max_tool_calls": self._max_tool_calls,
             "max_new_tokens": self._max_new_tokens,
             "use_notebook": self._use_notebook,
             "verify_goal": self._verify_goal,
@@ -520,7 +516,6 @@ class Strategist:
             env=ActionRepairingEnvironment(self._env),
             game=self._game,
             max_steps=self._max_steps_per_task if max_steps is None else max_steps,
-            max_tool_calls=self._max_tool_calls,
             parameters=self._parameters,
             hint=hint,
             vlm_model=self._executor_vlm_model,

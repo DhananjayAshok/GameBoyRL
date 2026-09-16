@@ -14,34 +14,8 @@ import numpy as np
 
 from gameboy_worlds.interface import HighLevelAction
 
-from execution.executor_action import ExecutorAction
 from python_scripts import paths
 from utils import load_parameters, log_error, log_info, parse_yes_no, sum_optional
-
-
-@dataclass
-class ExecutorToolCallRecord:
-    """
-    Record of a single passive tool call made by an executor.
-
-    :param executor_action_class: The :class:`~execution.executor_action.ExecutorAction`
-        subclass that was invoked.
-    :type executor_action_class: Type[ExecutorAction]
-    :param kwargs: Keyword arguments forwarded to
-        :meth:`~execution.executor_action.ExecutorAction.execute`.
-    :type kwargs: dict
-    :param result: Return dictionary from
-        :meth:`~execution.executor_action.ExecutorAction._execute`, or ``None``
-        if the action arguments failed validation.
-    :type result: Optional[dict]
-    :param success_code: Integer success code returned alongside ``result``, or
-        ``None`` if the action arguments failed validation.
-    :type success_code: Optional[int]
-    """
-    executor_action_class: Type[ExecutorAction]
-    kwargs: Dict[str, Any]
-    result: Optional[Dict[str, Any]]
-    success_code: Optional[int]
 
 
 @dataclass
@@ -97,17 +71,7 @@ class InvalidStepRecord:
 
 
 #: Anything an executor can produce from one VLM call.
-StepRecord = Union[EnvironmentStepRecord, ExecutorToolCallRecord, InvalidStepRecord]
-
-
-def tool_call_string(record: ExecutorToolCallRecord) -> str:
-    """
-    A tool call written the way the model was asked to write it, e.g.
-    ``locate(target=door)``. Shared by every renderer so the prompt-facing spelling of a
-    tool call cannot drift between them.
-    """
-    args = ", ".join(f"{key}={value}" for key, value in record.kwargs.items())
-    return f"{record.executor_action_class.__name__}({args})"
+StepRecord = Union[EnvironmentStepRecord, InvalidStepRecord]
 
 
 def per_prompt_token_counts(
@@ -199,7 +163,7 @@ class ExecutorReport:
         whether it was allowed to self-terminate, the model, the token budget and the pair
         of policies — built by
         :meth:`~execution.executors.Executor._run_config`. Excludes ``env``, ``task``,
-        ``max_steps`` and ``max_tool_calls``, which are fields of their own.
+        and ``max_steps``, which are fields of their own.
 
         It used to be whatever was left in ``**kwargs`` after ``__init__`` bound its named
         parameters, which was **structurally always empty**: everything a caller passes is
@@ -210,9 +174,6 @@ class ExecutorReport:
     :param max_steps: Maximum number of environment steps the executor was
         permitted to take.
     :type max_steps: int
-    :param max_tool_calls: Maximum number of tool calls the executor was
-        permitted to make.
-    :type max_tool_calls: int
     :param initial_state: State snapshot taken immediately before
         :meth:`~execution.executors.Executor._execute` is called.
     :type initial_state: dict
@@ -232,7 +193,6 @@ class ExecutorReport:
     game: str
     init_kwargs: Dict[str, Any]
     max_steps: int
-    max_tool_calls: int
     initial_state: Dict[str, Any]
     vlm_call_log: List[ExecutorVLMCallRecord] = field(default_factory=list)
     final_state: Optional[Dict[str, Any]] = None
@@ -278,12 +238,6 @@ class ExecutorReport:
         """
         Total prompt tokens across every VLM call this executor made.
 
-        .. important:: This covers :attr:`vlm_call_log` **only**. Inference performed
-            inside a passive tool is not included: see the TODO on
-            :meth:`~execution.executors.Executor._use_tool`. No tool infers today, so the
-            number is currently complete, but it will silently stop being so the moment
-            one does.
-
         :return: Total prompt tokens across every VLM call this executor made.
         :rtype: Optional[int]
         """
@@ -293,8 +247,7 @@ class ExecutorReport:
     def total_output_tokens(self) -> Optional[int]:
         """Generated tokens across every VLM call this executor made.
 
-        Same derivation, ``None`` propagation and tool-call caveat as
-        :attr:`total_input_tokens`.
+        Same derivation and ``None`` propagation as :attr:`total_input_tokens`.
 
         :return: Total generated tokens across every VLM call this executor made.
         :rtype: Optional[int]
@@ -402,9 +355,7 @@ def _indent(text: str, prefix: str = "      ") -> str:
 def _step_summary(step: StepRecord) -> str:
     if isinstance(step, EnvironmentStepRecord):
         return f"ENV   {step.action_class.__name__}({step.kwargs})"
-    if isinstance(step, InvalidStepRecord):
-        return f"INVALID  ({step.reason})"
-    return f"TOOL  {step.executor_action_class.__name__}({step.kwargs})  result={step.result}"
+    return f"INVALID  ({step.reason})"
 
 
 #: Tags of the calls that ask the model for an action.
@@ -446,34 +397,6 @@ def says_complete(response: str) -> bool:
 
 
 @dataclass
-class SupervisorToolCallRecord:
-    """
-    Record of a passive tool call made by a *supervisor*.
-
-    TODO: Add a supervisor tool and record its output here.
-    The supervisor-side counterpart of :class:`ExecutorToolCallRecord`. **Nothing produces
-    one yet** — supervisors have no tools — so :attr:`SupervisorVLMCallRecord.steps` is
-    always empty in practice. It exists so the shape matches the executor side and a
-    supervisor tool can be added without changing the record types or the readers.
-
-    :param tool_name: Identifier of the tool invoked.
-    :param kwargs: Keyword arguments it was invoked with.
-    :param result: Whatever the tool returned, or None.
-    :param success_code: Tool-defined status, or None.
-    """
-
-    tool_name: str
-    kwargs: Dict[str, Any]
-    result: Optional[Dict[str, Any]] = None
-    success_code: Optional[int] = None
-
-
-#: What a supervisor VLM call can own. Only one member today; a Union so adding a second
-#: (an invalid-reply record, say) does not change every annotation that mentions it.
-SupervisorStepRecord = Union[SupervisorToolCallRecord]
-
-
-@dataclass
 class SupervisorVLMCallRecord:
     """Record of a single VLM call made by a supervisor, and whatever it did as a result.
 
@@ -481,8 +404,6 @@ class SupervisorVLMCallRecord:
     :param images: Images given to the VLM for this call.
     :param prompt: The prompt sent.
     :param response: The raw text returned.
-    :param steps: What this call produced. Always empty today — see
-        :class:`SupervisorToolCallRecord`.
     :param input_tokens: Prompt tokens this call consumed, or ``None`` if the backend did
         not report it. 
     :param output_tokens: Generated tokens this call produced, or ``None``.
@@ -498,7 +419,6 @@ class SupervisorVLMCallRecord:
     images: List[np.ndarray]
     prompt: str
     response: str
-    steps: List[SupervisorStepRecord] = field(default_factory=list)
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
 

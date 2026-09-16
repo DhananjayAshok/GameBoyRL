@@ -76,7 +76,6 @@ python vlm.py \
     --tasks_path "${ARGS["tasks_path"]}" \
     --executor "${ARGS["executor"]}" \
     --max_steps "${ARGS["max_steps"]}" \
-    --max_tool_calls "${ARGS["max_tool_calls"]}" \
     --lookback "${ARGS["lookback"]}" \
     --controller_variant "${ARGS["controller_variant"]}" \
     --max_attempts "${ARGS["max_attempts"]}" \

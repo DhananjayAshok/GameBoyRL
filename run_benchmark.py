@@ -79,7 +79,6 @@ from python_scripts.paths import model_save_name
 @click.option("--save_video", type=bool, default=True)
 @click.option("--max_steps", default=200, type=int,
               help="Emulator steps for the WHOLE episode, every internal retry included.")
-@click.option("--max_tool_calls", default=0, type=int)
 @click.option("--n_tasks", type=int, default=None,
               help="Run the FIRST n tasks in benchmark order. A prefix rather than a "
                    "sample, so --n_tasks 5 is a subset of --n_tasks 10 and both are a "
@@ -100,7 +99,7 @@ from python_scripts.paths import model_save_name
 @click.pass_context
 def main(ctx, game, controller_variant, executor, executor_vlm_model, executor_vlm_kind,
          supervisor_vlm_model, supervisor_vlm_kind, supervisor_max_new_tokens,
-         save_video, max_steps, max_tool_calls, n_tasks,
+         save_video, max_steps, n_tasks,
          verbose, regenerate, extra_name, world_model_run_name):
     """Benchmark a frozen VLM on a game, with or without prebuilt knowledge."""
     parameters = load_parameters()
@@ -123,7 +122,6 @@ def main(ctx, game, controller_variant, executor, executor_vlm_model, executor_v
         model_save_name=model_save_name(executor_vlm_model),
         save_video=save_video,
         max_steps=max_steps,
-        max_tool_calls=max_tool_calls,
         n_tasks=n_tasks,
         verbose=verbose,
         regenerate=regenerate,

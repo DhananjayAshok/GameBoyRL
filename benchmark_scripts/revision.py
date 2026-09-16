@@ -80,7 +80,6 @@ def revision_cmd(obj, max_leg_steps, max_frames_per_slice, executor_max_new_toke
                 env=environment,
                 game=row["game"],
                 max_steps=obj["max_steps"],
-                max_tool_calls=obj["max_tool_calls"],
                 supervisor_vlm_model=obj["supervisor_vlm_model"],
                 supervisor_vlm_kind=obj["supervisor_vlm_kind"],
                 max_new_tokens=obj["supervisor_max_new_tokens"],

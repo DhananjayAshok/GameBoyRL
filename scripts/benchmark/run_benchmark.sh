@@ -86,7 +86,6 @@ group_flags+=" --executor_vlm_kind ${ARGS["executor_vlm_kind"]}"
 group_flags+=" --supervisor_max_new_tokens ${ARGS["supervisor_max_new_tokens"]}"
 group_flags+=" --save_video ${ARGS["save_video"]}"
 group_flags+=" --max_steps ${ARGS["max_steps"]}"
-group_flags+=" --max_tool_calls ${ARGS["max_tool_calls"]}"
 group_flags+="$optional_flags"
 
 case "${ARGS["supervisor"]}" in

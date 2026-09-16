@@ -13,7 +13,7 @@ BENCH_GAMES="bomberman_pocket bomberman_quest \
              pokemon_crystal pokemon_red \
              sword_of_hope_1 sword_of_hope_2"
 
-bash ~/vllm_scripts/serve_vllm_auto.sh "$MODEL"
+bash scripts/core/serve_vllm.sh "$MODEL"
 
 for GAME in $BENCH_GAMES; do
     echo ""

@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from execution.report import (ACTION_TAGS, DONE_CHECK_TAG, EnvironmentStepRecord,
-                              ExecutorToolCallRecord, says_complete, tool_call_string)
+                              says_complete)
 from utils import parse_key_value
 
 
@@ -36,8 +36,6 @@ def action_trace(report) -> str:
                     name = step.action_class.get_action_name(**step.kwargs)
                 except Exception:
                     name = step.action_class.__name__
-            elif isinstance(step, ExecutorToolCallRecord):
-                name = f"{tool_call_string(step)} → {step.result}"
             elif step is None:
                 name = "(no action)"
             else:

@@ -1,5 +1,5 @@
 from utils import object_detection
-from typing import Tuple, List, Dict, Any, Optional
+from typing import Tuple, List, Dict, Any, Optional, Callable
 import numpy as np
 from abc import ABC, abstractmethod
 from gameboy_worlds.emulation.parser import StateParser
@@ -37,7 +37,16 @@ class ExecutorAction(ABC):
 
     Development Note: Unlike HighLevelAction, ExecutorAction does NOT call emulator.step.
     If you want to implement an action that does that, you probably want to be doing that in an Executor class instead.
+
+    :param vlm_call: The owning executor's recording VLM entry point
+        (:meth:`~execution.executors.Executor._vlm_call`). Tools must infer through this
+        so their calls land in the executor's ``vlm_call_log``.
+    :param parameters: The owning executor's resolved parameters.
     """
+
+    def __init__(self, vlm_call: Callable[..., Any], parameters: Dict[str, Any]) -> None:
+        self._vlm_call = vlm_call
+        self._parameters = parameters
 
     @abstractmethod
     def _execute(self, info: Dict[str, Dict[str, Any]], **kwargs) -> Tuple[Dict[str, Any], int]:
@@ -56,15 +65,18 @@ class ExecutorAction(ABC):
         """
         raise NotImplementedError
 
-    def is_valid(self, **kwargs) -> bool:
+    def is_valid(self, info: Dict[str, Dict[str, Any]], **kwargs) -> Tuple[bool, Optional[str]]:
         """
-        Validates the arguments before execution. Returns ``True`` by default.
-        Subclasses may override to reject invalid inputs early.
+        Validates the game state and arguments before execution. Valid by default.
+        Subclasses may override to reject invalid calls early.
 
-        :return: Whether the provided kwargs are valid for this action.
-        :rtype: bool
+        :param info: Full state information from the environment.
+        :type info: Dict[str, Dict[str, Any]]
+        :return: ``(valid, reason)``, where ``reason`` explains a rejection and is
+            ``None`` when the call is valid.
+        :rtype: Tuple[bool, Optional[str]]
         """
-        return True
+        return True, None
 
     @classmethod
     @abstractmethod
@@ -139,12 +151,14 @@ class ExecutorAction(ABC):
         :param kwargs: Additional arguments forwarded to :meth:`_execute`.
         :return: A tuple containing:
 
-            - A dictionary with execution return information, or ``None`` if the arguments were invalid.
-            - An integer success code, or ``None`` if the arguments were invalid.
-        :rtype: Tuple[Optional[Dict[str, Any]], Optional[int]]
+            - A dictionary with execution return information, or ``{"invalid": reason}``
+              if the call was rejected by :meth:`is_valid`.
+            - An integer success code, or ``None`` if the call was rejected.
+        :rtype: Tuple[Dict[str, Any], Optional[int]]
         """
-        if not self.is_valid(**kwargs):
-            return None, None
+        valid, reason = self.is_valid(info, **kwargs)
+        if not valid:
+            return {"invalid": reason or "invalid call"}, None
         return self._execute(info, **kwargs)
 
 
@@ -194,10 +208,11 @@ class LocateAction(ExecutorAction):
     def coords_to_string(self, coords: List[Tuple[int, int]]) -> str:
         return "[" + ", ".join(self.coord_to_string(c) for c in coords) + "]"
 
-    def is_valid(self, target: str = None, **kwargs) -> bool:
-        if target is None:
-            return True
-        return isinstance(target, str) and len(target.strip()) > 0
+    def is_valid(self, info: Dict[str, Dict[str, Any]], target: str = None,
+                 **kwargs) -> Tuple[bool, Optional[str]]:
+        if target is None or (isinstance(target, str) and target.strip()):
+            return True, None
+        return False, f"target must be a non-empty string, got {target!r}"
 
     def check_for_target(self, description: str, screens: List[np.ndarray]) -> List[bool]:
         return object_detection(description=description, images=screens)

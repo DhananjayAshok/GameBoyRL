@@ -45,11 +45,8 @@ class ActionPolicy(Protocol):
     def response_format(self) -> str:
         """The exact reply format, appended after the instruction."""
 
-    def action_format(self, tools_offered: bool) -> str:
-        """The ``Action:`` line spliced in for ``[ACTION_FORMAT]``.
-
-        :param tools_offered: Whether a tool call is a legal answer this step.
-        """
+    def action_format(self) -> str:
+        """The ``Action:`` line spliced in for ``[ACTION_FORMAT]``."""
 
     def parse(self, response: str) -> Optional[Decision]:
         """Read the reply, or ``None`` if nothing usable came back."""
@@ -61,9 +58,7 @@ class ActionPolicy(Protocol):
         """What to tell the model when a parsed action is not a real action."""
 
 
-def _one_action_format(tools_offered: bool) -> str:
-    if tools_offered:
-        return "Action: <one environment action OR one tool call>"
+def _one_action_format() -> str:
     return "Action: <one environment action>"
 
 
@@ -98,8 +93,8 @@ class SingleActionPolicy:
     def response_format(self) -> str:
         return "Reasoning: <your reasoning>\n[ACTION_FORMAT]"
 
-    def action_format(self, tools_offered: bool) -> str:
-        return _one_action_format(tools_offered)
+    def action_format(self) -> str:
+        return _one_action_format()
 
     def parse(self, response: str) -> Optional[Decision]:
         action = parse_action_line(response)
@@ -126,16 +121,11 @@ class ScoredActionPolicy:
 
     Forces systematic evaluation of all options rather than anchoring on the first
     plausible action. Ties go to the first in the list.
-
-    Tool calls are scored under the same rubric, which asks about progress toward the task
-    — something a passive tool makes none of by construction — so they will tend to score
-    low until the rubric scores information-gathering on its own terms.
     """
 
     tag = "score"
     name = "scored"
-    # One scored line per available action, and tool calls add lines on top of the action
-    # list. Truncation here is silent — the parser just maxes over whatever lines arrived —
+    # One scored line per available action. Truncation here is silent — the parser just maxes over whatever lines arrived —
     # so the budget is set well clear of what the longest action list needs.
     max_new_tokens = 700
     done_check_reasoning_label = "The justification given for scoring that action highest was:"
@@ -149,8 +139,8 @@ class ScoredActionPolicy:
     def response_format(self) -> str:
         return "<action>: <one-sentence reason for the score>: <score>\n..."
 
-    def action_format(self, tools_offered: bool) -> str:
-        return _one_action_format(tools_offered)
+    def action_format(self) -> str:
+        return _one_action_format()
 
     def parse_score_line(self, line: str) -> Optional[Tuple[str, str, int]]:
         """
@@ -214,10 +204,7 @@ class SequenceActionPolicy:
     def response_format(self) -> str:
         return "Reasoning: <your reasoning>\n[ACTION_FORMAT]"
 
-    def action_format(self, tools_offered: bool) -> str:
-        if tools_offered:
-            return ("Action: <ACTION1, ACTION2, ...> — a sequence of environment actions, "
-                    "OR Action: <TOOL_CALL> — a single tool call on its own")
+    def action_format(self) -> str:
         return "Action: <ACTION1, ACTION2, ...>"
 
     def parse(self, response: str) -> Optional[Decision]:

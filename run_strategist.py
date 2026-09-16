@@ -97,7 +97,6 @@ GAME_START = {
               help="Planned tasks before giving up. Each is a whole supervised episode, so "
                    "this multiplies the cost of everything else.")
 @click.option("--max_steps_per_task", default=175, show_default=True, type=int)
-@click.option("--max_tool_calls", default=0, show_default=True, type=int)
 @click.option("--strategist_max_new_tokens", default=1200, show_default=True, type=int)
 @click.option("--use_notebook", default=True, show_default=True, type=bool,
               help="False runs the ablation: the planner sees only the previous attempt "
@@ -135,7 +134,7 @@ GAME_START = {
 @click.option("--verbose", is_flag=True, default=False)
 def main(game, goal, benchmark_task, strategist, executor, controller_variant, executor_vlm_model,
          executor_vlm_kind, strategist_vlm_model, strategist_vlm_kind, max_tasks,
-         max_steps_per_task, max_tool_calls, strategist_max_new_tokens, use_notebook,
+         max_steps_per_task, strategist_max_new_tokens, use_notebook,
          verify_goal, stop_on_goal, save_video, extra_name, done_check_every_k,
          goal_ledger_key, reflect_n_frames, verbose):
     """Pursue one long-horizon goal with a strategist."""
@@ -256,7 +255,6 @@ def main(game, goal, benchmark_task, strategist, executor, controller_variant, e
             executor_vlm_kind=executor_vlm_kind,
             max_tasks=max_tasks,
             max_steps_per_task=max_steps_per_task,
-            max_tool_calls=max_tool_calls,
             max_new_tokens=strategist_max_new_tokens,
             use_notebook=use_notebook,
             verify_goal=verify_goal,

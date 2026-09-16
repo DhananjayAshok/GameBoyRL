@@ -60,7 +60,6 @@ def baseline_cmd(obj):
                 env=environment,
                 game=row["game"],
                 max_steps=obj["max_steps"],
-                max_tool_calls=obj["max_tool_calls"],
                 # Passed like every other arm. It happens to match `load_parameters()`
                 # today, which is why omitting it was harmless, but an arm that overrides a
                 # parameter in-process (info_subgoal does, for the executor token budget)

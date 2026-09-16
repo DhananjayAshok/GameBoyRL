@@ -2,18 +2,17 @@
 Pokemon-specific executor actions.
 
 .. warning:: **This module is not usable as written.** It imports cleanly, but nothing
-    in it can actually run. Four separate blockers, each marked with a ``TODO`` at the
+    in it can actually run. Three separate blockers, each marked with a ``TODO`` at the
     site below:
 
     1. Neither class implements ``verbalize`` or ``string_to_kwargs``, both
        ``@abstractmethod`` on :class:`~execution.executor_action.ExecutorAction`, so
        neither can be instantiated. (:class:`~execution.executor_action.LocateAction`
        has the same gap, so ``PokemonLocateAction`` inherits it as well as adding its own.)
-    2. ``self._state_tracker`` is read but is defined by no class in the hierarchy.
-    3. ``self._emulator`` is read but is likewise never defined.
-    4. ``ExecutorVLM.infer(...)`` is called on the class rather than an instance.
+    2. ``self._emulator`` is read but is never defined.
+    3. ``ExecutorVLM.infer(...)`` is called on the class rather than an instance.
 
-    Nothing imports this module. Fix all four before wiring it up, or delete it.
+    Nothing imports this module. Fix all three before wiring it up, or delete it.
 """
 
 from execution.executor_action import ExecutorAction, LocateAction
@@ -33,15 +32,10 @@ class PokemonLocateAction(LocateAction):
     }
 
 
-    def is_valid(self, target=None):
-        # TODO: `self._state_tracker` is defined by no class in this hierarchy — this
-        # raises AttributeError. Decide where the state tracker should come from.
-        if (
-            self._state_tracker.get_episode_metric(("pokemon_core", "agent_state"))
-            != AgentState.FREE_ROAM
-        ):
-            return False
-        return super().is_valid(target=target)
+    def is_valid(self, info, target=None, **kwargs):
+        if info["pokemon_core"]["agent_state"] != AgentState.FREE_ROAM:
+            return False, "can only locate objects while in free roam"
+        return super().is_valid(info, target=target, **kwargs)
 
 
 
@@ -89,13 +83,10 @@ class CheckInteractionAction(ExecutorAction):
     # TODO: cannot be instantiated — `verbalize` and `string_to_kwargs` are abstract on
     # ExecutorAction and are not implemented here.
 
-    def is_valid(self, **kwargs):
-        # TODO: `self._state_tracker` is defined by no class in this hierarchy — this
-        # raises AttributeError. Decide where the state tracker should come from.
-        return (
-            self._state_tracker.get_episode_metric(("pokemon_core", "agent_state"))
-            == AgentState.FREE_ROAM
-        )
+    def is_valid(self, info, **kwargs):
+        if info["pokemon_core"]["agent_state"] != AgentState.FREE_ROAM:
+            return False, "can only check interactions while in free roam"
+        return True, None
 
     def parse_result(self, output):
         # TODO: substring matching on the whole answer clause — "no, yes it is absent"
