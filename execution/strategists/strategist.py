@@ -27,6 +27,7 @@ from execution.executors import Executor
 from execution.report import SupervisorReport
 from execution.strategists import prompts
 from execution.strategists.action_repair import ActionRepairingEnvironment
+from execution.strategists.curiosity import CuriosityMemory
 from execution.strategists.frame_memory import FrameMemory
 from execution.strategists._parsing import (parse_goal_check, parse_plan,
                                             parse_reflection, parse_summary, render)
@@ -138,6 +139,7 @@ class Strategist:
         max_tool_calls: int = 0,
         max_new_tokens: int = 1200,
         use_notebook: bool = True,
+        exploration: str = "exact",
         verify_goal: bool = True,
         stop_on_goal: bool = True,
         reset_between_tasks: bool = False,
@@ -161,7 +163,8 @@ class Strategist:
         self._max_tool_calls = max_tool_calls
         self._max_new_tokens = max_new_tokens
         self._use_notebook = use_notebook
-        self.frames = FrameMemory()
+        self._exploration = exploration
+        self.frames = self._make_frame_memory(exploration)
         """Every screen seen this episode. Fed from the step records of each completed
         task, so it holds the frame after EVERY emulator step, not one per task."""
         self._verify_goal = verify_goal
@@ -210,6 +213,7 @@ class Strategist:
             "max_tool_calls": self._max_tool_calls,
             "max_new_tokens": self._max_new_tokens,
             "use_notebook": self._use_notebook,
+            "exploration": self._exploration,
             "verify_goal": self._verify_goal,
             "stop_on_goal": self._stop_on_goal,
             "reset_between_tasks": self._reset_between_tasks,
@@ -565,6 +569,27 @@ class Strategist:
         return report.executor_reports[-1].termination_reason == "agent_done"
 
     # ------------------------------------------------------------- reflection
+
+    def _make_frame_memory(self, exploration: str):
+        """The screen memory this run uses.
+
+        ``exact`` hashes the frame: no thresholds, nothing to calibrate, and a repeat is
+        unarguably a repeat. ``curiosity`` compares 16x16 patches through a fixed random
+        projection, which catches the same place wearing a different animation frame or a
+        text box -- the case exact matching misses, and the reason the environment's own
+        change detector was useless on Prism, where nothing is ever byte-identical.
+
+        Default stays ``exact``: it is the one with no parameters to get wrong.
+        """
+        if str(exploration).lower() != "curiosity":
+            return FrameMemory()
+        parser = None
+        try:
+            parser = self._env._emulator.state_parser
+        except Exception:  # noqa: BLE001 - patching falls back to plain slicing
+            log_warn("No state parser available; patch grid will not be tile-aligned.",
+                     self._parameters)
+        return CuriosityMemory(parser=parser)
 
     def _record_frames(self, record: TaskRecord) -> None:
         """Add the screen after every emulator step of this task to the frame memory.

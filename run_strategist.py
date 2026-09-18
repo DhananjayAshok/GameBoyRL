@@ -99,6 +99,14 @@ GAME_START = {
 @click.option("--max_steps_per_task", default=175, show_default=True, type=int)
 @click.option("--max_tool_calls", default=0, show_default=True, type=int)
 @click.option("--strategist_max_new_tokens", default=1200, show_default=True, type=int)
+@click.option("--exploration", default="exact",
+              type=click.Choice(["exact", "curiosity"]),
+              help="How a screen is recognised as one already visited. 'exact' hashes the "
+                   "frame -- no thresholds, and a repeat is unarguably a repeat. "
+                   "'curiosity' compares 16x16 patches through a fixed random projection, "
+                   "which also catches the same place wearing a different animation frame "
+                   "or with a text box open; on a Gen-2 ROM hack nothing is ever "
+                   "byte-identical, so exact matching sees no repeats at all there.")
 @click.option("--use_notebook", default=True, show_default=True, type=bool,
               help="False runs the ablation: the planner sees only the previous attempt "
                    "instead of the accumulated notebook.")
@@ -134,6 +142,7 @@ GAME_START = {
                    "from — with none it recorded no map facts for an entire run.")
 @click.option("--verbose", is_flag=True, default=False)
 def main(game, goal, benchmark_task, strategist, executor, controller_variant, executor_vlm_model,
+         exploration,
          executor_vlm_kind, strategist_vlm_model, strategist_vlm_kind, max_tasks,
          max_steps_per_task, max_tool_calls, strategist_max_new_tokens, use_notebook,
          verify_goal, stop_on_goal, save_video, extra_name, done_check_every_k,
@@ -259,6 +268,7 @@ def main(game, goal, benchmark_task, strategist, executor, controller_variant, e
             max_tool_calls=max_tool_calls,
             max_new_tokens=strategist_max_new_tokens,
             use_notebook=use_notebook,
+            exploration=exploration,
             verify_goal=verify_goal,
             stop_on_goal=stop_on_goal,
             # Only in measured mode. A `test` environment truncates once its task can no
