@@ -386,6 +386,38 @@ def parametric_doc(parameters=None, *, game: str, model_name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Perception
+# ---------------------------------------------------------------------------
+
+
+def tile_recognizer_file(parameters=None, *, game: str, name: str) -> str:
+    parameters, storage, _ = _roots(parameters)
+    segment = depathify(name)
+    if not segment:
+        log_error(f"Tile recognizer name {name!r} has no usable characters for a file name.", parameters)
+    return os.path.join(storage, "playthrough_artifacts", game, "perception", "tile_recognizer", segment + ".pkl")
+
+
+# ---------------------------------------------------------------------------
+# Strategist
+# ---------------------------------------------------------------------------
+
+
+def strategist_dir(parameters=None, *, game: str, name: str) -> str:
+    """Where one strategist's persistent state lives.
+
+    Beside :func:`tile_recognizer_file` under the same ``playthrough_artifacts/<game>``
+    root, because the tile database and the strategist's knowledge, goals and locations are
+    the state of one continuing playthrough and are keyed on the same name.
+    """
+    parameters, storage, _ = _roots(parameters)
+    segment = depathify(name)
+    if not segment:
+        log_error(f"Strategist name {name!r} has no usable characters for a directory name.", parameters)
+    return os.path.join(storage, "playthrough_artifacts", game, "strategist", segment)
+
+
+# ---------------------------------------------------------------------------
 # Benchmark
 # ---------------------------------------------------------------------------
 
@@ -749,6 +781,16 @@ class Paths:
 
     def parametric_doc(self) -> str:
         return parametric_doc(self.parameters, game=self.game, model_name=self._model)
+
+    # -- perception -------------------------------------------------------
+
+    def tile_recognizer_file(self, name: str) -> str:
+        return tile_recognizer_file(self.parameters, game=self.game, name=name)
+
+    # -- strategist -------------------------------------------------------
+
+    def strategist_dir(self, name: str) -> str:
+        return strategist_dir(self.parameters, game=self.game, name=name)
 
     # -- benchmark --------------------------------------------------------
 

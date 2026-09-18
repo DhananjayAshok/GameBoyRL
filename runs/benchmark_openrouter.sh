@@ -14,6 +14,7 @@ games=(
 )
 
 models=(
+    "google/gemini-3.1-pro-preview"
     "google/gemini-3.6-flash"
     "anthropic/claude-haiku-4.5"
     "openai/gpt-5-mini"

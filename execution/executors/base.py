@@ -10,7 +10,8 @@ from typing import Any, Dict, Optional, Type
 from gameboy_worlds.interface import Environment, HighLevelAction
 
 from execution.report import (ACTION_TAGS, EnvironmentStepRecord, ExecutorReport,
-                              InvalidStepRecord, ExecutorVLMCallRecord, parse_completion,
+                              InvalidStepRecord, ExecutorVLMCallRecord, LogRecord,
+                              ScriptedActionRecord, parse_completion,
                               per_prompt_token_counts)
 from utils import load_parameters, log_error, log_info, log_warn, ExecutorVLM, parse_key_value
 
@@ -112,7 +113,7 @@ Reasoning: <why, referring to what is visible in image 2>
         self._max_new_tokens = self._parameters.get("executor_vlm_max_new_tokens", 512)
         self._last_frame_changed = True
         self._last_reasoning: Optional[str] = None
-        self._current_call: Optional[ExecutorVLMCallRecord] = None
+        self._current_call: Optional[LogRecord] = None
 
         self.report = self._make_report(task, self._run_config(kwargs), max_steps)
 
@@ -301,6 +302,12 @@ Reasoning: <why, referring to what is visible in image 2>
         self.report.vlm_call_log.append(record)
         self._current_call = record
         return result
+
+    def _begin_scripted(self, description: str) -> ScriptedActionRecord:
+        record = ScriptedActionRecord(description=description)
+        self.report.vlm_call_log.append(record)
+        self._current_call = record
+        return record
 
     def _batched_vlm_call(self, tag: str, **kwargs: Any) -> list:
         """

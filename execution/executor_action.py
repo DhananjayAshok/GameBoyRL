@@ -30,6 +30,24 @@ def _get_quadrants(
     }
 
 
+def coord_to_string(coord: Tuple[int, int]) -> str:
+    x, y = coord
+    parts = []
+    if x > 0:
+        parts.append(f"{x} steps to right from you")
+    elif x < 0:
+        parts.append(f"{-x} steps to left from you")
+    if y > 0:
+        parts.append(f"{y} steps up from you")
+    elif y < 0:
+        parts.append(f"{-y} steps down from you")
+    return "(" + ", ".join(parts) + ")"
+
+
+def coords_to_string(coords: List[Tuple[int, int]]) -> str:
+    return "[" + ", ".join(coord_to_string(c) for c in coords) + "]"
+
+
 class ExecutorAction(ABC):
     """
     Passive (non-interactive) actions that can be called on by an Executor to understand the game state.
@@ -192,21 +210,10 @@ class LocateAction(ExecutorAction):
     """Maps known target names to VLM-ready descriptions. Subclasses override to add entries."""
 
     def coord_to_string(self, coord: Tuple[int, int]) -> str:
-        start = "("
-        c1 = coord[0]
-        if c1 > 0:
-            start += f"{c1} steps to right from you, "
-        elif c1 < 0:
-            start += f"{-c1} steps to left from you, "
-        c2 = coord[1]
-        if c2 > 0:
-            start += f"{c2} steps up from you)"
-        elif c2 < 0:
-            start += f"{-c2} steps down from you)"
-        return start
+        return coord_to_string(coord)
 
     def coords_to_string(self, coords: List[Tuple[int, int]]) -> str:
-        return "[" + ", ".join(self.coord_to_string(c) for c in coords) + "]"
+        return coords_to_string(coords)
 
     def is_valid(self, info: Dict[str, Dict[str, Any]], target: str = None,
                  **kwargs) -> Tuple[bool, Optional[str]]:

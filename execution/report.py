@@ -143,6 +143,25 @@ class ExecutorVLMCallRecord:
 
 
 @dataclass
+class ScriptedActionRecord:
+    description: str
+    steps: List[StepRecord] = field(default_factory=list)
+    tag: str = "scripted"
+    images: List[np.ndarray] = field(default_factory=list)
+    prompt: str = ""
+    response: str = ""
+    input_tokens: Optional[int] = 0
+    output_tokens: Optional[int] = 0
+
+    @property
+    def env_steps(self) -> List[EnvironmentStepRecord]:
+        return [s for s in self.steps if isinstance(s, EnvironmentStepRecord)]
+
+
+LogRecord = Union[ExecutorVLMCallRecord, ScriptedActionRecord]
+
+
+@dataclass
 class ExecutorReport:
     """
     Complete record of a single executor run.
@@ -194,7 +213,7 @@ class ExecutorReport:
     init_kwargs: Dict[str, Any]
     max_steps: int
     initial_state: Dict[str, Any]
-    vlm_call_log: List[ExecutorVLMCallRecord] = field(default_factory=list)
+    vlm_call_log: List[LogRecord] = field(default_factory=list)
     final_state: Optional[Dict[str, Any]] = None
     outcome: Optional[int] = None
     notes: Optional[str] = None
@@ -275,10 +294,13 @@ class ExecutorReport:
             tag_label = f"[{entry.tag.upper()}]"
             lines.append(f"\n  ┌─ {tag_label} (call {display_idx})" + "─" * max(0, 48 - len(tag_label)))
             lines.append("")
-            lines.append("  | Prompt:")
-            lines.append(_indent(entry.prompt, "  │   "))
-            lines.append("  │ VLM output:")
-            lines.append(_indent(entry.response, "  │   "))
+            if isinstance(entry, ScriptedActionRecord):
+                lines.append(f"  │ Scripted: {entry.description}")
+            else:
+                lines.append("  | Prompt:")
+                lines.append(_indent(entry.prompt, "  │   "))
+                lines.append("  │ VLM output:")
+                lines.append(_indent(entry.response, "  │   "))
 
             for step in entry.steps:
                 if isinstance(step, InvalidStepRecord):
@@ -437,6 +459,9 @@ class SupervisorReport:
         meant nothing that defines an arm's behaviour was recorded anywhere in the archive;
         those are still here, nested under ``executor_kwargs``.
     :param event_log: Supervisor calls and executor runs, interleaved, in order.
+    :param narrative: One short written summary per executor run, in order — what the
+        supervisor understood to have happened, from the frames and any text on screen.
+        Empty for supervisors that do not summarise their runs.
     """
 
     task: str
@@ -444,6 +469,7 @@ class SupervisorReport:
     game: str
     init_kwargs: Dict[str, Any] = field(default_factory=dict)
     event_log: List[Union[SupervisorVLMCallRecord, ExecutorReport]] = field(default_factory=list)
+    narrative: List[str] = field(default_factory=list)
 
     @property
     def supervisor_calls(self) -> List[SupervisorVLMCallRecord]:
