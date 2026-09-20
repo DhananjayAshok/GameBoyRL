@@ -45,9 +45,49 @@ from benchmark_scripts import (
     revision,
     subgoal,
 )
-from execution.registry import AVAILABLE_EXECUTORS
+from execution.registry import (AVAILABLE_EXECUTORS, WORLD_MODEL_EXECUTOR,
+                                make_world_model_executor_class)
 from utils import load_parameters
 from python_scripts.paths import model_save_name
+
+
+def _absent(value) -> bool:
+    return value in (None, "", "none")
+
+
+def _resolve_executor(executor: str, world_model_run_name, world_model_game=None,
+                      game: str = None):
+    """The executor class this run plays with.
+
+    ``world_model`` names a family, not an arm: the checkpoint is part of the arm's identity,
+    so it resolves to a class named ``world_model_<run_name>`` — or
+    ``world_model_<source_game>_<run_name>`` when the checkpoint is borrowed from another
+    game. Every other key is already a class named after itself. Either way the class name
+    is what the CSV, the session directory and the archived report are keyed on.
+
+    A source game equal to ``game`` is the game's own checkpoint and is named as such, so
+    spelling it out cannot split one experiment across two CSVs.
+
+    Checked here, before any emulator starts, rather than when the first executor is built.
+    """
+    run_name = None if _absent(world_model_run_name) else world_model_run_name
+    source_game = None if _absent(world_model_game) else world_model_game
+    if executor == WORLD_MODEL_EXECUTOR:
+        if run_name is None:
+            raise click.UsageError(
+                f"--executor {WORLD_MODEL_EXECUTOR} requires --world_model_run_name.")
+        if source_game is not None and source_game not in AVAILABLE_GAMES:
+            raise click.UsageError(
+                f"--world_model_game {source_game!r} is not a known game.")
+        if source_game == game:
+            source_game = None
+        return make_world_model_executor_class(run_name, source_game)
+    for flag, value in (("--world_model_run_name", run_name),
+                        ("--world_model_game", source_game)):
+        if value is not None:
+            raise click.UsageError(
+                f"{flag} is only read by --executor {WORLD_MODEL_EXECUTOR}, not {executor}.")
+    return AVAILABLE_EXECUTORS[executor]
 
 
 @click.group()
@@ -95,21 +135,34 @@ from python_scripts.paths import model_save_name
                    "is unchanged. 'none' is accepted as the shell's absent sentinel.")
 @click.option("--world_model_run_name", default=None, type=str,
               help="RL run_name whose trained world model and observation encoder drive "
-                   "the 'world_model' executor. Required by that executor, ignored by the "
-                   "others. 'none' is accepted as the shell's absent sentinel.")
+                   "the 'world_model' executor. Required by that executor and rejected by "
+                   "the others. It becomes part of the executor's name — world_model_<run_name>"
+                   " — so it names the CSV and session directory; pass that full name as "
+                   "--executor to the debug tools. 'none' is accepted as the shell's absent "
+                   "sentinel.")
+@click.option("--world_model_game", default=None, type=str,
+              help="Game whose checkpoint the 'world_model' executor plays with, for a title "
+                   "with no world model of its own — e.g. --game pokemon_crystal "
+                   "--world_model_game pokemon_red. Defaults to --game. A different game "
+                   "becomes part of the executor's name, world_model_<game>_<run_name>. "
+                   "'none' is accepted as the shell's absent sentinel.")
 @click.pass_context
 def main(ctx, game, controller_variant, executor, executor_vlm_model, executor_vlm_kind,
          supervisor_vlm_model, supervisor_vlm_kind, supervisor_max_new_tokens,
          save_video, max_steps, max_tool_calls, n_tasks,
-         verbose, regenerate, extra_name, world_model_run_name):
+         verbose, regenerate, extra_name, world_model_run_name, world_model_game):
     """Benchmark a frozen VLM on a game, with or without prebuilt knowledge."""
     parameters = load_parameters()
+    executor_class = _resolve_executor(executor, world_model_run_name, world_model_game, game)
     ctx.obj = dict(
         parameters=parameters,
         game=game,
         controller_variant=controller_variant,
         extra_name=extra_name,
-        executor=executor,
+        # The resolved class's name, not the --executor word: for the world-model family the
+        # two differ, and names built from the word would let two checkpoints share a CSV.
+        executor=executor_class.__name__,
+        executor_class=executor_class,
         executor_vlm_model=executor_vlm_model,
         executor_vlm_kind=executor_vlm_kind,
         # Falls back to the executor's, which is now guaranteed to be a real model rather
@@ -127,14 +180,6 @@ def main(ctx, game, controller_variant, executor, executor_vlm_model, executor_v
         n_tasks=n_tasks,
         verbose=verbose,
         regenerate=regenerate,
-        # Spread into every arm's supervisor call, which forwards it verbatim to the
-        # executor. Built here rather than per-arm so the four arms cannot disagree about
-        # what the executor was given, and left empty unless actually set so a world-model
-        # knob never lands in the init_kwargs of a run that has no world model.
-        executor_kwargs=(
-            {"world_model_run_name": world_model_run_name}
-            if world_model_run_name and world_model_run_name != "none" else {}
-        ),
     )
 
 

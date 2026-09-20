@@ -12,7 +12,7 @@ import click
 from gameboy_worlds import get_benchmark_tasks
 
 from execution.parametric_doc import load_or_generate_parametric_document
-from execution.registry import AVAILABLE_EXECUTORS, AVAILABLE_SUPERVISORS
+from execution.registry import AVAILABLE_SUPERVISORS
 from execution.supervisors import PLAN_SEPARATOR, InfoSubgoalSupervisor
 from utils import VLM, log_info
 from python_scripts import paths
@@ -113,7 +113,7 @@ def _run(obj, *, mode, info_docs, parametric_categories,
     controller_variant = obj["controller_variant"]
     extra_name = obj["extra_name"]
     executor = obj["executor"]
-    executor_class = AVAILABLE_EXECUTORS[executor]
+    executor_class = obj["executor_class"]
     model_save_name = obj["model_save_name"]
 
     # In-process only: the loaded dict is handed to every supervisor and executor below, and
@@ -204,7 +204,6 @@ def _run(obj, *, mode, info_docs, parametric_categories,
                 parameters=parameters,
                 vlm_model=obj["executor_vlm_model"],
                 vlm_kind=obj["executor_vlm_kind"],
-                **obj["executor_kwargs"],
             )
             result = supervisor.evaluate()
             report = result["report"]

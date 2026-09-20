@@ -132,6 +132,147 @@ def per_prompt_token_counts(
     return list(zip(inputs, outputs))
 
 
+#: Image number of the first predicted frame in a world-model call. Image 1 is the current
+#: screen, so the picked prediction is ``images[choice - 1]``.
+WORLD_MODEL_FIRST_CHOICE = 2
+
+
+@dataclass
+class WorldModelDecision:
+    """
+    What the world-model arm showed the VLM on one call, what it picked, and — once the
+    picked action has run — how close the world model came to what actually happened.
+
+    The call's ``images`` are ``[current screen, *predictions]`` and :attr:`candidates` names
+    the predictions in that order, so ``images[1 + i]`` is the prediction for
+    ``candidates[i]``. Without this record that mapping exists only in the prompt text.
+
+    *Similarity* is the cosine between unit-norm observation-encoder embeddings (the space
+    the world model predicts in). *Pixel error* is mean absolute error in grey levels, 0-255.
+    Every score is ``None`` until the chosen action has run, and stays ``None`` when the reply
+    had no valid choice.
+
+    :param candidates: Action labels, in image order.
+    :param action_indices: The world model's discrete action index for each candidate.
+    :param choice: The image number picked, as the prompt numbers them, or ``None`` if the
+        reply had no valid ``Choice:``.
+    :param predicted_similarity: Per candidate, similarity of its prediction to the screen
+        the chosen action produced. Only the chosen entry is a prediction *of that outcome*;
+        the rest say whether the model told the actions apart.
+    :param copy_similarity: Similarity of the pre-action screen to the screen that followed —
+        the "nothing changes" baseline a useful prediction has to beat.
+    :param predicted_pixel_error: Pixel error of the decoded prediction for the chosen action.
+    :param copy_pixel_error: Pixel error of the pre-action screen — the same baseline.
+    :param reconstruction_pixel_error: Pixel error of the real next screen after an
+        encode→decode round trip: the floor no prediction can beat through this decoder.
+    :param frame_changed: Whether the chosen action changed the screen. On unchanged steps
+        the baseline is perfect by construction, so read the scores split on this.
+    """
+
+    candidates: List[str]
+    action_indices: List[int]
+    choice: Optional[int] = None
+    predicted_similarity: Optional[List[float]] = None
+    copy_similarity: Optional[float] = None
+    predicted_pixel_error: Optional[float] = None
+    copy_pixel_error: Optional[float] = None
+    reconstruction_pixel_error: Optional[float] = None
+    frame_changed: Optional[bool] = None
+
+    @property
+    def chosen(self) -> Optional[int]:
+        """Index into :attr:`candidates` of the picked action, or ``None``."""
+        return None if self.choice is None else self.choice - WORLD_MODEL_FIRST_CHOICE
+
+    @property
+    def chosen_label(self) -> Optional[str]:
+        return None if self.chosen is None else self.candidates[self.chosen]
+
+    @property
+    def scored(self) -> bool:
+        return self.predicted_similarity is not None
+
+    @property
+    def chosen_similarity(self) -> Optional[float]:
+        return self.predicted_similarity[self.chosen] if self.scored else None
+
+    @property
+    def chosen_was_best_match(self) -> Optional[bool]:
+        """Whether the chosen action's prediction was strictly closer to what happened than
+        every other action's. Strict, so a model predicting the same frame for every action
+        scores ``False`` rather than a free ``True``."""
+        if not self.scored:
+            return None
+        chosen = self.chosen_similarity
+        return all(s < chosen for i, s in enumerate(self.predicted_similarity)
+                   if i != self.chosen)
+
+    @property
+    def action_spread(self) -> Optional[float]:
+        """Max minus min of :attr:`predicted_similarity`: near zero means the predictions for
+        different actions were effectively the same frame."""
+        if not self.scored:
+            return None
+        return max(self.predicted_similarity) - min(self.predicted_similarity)
+
+    def image_caption(self, image_index: int) -> str:
+        """What ``images[image_index]`` of this call shows."""
+        if image_index == 0:
+            return "current screen"
+        candidate = image_index - 1
+        caption = f"predicted after {self.candidates[candidate]}"
+        return caption + " (chosen)" if candidate == self.chosen else caption
+
+    def describe(self) -> str:
+        """One line: the pick, and how the prediction compared with what happened."""
+        if self.choice is None:
+            return "world model: no valid choice"
+        text = f"world model: chose image {self.choice} = {self.chosen_label}"
+        if not self.scored:
+            return text
+        best = max(range(len(self.candidates)), key=lambda i: self.predicted_similarity[i])
+        return (
+            f"{text} · similarity to outcome {self.chosen_similarity:.3f} "
+            f"(nothing-changes {self.copy_similarity:.3f}) · closest prediction: "
+            f"{self.candidates[best]} · spread across actions {self.action_spread:.3f} · "
+            f"pixel error {self.predicted_pixel_error:.1f} (nothing-changes "
+            f"{self.copy_pixel_error:.1f}, decoder floor {self.reconstruction_pixel_error:.1f})"
+            f"{'' if self.frame_changed else ' · screen unchanged'}"
+        )
+
+
+def summarize_world_model(decisions: List[WorldModelDecision]) -> Optional[str]:
+    """
+    How well the world model predicted, over a run's decisions, or ``None`` if none were
+    scored. Split on whether the screen changed, because an unchanged screen hands the
+    nothing-changes baseline a perfect score and would otherwise swamp the average.
+    """
+    scored = [d for d in decisions if d.scored]
+    if not scored:
+        return None
+    lines = [f"World model: {len(scored)} scored step(s) of {len(decisions)} decision(s)"]
+    for label, group in (("all steps", scored),
+                         ("screen changed", [d for d in scored if d.frame_changed])):
+        if not group:
+            lines.append(f"  {label}: none")
+            continue
+        chance = float(np.mean([1 / len(d.candidates) for d in group]))
+        lines.append(
+            f"  {label} (n={len(group)}): "
+            f"similarity to outcome {np.mean([d.chosen_similarity for d in group]):.3f} "
+            f"vs nothing-changes {np.mean([d.copy_similarity for d in group]):.3f}; "
+            f"beat nothing-changes "
+            f"{np.mean([d.chosen_similarity > d.copy_similarity for d in group]):.0%}; "
+            f"chosen action's prediction was the closest "
+            f"{np.mean([d.chosen_was_best_match for d in group]):.0%} (chance {chance:.0%}); "
+            f"spread across actions {np.mean([d.action_spread for d in group]):.3f}; "
+            f"pixel error {np.mean([d.predicted_pixel_error for d in group]):.1f} "
+            f"vs nothing-changes {np.mean([d.copy_pixel_error for d in group]):.1f} "
+            f"(decoder floor {np.mean([d.reconstruction_pixel_error for d in group]):.1f})"
+        )
+    return "\n".join(lines)
+
+
 @dataclass
 class ExecutorVLMCallRecord:
     """
@@ -162,6 +303,11 @@ class ExecutorVLMCallRecord:
     :type input_tokens: Optional[int]
     :param output_tokens: Generated tokens this call produced. ``None`` as above.
     :type output_tokens: Optional[int]
+    :param world_model: Set only by the world-model arm: which of :attr:`images` shows which
+        action, what was picked, and how the prediction compared with the outcome.
+        ``None`` on every other call — and on archives written before the field existed,
+        which is why it is a plain default rather than a factory.
+    :type world_model: Optional[WorldModelDecision]
     """
 
     tag: str
@@ -171,6 +317,7 @@ class ExecutorVLMCallRecord:
     steps: List[StepRecord] = field(default_factory=list)
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
+    world_model: Optional[WorldModelDecision] = None
 
     @property
     def env_steps(self) -> List[EnvironmentStepRecord]:
@@ -301,6 +448,11 @@ class ExecutorReport:
         """
         return sum_optional([call.output_tokens for call in self.vlm_call_log])
 
+    @property
+    def world_model_decisions(self) -> List[WorldModelDecision]:
+        """Every world-model decision in this run, in order. Empty for other executors."""
+        return [call.world_model for call in self.vlm_call_log if call.world_model is not None]
+
     def __str__(self) -> str:
         """
         Return the full interleaved VLM-call / step trajectory as a string.
@@ -332,6 +484,8 @@ class ExecutorReport:
                     lines.append(f"  │ → INVALID  ({step.reason})")
                 else:
                     lines.append(f"  │ → {_step_summary(step)}")
+            if entry.world_model is not None:
+                lines.append(f"  │ → {entry.world_model.describe()}")
 
             if entry.tag in ACTION_TAGS and not entry.steps:
                 # An action call is expected to produce something. Nothing at all means
@@ -348,6 +502,10 @@ class ExecutorReport:
                              + ("  → SELF-TERMINATED  (agent_done)" if ended else ""))
 
             lines.append("  └" + "─" * 57)
+
+        world_model_summary = summarize_world_model(self.world_model_decisions)
+        if world_model_summary:
+            lines.append(_indent(world_model_summary, "  "))
 
         return "\n".join(lines)
 
@@ -577,9 +735,16 @@ class SupervisorReport:
         """Generated tokens for the whole episode — supervisor plus every executor leg."""
         return sum_optional([self.supervisor_output_tokens, self.executor_output_tokens])
 
+    @property
+    def world_model_decisions(self) -> List[WorldModelDecision]:
+        """Every world-model decision across every leg, in order."""
+        return [d for report in self.executor_reports for d in report.world_model_decisions]
+
     def __str__(self) -> str:
         """The interleaved event log as text, for the benchmark CSV's ``report`` column.
 
+        Ends with a whole-episode world-model summary when more than one leg made world-model
+        decisions; with a single leg, that leg's own summary already says the same thing.
         """
         if not self.event_log:
             return "  (no supervisor events recorded)"
@@ -598,4 +763,8 @@ class SupervisorReport:
                 if hint:
                     lines.append(_indent(f"hint: {hint}"))
                 lines.append(str(event))
+        legs_with_decisions = [r for r in self.executor_reports if r.world_model_decisions]
+        if len(legs_with_decisions) > 1:
+            lines.append("===== WORLD MODEL (whole episode) =====")
+            lines.append(_indent(summarize_world_model(self.world_model_decisions) or "", "  "))
         return "\n".join(lines)

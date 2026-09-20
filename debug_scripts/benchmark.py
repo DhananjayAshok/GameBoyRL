@@ -50,7 +50,7 @@ import click
 import pandas as pd
 
 from execution.report import (EnvironmentStepRecord, SupervisorVLMCallRecord,
-                              _step_summary)
+                              _step_summary, summarize_world_model)
 from utils import log_error, log_info, log_warn, parse_action_line
 from benchmark_scripts.common import REPORT_FILENAME
 from debug_scripts import markdown as md
@@ -280,11 +280,17 @@ def _executor_call_blocks(call, index: int, frames_dir: str, report_dir: str,
                           prefix: str, overwrite: bool) -> list:
     """One executor VLM call: what it saw, what it was asked, what it said, what it did."""
     lines = [md.para(f"**call {index}** · tag `{call.tag}`")]
+    # A world-model call shows the current screen plus one prediction per action and answers
+    # with an image number, not an Action: line. Its record says which image is which.
+    decision = call.world_model
 
     for i, image in enumerate(call.images):
         path = _save_frame(image, frames_dir, f"{prefix}_call{index}_saw{i}", overwrite)
         if path:
-            lines.append(md.img(f"call {index} input {i}", path, report_dir))
+            caption = decision.image_caption(i) if decision else f"input {i}"
+            if decision:
+                lines.append(md.para(f"input {i}: {caption}"))
+            lines.append(md.img(f"call {index} {caption}", path, report_dir))
     if not call.images:
         lines.append(md.para("_(no images on this call)_"))
 
@@ -292,8 +298,11 @@ def _executor_call_blocks(call, index: int, frames_dir: str, report_dir: str,
     lines.append(md.para("output"))
     lines.append(md.code(call.response))
 
-    action = parse_action_line(call.response)
-    lines.append(md.para(f"parsed action: `{action if action else 'none'}`"))
+    if decision:
+        lines.append(md.para(decision.describe()))
+    else:
+        action = parse_action_line(call.response)
+        lines.append(md.para(f"parsed action: `{action if action else 'none'}`"))
 
     # Every step, not just the last: one call can own several (the sequence policy), and
     # the old text parser kept only the final one.
@@ -375,6 +384,9 @@ def _episode_section(index: int, row, report, model, report_dir,
         f"({len(report.supervisor_calls)} supervisor call(s), "
         f"{len(report.executor_reports)} executor leg(s))",
     ]))
+    world_model_summary = summarize_world_model(report.world_model_decisions)
+    if world_model_summary:
+        blocks.append(md.code(world_model_summary))
     # Prefixed with the row number: without it two episodes sharing a task string write into
     # one directory, and the second silently reuses the first's PNGs whenever --overwrite is
     # not set — a report showing the wrong screens, with nothing to indicate it.

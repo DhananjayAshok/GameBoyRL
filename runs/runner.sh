@@ -8,12 +8,11 @@ MAX_STEPS=175
 
 BENCH_GAMES="bomberman_pocket bomberman_quest \
              deja_vu_1 deja_vu_2 \
-             harvest_moon_1 harvest_moon_2 \
              legend_of_zelda_links_awakening legend_of_zelda_the_oracle_of_seasons \
              pokemon_crystal pokemon_red \
              sword_of_hope_1 sword_of_hope_2"
 
-bash ~/vllm_scripts/serve_vllm_auto.sh "$MODEL"
+bash scripts/core/serve_vllm.sh "$MODEL" -tp 4 || { echo "Could not start vLLM"; exit 1; }
 
 for GAME in $BENCH_GAMES; do
     echo ""
@@ -51,3 +50,5 @@ for GAME in $BENCH_GAMES; do
 done
 
 echo "DONE ALL"
+
+bash scripts/core/stop_vllm.sh 8000

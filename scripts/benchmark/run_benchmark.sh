@@ -77,6 +77,9 @@ fi
 if [[ "${ARGS["world_model_run_name"]}" != "none" ]]; then
     optional_flags+=" --world_model_run_name ${ARGS["world_model_run_name"]}"
 fi
+if [[ "${ARGS["world_model_game"]}" != "none" ]]; then
+    optional_flags+=" --world_model_game ${ARGS["world_model_game"]}"
+fi
 
 group_flags="--game ${ARGS["game"]}"
 group_flags+=" --controller_variant ${ARGS["controller_variant"]}"

@@ -11,7 +11,7 @@ import click
 
 from gameboy_worlds import get_benchmark_tasks
 
-from execution.registry import AVAILABLE_EXECUTORS, AVAILABLE_SUPERVISORS
+from execution.registry import AVAILABLE_SUPERVISORS
 from execution.supervisors import DummySupervisor
 
 from benchmark_scripts import common
@@ -27,7 +27,7 @@ def baseline_cmd(obj):
     executor = obj["executor"]
     controller_variant = obj["controller_variant"]
     extra_name = obj["extra_name"]
-    executor_class = AVAILABLE_EXECUTORS[executor]
+    executor_class = obj["executor_class"]
     model_save_name = obj["model_save_name"]
     supervisor_name = "dummy"
     supervisor_class = AVAILABLE_SUPERVISORS[supervisor_name]
@@ -68,7 +68,6 @@ def baseline_cmd(obj):
                 parameters=parameters,
                 vlm_model=obj["executor_vlm_model"],
                 vlm_kind=obj["executor_vlm_kind"],
-                **obj["executor_kwargs"],
             )
             result = supervisor.evaluate()
             if obj["verbose"]:

@@ -10,7 +10,7 @@ import click
 
 from gameboy_worlds import get_benchmark_tasks
 
-from execution.registry import AVAILABLE_EXECUTORS, AVAILABLE_SUPERVISORS
+from execution.registry import AVAILABLE_SUPERVISORS
 from execution.supervisors import PLAN_SEPARATOR
 
 from benchmark_scripts import common
@@ -67,7 +67,7 @@ def subgoal_cmd(obj, max_leg_steps, max_attempts_per_step, max_replans,
     controller_variant = obj["controller_variant"]
     extra_name = obj["extra_name"]
     executor = obj["executor"]
-    executor_class = AVAILABLE_EXECUTORS[executor]
+    executor_class = obj["executor_class"]
     model_save_name = obj["model_save_name"]
     supervisor_name = "subgoal"
     supervisor_class = AVAILABLE_SUPERVISORS[supervisor_name]
@@ -110,7 +110,6 @@ def subgoal_cmd(obj, max_leg_steps, max_attempts_per_step, max_replans,
                 parameters=parameters,
                 vlm_model=obj["executor_vlm_model"],
                 vlm_kind=obj["executor_vlm_kind"],
-                **obj["executor_kwargs"],
             )
             result = supervisor.evaluate()
             report = result["report"]

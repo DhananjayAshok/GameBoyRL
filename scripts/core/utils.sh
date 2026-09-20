@@ -709,8 +709,13 @@ declare -A RUN_BENCHMARK_DEFAULTS=(
     ["max_concurrency"]=8
     ["executor_max_new_tokens"]=8000
     # RL run_name whose world model and observation encoder drive the `world_model`
-    # executor. `none` means absent, and every other executor ignores it.
+    # executor. `none` means absent. Required by that executor and rejected by the others;
+    # it becomes part of the executor's name (world_model_<run_name>), so it names the CSV.
     ["world_model_run_name"]=none
+    # Game whose checkpoint the `world_model` executor borrows, for titles with no world model
+    # of their own (pokemon_crystal from pokemon_red). `none` means the benchmark game's own.
+    # A different game becomes part of the executor's name: world_model_<game>_<run_name>.
+    ["world_model_game"]=none
 )
 
 RUN_BENCHMARK_ARG_KEYS=("${RUN_BENCHMARK_ESSENTIALS[@]}" "${!RUN_BENCHMARK_DEFAULTS[@]}")
