@@ -34,7 +34,6 @@ class AttemptCheckerSupervisor(Supervisor):
     :param env: The game environment.
     :param game: Game name string.
     :param max_steps: Env-step budget forwarded to the executor.
-    :param max_tool_calls: Tool-call budget forwarded to the executor.
     :param evaluation_lookback: Number of final env-step frames passed to the checker VLM.
     :param goal_condition: Visual description of the state that means the task is done, shown
         to the judge as a strict guide. ``None`` for a task that has none (a proposed task,
@@ -54,7 +53,6 @@ class AttemptCheckerSupervisor(Supervisor):
         env: Environment,
         game: str,
         max_steps: int,
-        max_tool_calls: int,
         evaluation_lookback: int = 8,
         hint: Optional[str] = None,
         goal_condition: Optional[str] = None,
@@ -80,7 +78,6 @@ class AttemptCheckerSupervisor(Supervisor):
             env=env,
             game=game,
             max_steps=max_steps,
-            max_tool_calls=max_tool_calls,
             supervisor_vlm_model=supervisor_vlm_model,
             supervisor_vlm_kind=supervisor_vlm_kind,
             max_new_tokens=max_new_tokens,

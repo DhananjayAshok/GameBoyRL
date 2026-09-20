@@ -32,7 +32,6 @@ class Supervisor(ABC):
     :param env: The game environment passed to each executor call.
     :param game: Game name string, forwarded to the executor.
     :param max_steps: Step budget forwarded to each executor.
-    :param max_tool_calls: Tool-call budget forwarded to each executor.
     :param supervisor_vlm_model: The one model this supervisor reasons with. ``None`` for a
         supervisor that never calls one (the baseline); constructing the VLM is deferred, so
         a supervisor that does not reason does not need a model to exist.
@@ -55,7 +54,6 @@ class Supervisor(ABC):
         env: Environment,
         game: str,
         max_steps: int,
-        max_tool_calls: int,
         supervisor_vlm_model: Optional[str] = None,
         supervisor_vlm_kind: Optional[str] = None,
         max_new_tokens: int = 4800,
@@ -67,7 +65,6 @@ class Supervisor(ABC):
         self._env = env
         self._game = game
         self._max_steps = max_steps
-        self._max_tool_calls = max_tool_calls
         self._supervisor_vlm_model = supervisor_vlm_model
         self._supervisor_vlm_kind = supervisor_vlm_kind
         self._max_new_tokens = max_new_tokens
@@ -96,7 +93,6 @@ class Supervisor(ABC):
             "supervisor_vlm_kind": self._supervisor_vlm_kind,
             "max_new_tokens": self._max_new_tokens,
             "max_steps": self._max_steps,
-            "max_tool_calls": self._max_tool_calls,
             "executor_kwargs": dict(self._executor_kwargs),
         }
 
@@ -234,7 +230,6 @@ class Supervisor(ABC):
             task=task,
             game=self._game,
             max_steps=self._max_steps if max_steps is None else max_steps,
-            max_tool_calls=self._max_tool_calls,
             parameters=self._parameters,
             **run_kwargs,
         )

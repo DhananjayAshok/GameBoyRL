@@ -78,7 +78,6 @@ python vlm.py \
     --max_total_practice_runs "${ARGS["max_total_practice_runs"]}" \
     --n_random_actions "${ARGS["n_random_actions"]}" \
     --max_steps "${ARGS["max_steps"]}" \
-    --max_tool_calls "${ARGS["max_tool_calls"]}" \
     --lookback "${ARGS["lookback"]}" \
     --executor "${ARGS["executor"]}" \
     --controller_variant "${ARGS["controller_variant"]}" \

@@ -13,6 +13,8 @@ from gameboy_worlds import get_benchmark_tasks
 
 from execution.registry import AVAILABLE_SUPERVISORS
 
+from utils import log_info
+
 from benchmark_scripts import common
 from python_scripts import paths
 
@@ -33,10 +35,17 @@ def _summary(result: dict, report) -> dict:
                    "decides how often the supervisor gets to look, not the episode budget.")
 @click.option("--max_frames_per_slice", default=8, show_default=True, type=int,
               help="Trajectory frames per critique call.")
+@click.option("--executor_max_new_tokens", default=8000, show_default=True, type=int,
+              help="Token budget per executor action call. Overrides the project-wide "
+                   "executor_vlm_max_new_tokens for this process only.")
 @click.pass_obj
-def revision_cmd(obj, max_leg_steps, max_frames_per_slice):
+def revision_cmd(obj, max_leg_steps, max_frames_per_slice, executor_max_new_tokens):
     """Benchmark with a hint revised between short executor legs, and no plan."""
     parameters = obj["parameters"]
+    previous = parameters.get("executor_vlm_max_new_tokens")
+    parameters["executor_vlm_max_new_tokens"] = executor_max_new_tokens
+    log_info(f"Executor token budget: {previous} -> {executor_max_new_tokens} "
+             f"(this run only). Supervisor calls: {obj['supervisor_max_new_tokens']}.")
     game = obj["game"]
     controller_variant = obj["controller_variant"]
     extra_name = obj["extra_name"]
@@ -71,7 +80,6 @@ def revision_cmd(obj, max_leg_steps, max_frames_per_slice):
                 env=environment,
                 game=row["game"],
                 max_steps=obj["max_steps"],
-                max_tool_calls=obj["max_tool_calls"],
                 supervisor_vlm_model=obj["supervisor_vlm_model"],
                 supervisor_vlm_kind=obj["supervisor_vlm_kind"],
                 max_new_tokens=obj["supervisor_max_new_tokens"],

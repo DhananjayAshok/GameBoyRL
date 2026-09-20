@@ -1,0 +1,189 @@
+"""
+Entry point for a strategist playthrough. Use --help for CLI options.
+
+Not a benchmark arm. Every arm in ``run_benchmark.py`` sweeps a fixed list of short tasks
+and scores each independently; a strategist run is the opposite shape -- one long-horizon
+ladder, one emulator session, and a sequence of tasks the strategist chooses as it goes.
+There is no task list to sweep and no per-task pass rate to average.
+
+    python run_strategist.py --name gemma_starter --init_state starter \\
+        --model google/gemma-4-31b-it --vlm_kind vllm --max_episodes 400
+
+State (knowledge, goals, locations, tiles) persists under
+``Paths.strategist_dir(name)`` and is resumed by default, so re-running the same --name
+continues the same playthrough. The episode record is checkpointed into the same directory
+after every episode.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from datetime import datetime
+
+import click
+
+from gameboy_worlds import get_environment
+
+from execution.strategist.pokemon.strategist import PokemonStrategist
+from python_scripts import paths
+from utils import load_parameters, log_info
+
+#: As high as the emulator allows: its own budget must never be what ends a playthrough.
+#: The strategist stops on its own ladder, its episode count or the wall clock, and an
+#: emulator that truncated underneath it would look exactly like the agent giving up.
+#:
+#: This IS the ceiling -- ``gameboy_hard_max_steps`` in GameBoyWorlds' config is 1,000,000
+#: and anything larger is silently clamped to it with a warning. Set to the cap rather than
+#: to a bigger number so the value here is the value that runs. For scale, an episode
+#: spends a few hundred emulator steps, so this is ~10x what 10 hours can consume.
+DEFAULT_ENV_MAX_STEPS = 1_000_000
+
+
+@click.command()
+@click.option("--game", default="pokemon_red", type=str)
+@click.option("--init_state", default="starter", show_default=True, type=str,
+              help="Where the playthrough begins. 'starter' is Oak's lab beside the Poke "
+                   "Balls; 'initial' is the true start of the game, the bedroom.")
+@click.option("--name", required=True, type=str,
+              help="Identity of this playthrough. Keys the state directory AND the tile "
+                   "database, so re-running the same name continues where it left off.")
+@click.option("--model", required=True, type=str,
+              help="The model every layer uses, unless overridden per layer below.")
+@click.option("--vlm_kind", required=True, type=str)
+@click.option("--strategist_vlm_model", default=None, type=str, help="Defaults to --model.")
+@click.option("--strategist_vlm_kind", default=None, type=str)
+@click.option("--supervisor_vlm_model", default=None, type=str, help="Defaults to --model.")
+@click.option("--supervisor_vlm_kind", default=None, type=str)
+@click.option("--executor_vlm_model", default=None, type=str, help="Defaults to --model.")
+@click.option("--executor_vlm_kind", default=None, type=str)
+@click.option("--max_episodes", default=400, show_default=True, type=int,
+              help="Episodes this run may take. One episode is a whole supervised run, so "
+                   "this multiplies the cost of everything else. Set it ABOVE what the "
+                   "wall clock allows, so the job ends on time rather than on the counter.")
+@click.option("--supervisor_max_steps", default=10, show_default=True, type=int,
+              help="Executor calls the supervisor may spend per episode.")
+@click.option("--env_max_steps", default=DEFAULT_ENV_MAX_STEPS, show_default=True, type=int)
+@click.option("--strategist_max_new_tokens", default=4800, show_default=True, type=int)
+@click.option("--supervisor_max_new_tokens", default=4800, show_default=True, type=int)
+@click.option("--controller_variant", default="state_wise", show_default=True, type=str,
+              help="The Pokemon executors act through state-wise actions, not low-level "
+                   "button presses.")
+@click.option("--save_video", default=True, show_default=True, type=bool)
+@click.option("--resume/--fresh", default=True, show_default=True,
+              help="--fresh starts the ladder, knowledge and locations over. It does NOT "
+                   "reset the emulator to a later point: the run still starts at "
+                   "--init_state.")
+def main(game, init_state, name, model, vlm_kind, strategist_vlm_model, strategist_vlm_kind,
+         supervisor_vlm_model, supervisor_vlm_kind, executor_vlm_model, executor_vlm_kind,
+         max_episodes, supervisor_max_steps, env_max_steps, strategist_max_new_tokens,
+         supervisor_max_new_tokens, controller_variant, save_video, resume):
+    """Play one long-horizon playthrough with the strategist."""
+    parameters = load_parameters()
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = paths.strategist_dir(parameters, game=game, name=name)
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"run_{stamp}.json")
+
+    log_info(f"Strategist playthrough {name!r} on {game} from {init_state!r}", parameters)
+    log_info(f"State: {out_dir}", parameters)
+    log_info(f"Record: {out_path}", parameters)
+
+    def checkpoint(report) -> None:
+        with open(out_path, "w") as handle:
+            json.dump(serialise(report), handle, indent=2)
+
+    environment = get_environment(
+        game=game,
+        environment_variant="default",
+        controller_variant=controller_variant,
+        init_state=init_state,
+        max_steps=env_max_steps,
+        headless=True,
+        save_video=save_video,
+        # depathify'd for the same reason strategist_dir is: a name with spaces or
+        # slashes in it becomes a directory name here, on GameBoyWorlds' storage.
+        session_name=f"strategist/{game}/{paths.depathify(name)}/{stamp}/",
+    )
+    try:
+        environment.reset()
+        strategist = PokemonStrategist(
+            env=environment,
+            game=game,
+            name=name,
+            max_episodes=max_episodes,
+            supervisor_max_steps=supervisor_max_steps,
+            strategist_vlm_model=strategist_vlm_model or model,
+            strategist_vlm_kind=strategist_vlm_kind or vlm_kind,
+            max_new_tokens=strategist_max_new_tokens,
+            supervisor_max_new_tokens=supervisor_max_new_tokens,
+            resume=resume,
+            on_episode_complete=checkpoint,
+            parameters=parameters,
+            # Forwarded to each episode's PokemonPlayThroughSupervisor, which forwards the
+            # vlm_* pair on to every executor it spawns.
+            supervisor_vlm_model=supervisor_vlm_model or model,
+            supervisor_vlm_kind=supervisor_vlm_kind or vlm_kind,
+            vlm_model=executor_vlm_model or model,
+            vlm_kind=executor_vlm_kind or vlm_kind,
+        )
+        report = strategist.run()
+    finally:
+        # An emulator left open holds its session directory and its video handle, so a
+        # crashed run that keeps them is a run whose partial video cannot be read.
+        environment.close()
+
+    checkpoint(report)
+    print()
+    print(str(report))
+    print()
+    print(f"Record written to {out_path}")
+
+
+def serialise(report) -> dict:
+    """The run as JSON-safe data.
+
+    Supervisor reports are kept as their rendered strings rather than as structures: the
+    report's own ``__str__`` is what every existing reader of this pipeline consumes, and
+    the frames inside them are numpy arrays that JSON cannot carry anyway.
+    """
+    return {
+        "game": report.game,
+        "strategist": report.strategist_name,
+        "init_kwargs": report.init_kwargs,
+        "stop_reason": report.stop_reason,
+        "task_ladder": report.task_ladder,
+        "locations": report.locations,
+        "final_knowledge": report.final_knowledge,
+        "tokens": {
+            "strategist_input": report.strategist_input_tokens,
+            "strategist_output": report.strategist_output_tokens,
+            "supervisor_input": report.supervisor_input_tokens,
+            "supervisor_output": report.supervisor_output_tokens,
+            "total_input": report.total_input_tokens,
+            "total_output": report.total_output_tokens,
+        },
+        "n_invalid": report.n_invalid,
+        "episodes": [
+            {
+                "n": episode.n,
+                "goal": episode.goal,
+                "task": episode.task,
+                "guidance": episode.guidance,
+                "location_before": episode.location_before,
+                "location_after": episode.location_after,
+                "status": episode.status,
+                "summary": episode.summary,
+                "goal_complete": episode.goal_complete,
+                "facts_added": episode.facts_added,
+                "subgoals_added": episode.subgoals_added,
+                "supervisor_report": (str(episode.supervisor_report)
+                                      if episode.supervisor_report is not None else None),
+            }
+            for episode in report.episodes
+        ],
+    }
+
+
+if __name__ == "__main__":
+    main()

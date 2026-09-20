@@ -185,3 +185,4 @@ scripts/core/all_train_states.sh
 vllm*.pid
 slurm/
 storage/
+paper/

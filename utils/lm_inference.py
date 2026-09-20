@@ -1,3 +1,4 @@
+import httpx
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
 from time import sleep, perf_counter
@@ -321,7 +322,11 @@ class OpenAICompatibleAPIBase(RateLimitedAPIBase):
         self._async_client_api_key = api_key
 
     def _make_async_client(self) -> AsyncOpenAI:
-        return AsyncOpenAI(base_url=self._async_client_base_url, api_key=self._async_client_api_key)
+        return AsyncOpenAI(
+            base_url=self._async_client_base_url,
+            api_key=self._async_client_api_key,
+            timeout=httpx.Timeout(600.0, connect=30.0),
+        )
 
 
 class InferenceModel(ABC):
@@ -1139,7 +1144,7 @@ class OpenAIAPIModel(OpenAICompatibleAPIBase, APIModel):
         kwargs = dict(model=self.model, messages=messages, max_tokens=max_new_tokens, stop=final_stop, n=num_return_sequences)
         if temperature is not None:
             kwargs["temperature"] = temperature
-        max_tries = 3
+        max_tries = 5
         last_error = None
         for attempt in range(max_tries):
             try:
@@ -1318,7 +1323,7 @@ class AnthropicModel(APIModel):
         if temperature is not None:
             kwargs["temperature"] = temperature
         kwargs["stop_sequences"] = list(dict.fromkeys(["[STOP]"] + (stop_strings or [])))
-        max_tries = 3
+        max_tries = 5
         last_error = None
         for attempt in range(max_tries):
             try:

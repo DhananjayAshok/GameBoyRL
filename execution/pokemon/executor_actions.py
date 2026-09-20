@@ -1,24 +1,20 @@
 """
 Pokemon-specific executor actions.
 
-.. warning:: **This module is not usable as written.** It imports cleanly, but nothing
-    in it can actually run. Four separate blockers, each marked with a ``TODO`` at the
-    site below:
-
-    1. Neither class implements ``verbalize`` or ``string_to_kwargs``, both
-       ``@abstractmethod`` on :class:`~execution.executor_action.ExecutorAction`, so
-       neither can be instantiated. (:class:`~execution.executor_action.LocateAction`
-       has the same gap, so ``PokemonLocateAction`` inherits it as well as adding its own.)
-    2. ``self._state_tracker`` is read but is defined by no class in the hierarchy.
-    3. ``self._emulator`` is read but is likewise never defined.
-    4. ``ExecutorVLM.infer(...)`` is called on the class rather than an instance.
-
-    Nothing imports this module. Fix all four before wiring it up, or delete it.
+.. warning:: ``PokemonLocateAction`` cannot be instantiated yet: neither it nor
+    :class:`~execution.executor_action.LocateAction` implements ``verbalize`` or
+    ``string_to_kwargs``, both ``@abstractmethod`` on
+    :class:`~execution.executor_action.ExecutorAction`.
 """
 
-from execution.executor_action import ExecutorAction, LocateAction
+import re
+from typing import Any, Dict, Optional, Tuple
+
+from execution.executor_action import ExecutorAction, LocateAction, coords_to_string
+from execution.perception.pokemon.grid import split_grid
+from execution.perception.pokemon.tiles import PLAYER_NEIGHBOURS, verbalize_neighbourhood
 from gameboy_worlds.emulation.pokemon import AgentState
-from utils import ExecutorVLM
+from utils import parse_key_value, parse_yes_no
 
 
 class PokemonLocateAction(LocateAction):
@@ -33,129 +29,114 @@ class PokemonLocateAction(LocateAction):
     }
 
 
-    def is_valid(self, target=None):
-        # TODO: `self._state_tracker` is defined by no class in this hierarchy — this
-        # raises AttributeError. Decide where the state tracker should come from.
-        if (
-            self._state_tracker.get_episode_metric(("pokemon_core", "agent_state"))
-            != AgentState.FREE_ROAM
-        ):
-            return False
-        return super().is_valid(target=target)
+    def is_valid(self, info, target=None, **kwargs):
+        if info["pokemon_core"]["agent_state"] != AgentState.FREE_ROAM:
+            return False, "can only locate objects while in free roam"
+        return super().is_valid(info, target=target, **kwargs)
 
 
 
 class CheckInteractionAction(ExecutorAction):
     """
-    Checks whether a target object is in the interaction sphere of the agent.
-    Uses VLM inference to check each grid cell for the target.
-    1. Checks the orientation of the agent using VLM inference.
-    2. Captures the grid cell in all four cardinal directions of the agent and uses VLM inference to describe what is in the cell and whether we can interact with it.
+    Finds which of the eight cells around the agent holds a target, in one VLM call, from the
+    whole screen plus the tile descriptions of those cells.
 
     Is Valid When:
     - In Free Roam State
+    - ``target`` is a non-empty string
 
     Action Success Interpretation:
-    - -1: There is nothing to interact with anywhere around the agent.
-    - 0: There is something to interact with in front of the agent.
-    - 1: There is something to interact with, but not in front of the agent.
+    - -1: The target is not in any of the eight cells around the agent.
+    - 0: The target is in a cardinal cell, so the agent can face it. ``direction`` says which way.
+    - 1: The target is only in a diagonal cell, which cannot be faced or interacted with.
 
     Action Returns:
-    - `orientation` (`Tuple[int, int]`): The orientation of the agent. Can be one of UP, DOWN, LEFT, RIGHT or None (if VLM fails to determine orientation).
-    - `up/down/left/right` (`Tuple[str, bool, str]`): For each cardinal direction, a tuple containing:
-        - A brief description of what is in the grid cell in that direction.
-        - A boolean indicating whether there is something to interact with in that cell.
-        - The raw VLM output for that cell.
-
+    - `cell` (`Optional[Tuple[int, int]]`): The cell holding the target, or None.
+    - `direction` (`str`): Present for code 0 — the direction to face.
+    - `found_cells` / `found_cells_str`: The same cell, kept for callers that render it.
     """
 
-    orientation_prompt = """
-    You are playing Pokemon and are given a screen capture of the player. Which direction is the player facing?
-    Do not give any explanation, just your answer. 
-    Answer with one of: UP, DOWN, LEFT, RIGHT and then [STOP]
-    Output:
-    """
+    MAX_NEW_TOKENS = 4000
 
-    percieve_prompt = """
-    You are playing Pokemon and are given a screen capture of the grid cell in front of the player. 
-    Briefly describe what you see in the image, is it an item, pokeball, object, switch or NPC that can be interacted with? Note that doors and caves can be entered, but not interacted with. If the cell seems empty (or a background texture), say so and declare nothing to interact with.
-    Give your answer in the following format:
-    Description: <a single sentence description of the cell>
-    Answer: <YES (if there is something to interact with) or NO (if there is nothing to interact with)>
-    and then [STOP]
-    Description:
-    """
+    LOCATE_TAG = "check_interaction_locate"
 
-    # TODO: cannot be instantiated — `verbalize` and `string_to_kwargs` are abstract on
-    # ExecutorAction and are not implemented here.
+    cardinals = {
+        "up": (0, 1),
+        "down": (0, -1),
+        "left": (-1, 0),
+        "right": (1, 0),
+    }
+    neighbours = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx, dy) != (0, 0)]
 
-    def is_valid(self, **kwargs):
-        # TODO: `self._state_tracker` is defined by no class in this hierarchy — this
-        # raises AttributeError. Decide where the state tracker should come from.
+    neighbourhood_block = """This is what has already been recognised in the eight cells around the player. Use it together with the image:
+[NEIGHBOURHOOD]
+"""
+
+    _call_pattern = re.compile(r"check_interaction\s*\(\s*target\s*=\s*(.*?)\s*\)\s*$", re.IGNORECASE)
+
+    @classmethod
+    def verbalize(cls) -> str:
         return (
-            self._state_tracker.get_episode_metric(("pokemon_core", "agent_state"))
-            == AgentState.FREE_ROAM
+            "check_interaction(target=<str>) — check whether the target is directly in front of you and can be interacted with, and if not, whether it is next to you.\n"
+            "  target — the object or character to look for (e.g. 'old man npc').\n"
+            "  Example: check_interaction(target=old man npc)"
         )
 
-    def parse_result(self, output):
-        # TODO: substring matching on the whole answer clause — "no, yes it is absent"
-        # scores as True. Use `parse_yes_no(output, "Answer")` from utils, as
-        # utils.vlm.object_detection now does, and drop this method.
-        if "answer:" not in output.lower():
-            return output.strip(), None
-        description_part, answer_part = output.lower().split("answer:")
-        if "yes" in answer_part:
-            return description_part.strip(), True
-        elif "no" in answer_part:
-            return description_part.strip(), False
-        else:
-            return description_part.strip(), None
+    @classmethod
+    def string_to_kwargs(cls, action_str: str) -> Dict[str, Any]:
+        match = cls._call_pattern.search(action_str.strip())
+        if match is None:
+            return {}
+        return {"target": match.group(1).strip().strip("'\"")}
 
-    def _execute(self):
-        # TODO: `self._emulator` is defined by no class in this hierarchy — this raises
-        # AttributeError. ExecutorAction subclasses reach the game some other way.
-        current_frame = self._emulator.get_current_frame()
-        grid_cells = self._emulator.state_parser.capture_grid_cells(
-            current_frame=current_frame
+    def is_valid(self, info, target: str = None, **kwargs):
+        if info["pokemon_core"]["agent_state"] != AgentState.FREE_ROAM:
+            return False, "can only check interactions while in free roam"
+        if not isinstance(target, str) or not target.strip():
+            return False, f"target must be a non-empty string, got {target!r}"
+        return True, None
+
+    locate_prompt = """You are playing Pokemon. The image is the current screen, divided into a grid of 16x16 cells. The player is at (0, 0), x increases to the right and y increases upward.
+
+The target to interact with is: [TARGET]
+[NEIGHBOURHOOD_BLOCK]
+Which of the eight cells around the player holds the target? The player can only interact with something directly above, below, to the left or to the right, never diagonally, so prefer one of those if the target covers several cells. Answer None if the target is not in any of the eight cells.
+
+Respond in exactly this format:
+Reasoning: <where the target is on the screen>
+Cell: <(x, y) of one of the eight cells around the player, or None>
+[STOP]"""
+
+    def _locate_prompt(self, target: str, identified) -> str:
+        block = ""
+        if identified is not None:
+            block = self.neighbourhood_block.replace("[NEIGHBOURHOOD]", verbalize_neighbourhood(identified))
+        return (self.locate_prompt.replace("[TARGET]", target.strip())
+                .replace("[NEIGHBOURHOOD_BLOCK]", block))
+
+    def parse_cell(self, output: str) -> Optional[Tuple[int, int]]:
+        answer = parse_key_value(output, "Cell") or ""
+        match = re.search(r"\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)", answer)
+        if match is None:
+            return None
+        cell = (int(match.group(1)), int(match.group(2)))
+        return cell if cell in self.neighbours else None
+
+    def _execute(self, info, target: str, identified=None, **kwargs) -> Tuple[Dict[str, Any], int]:
+        results: Dict[str, Any] = {"cell": None, "found_cells": [], "found_cells_str": coords_to_string([])}
+        output = self._vlm_call(
+            self.LOCATE_TAG,
+            texts=self._locate_prompt(target, identified),
+            images=[info["core"]["current_frame"]],
+            max_new_tokens=self.MAX_NEW_TOKENS,
         )
-        # TODO: `infer` is an instance method — calling it on the class is a TypeError.
-        # Construct an ExecutorVLM (or take one in __init__) and call it on that.
-        orientation_output = ExecutorVLM.infer(
-            texts=[self.orientation_prompt],
-            images=[grid_cells[(0, 0)]],
-            max_new_tokens=5,
-        )[0]
-        all_cardinals = {
-            "up": (0, 1),
-            "down": (0, -1),
-            "left": (-1, 0),
-            "right": (1, 0),
-        }
-        cardinal = None
-        for cardinal_key, cardinal_value in all_cardinals.items():
-            if cardinal_key in orientation_output.lower():
-                if cardinal is not None:
-                    # Multiple directions detected, VLM failure
-                    cardinal = None
-                    break
-                cardinal = cardinal_key
-        cardinal_results = {}
-        for cardinal_key, cardinal_value in all_cardinals.items():
-            cardinal_screen = grid_cells[cardinal_value]
-            percieve_output = ExecutorVLM.infer(
-                texts=[self.percieve_prompt],
-                images=[cardinal_screen],
-                max_new_tokens=50,
-            )[0]
-            description, answer = self.parse_result(percieve_output)
-            cardinal_results[cardinal_key] = (description, answer, percieve_output)
-        cardinal_results["orientation"] = cardinal
-        success_code = -1
-        for key in all_cardinals.keys():
-            if cardinal_results[key][1]:
-                if key == cardinal:
-                    success_code = 0
-                    break
-                else:
-                    success_code = 1
-        return cardinal_results, success_code
+        cell = self.parse_cell(output)
+        results["cell"] = cell
+        if cell is None:
+            return results, -1
+        results["found_cells"] = [cell]
+        results["found_cells_str"] = coords_to_string([cell])
+        if cell not in self.cardinals.values():
+            return results, 1
+        results["direction"] = next(name for name, offset in self.cardinals.items() if offset == cell)
+        return results, 0

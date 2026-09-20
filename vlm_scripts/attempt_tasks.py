@@ -29,7 +29,6 @@ CLI options
   --tasks_path        Path to the input JSONL file (required)
   --executor          Short name of the executor class (default: single_actions)
   --max_steps         Env-step budget per task attempt (default: 50)
-  --max_tool_calls    Tool-call budget per task attempt (default: 10)
   --lookback          Frames passed to checker VLM (default: 8)
   (game, model_name, vlm_kind, overwrite, verbose come from the parent click group)
 
@@ -112,7 +111,6 @@ def _attempt_task(
     vlm_kind: str,
     executor_class,
     max_steps: int,
-    max_tool_calls: int,
     lookback: int,
     controller_variant: str,
     max_attempts: int,
@@ -152,7 +150,6 @@ def _attempt_task(
                 env=env,
                 game=game,
                 max_steps=max_steps,
-                max_tool_calls=max_tool_calls,
                 evaluation_lookback=lookback,
                 allow_self_termination=True,
                 supervisor_vlm_model=model_name,
@@ -244,12 +241,6 @@ def _attempt_task(
     help="Env-step budget per task attempt.",
 )
 @click.option(
-    "--max_tool_calls",
-    default=10,
-    show_default=True,
-    help="Tool-call budget per task attempt.",
-)
-@click.option(
     "--lookback",
     default=8,
     show_default=True,
@@ -281,7 +272,7 @@ def _attempt_task(
 )
 @click.pass_obj
 def attempt_tasks_cmd(
-    obj, tasks_path, executor_name, max_steps, max_tool_calls, lookback, controller_variant, max_attempts, checker_max_new_tokens, max_concurrency
+    obj, tasks_path, executor_name, max_steps, lookback, controller_variant, max_attempts, checker_max_new_tokens, max_concurrency
 ):
     """Attempt each proposed task with a VLM executor and check for success."""
     parameters = obj["parameters"]
@@ -384,7 +375,6 @@ def attempt_tasks_cmd(
                 vlm_kind,
                 executor_class,
                 max_steps,
-                max_tool_calls,
                 lookback,
                 controller_variant,
                 max_attempts,

@@ -46,14 +46,14 @@ Task: [TASK][HINT_BLOCK]
 
 You are playing a GameBoy game. The current screen is shown in the image.
 
-[ERROR_BLOCK][TOOL_RESULT_BLOCK]Available environment actions:
+[ERROR_BLOCK]Available environment actions:
 [ACTION_LIST]
 
-[TOOLS_BLOCK][CONTEXT_SECTION][INSTRUCTION]
+[CONTEXT_SECTION][INSTRUCTION]
 [RESPONSE_FORMAT]
 [STOP]"""
 
-    def __init__(self, env, task, max_steps, max_tool_calls,
+    def __init__(self, env, task, max_steps,
                  action_policy=None, history_policy=None,
                  history_k: int = 5, **kwargs):
         action_policy = action_policy or self.ACTION_POLICY
@@ -70,7 +70,7 @@ You are playing a GameBoy game. The current screen is shown in the image.
         self._action_policy = action_policy
         self._history_policy = history_policy
         # Set before super().__init__, which runs the whole episode.
-        super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
+        super().__init__(env, task, max_steps, **kwargs)
 
     @property
     def DONE_CHECK_REASONING_LABEL(self) -> str:  # noqa: N802 - shadows a base constant
@@ -127,60 +127,22 @@ You are playing a GameBoy game. The current screen is shown in the image.
     def _error_block(error_message: Optional[str]) -> str:
         return f"[ERROR] {error_message}\n\n" if error_message is not None else ""
 
-    @staticmethod
-    def _tool_result_block(tool_call_message: Optional[str]) -> str:
-        return f"Tool result: {tool_call_message}\n\n" if tool_call_message is not None else ""
-
     def _action_list_block(self) -> str:
         return "\n".join(f"  {s}" for s in self._get_action_strings().values())
 
-    def _tools_offered(self, tool_calls_exceeded: bool) -> bool:
-        """
-        Whether this step may use a tool at all.
-
-        Two things have to agree: the budget is not spent, and tools exist. Every action
-        policy can choose a tool.
-        """
-        return not tool_calls_exceeded and bool(self.available_tools)
-
-    def _tools_block(self, tool_calls_exceeded: bool) -> str:
-        if not self._tools_offered(tool_calls_exceeded):
-            return ""
-        lines = [f"Available tool calls (do not advance the game, "
-                 f"{self._max_tool_calls} total budget):"]
-        lines += [f"  {tool_class.verbalize()}" for tool_class in self.available_tools]
-        return "\n".join(lines) + "\n\n"
-
-    def _action_format(self, tool_calls_exceeded: bool) -> str:
-        return self._action_policy.action_format(self._tools_offered(tool_calls_exceeded))
-
-    def _build_prompt(self, tool_call_message: Optional[str], error_message: Optional[str],
-                      tool_calls_exceeded: bool) -> str:
+    def _build_prompt(self, error_message: Optional[str]) -> str:
         return (
             self.STEP_PROMPT
             .replace("[TASK]", self._task)
             .replace("[HINT_BLOCK]", self._hint_block())
             .replace("[ERROR_BLOCK]", self._error_block(error_message))
-            .replace("[TOOL_RESULT_BLOCK]", self._tool_result_block(tool_call_message))
             .replace("[ACTION_LIST]", self._action_list_block())
-            .replace("[TOOLS_BLOCK]", self._tools_block(tool_calls_exceeded))
             .replace("[CONTEXT_SECTION]", self._history_policy.render())
             .replace("[INSTRUCTION]", self._action_policy.instruction())
             .replace("[RESPONSE_FORMAT]", self._action_policy.response_format())
             # Last: the response format may itself contain the placeholder.
-            .replace("[ACTION_FORMAT]", self._action_format(tool_calls_exceeded))
+            .replace("[ACTION_FORMAT]", self._action_policy.action_format())
         )
-
-    def _try_parse_tool_call(self, action_str: str) -> Optional[tuple]:
-        """``(tool_class, kwargs)`` if *action_str* is a tool call, else ``None``."""
-        for tool_class in self.available_tools:
-            try:
-                kwargs = tool_class.string_to_kwargs(action_str)
-                if kwargs is not None:
-                    return tool_class, kwargs
-            except Exception:
-                continue
-        return None
 
     # ------------------------------------------------------------------
     # The loop
@@ -191,16 +153,13 @@ You are playing a GameBoy game. The current screen is shown in the image.
         self._last_truncated = False
         self._history_policy.reset()
 
-        tool_call_message: Optional[str] = None
         error_message: Optional[str] = None
         n_env_steps = 0
         consecutive_invalid = 0
 
         while n_env_steps < self._max_steps:
             frame = self._get_state()["core"]["current_frame"]
-            tool_calls_exceeded = self._n_tool_calls >= self._max_tool_calls
-            prompt = self._build_prompt(tool_call_message, error_message,
-                                        tool_calls_exceeded)
+            prompt = self._build_prompt(error_message)
 
             call_kwargs = {"texts": prompt, "images": [frame]}
             if self._action_policy.max_new_tokens is not None:
@@ -211,7 +170,6 @@ You are playing a GameBoy game. The current screen is shown in the image.
             if decision is None:
                 self._record_invalid(str(response))
                 error_message = self._action_policy.parse_error()
-                tool_call_message = None
                 n_env_steps += 1
                 consecutive_invalid += 1
                 if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
@@ -224,9 +182,8 @@ You are playing a GameBoy game. The current screen is shown in the image.
             # reasoning, which is what the completion check is then shown.
             self._last_reasoning = decision.reasoning or self._last_reasoning
 
-            (outcome, n_env_steps, consecutive_invalid, error_message,
-             tool_call_message) = self._run_decision(decision, n_env_steps,
-                                                     consecutive_invalid)
+            outcome, n_env_steps, consecutive_invalid, error_message = self._run_decision(
+                decision, n_env_steps, consecutive_invalid)
             if outcome is not None:
                 return outcome
 
@@ -236,39 +193,17 @@ You are playing a GameBoy game. The current screen is shown in the image.
     def _run_decision(self, decision, n_env_steps: int, consecutive_invalid: int):
         """Dispatch one decision's actions, then let the history see what happened.
 
-        :return: ``(outcome, n_env_steps, consecutive_invalid, error_message,
-            tool_call_message)`` where a non-None outcome ends the episode.
+        :return: ``(outcome, n_env_steps, consecutive_invalid, error_message)`` where a
+            non-None outcome ends the episode.
         """
         records: List[EnvironmentStepRecord] = []
         steps: List[StepRecord] = []
         error_message: Optional[str] = None
-        tool_call_message: Optional[str] = None
         aborted = False
 
         for action_str in decision.actions:
             if n_env_steps >= self._max_steps:
                 break
-
-            if self._tools_offered(self._n_tool_calls >= self._max_tool_calls):
-                tool_result = self._try_parse_tool_call(action_str)
-                if tool_result is not None:
-                    tool_class, tool_kwargs = tool_result
-                    steps.append(self._use_tool(tool_class, **tool_kwargs))
-                    tool_call_message = str(steps[-1].result)
-                    # A tool call costs a step of the budget even though it does not advance
-                    # the emulator. It used to be free here, which meant this loop had no
-                    # bound at all on a tool-heavy run: `max_tool_calls` stops the tool
-                    # being *offered*, but until it is spent the loop could iterate without
-                    # `n_env_steps` ever moving. The supervisor's episode budget is now
-                    # counted the same way (`Supervisor` legs charge every recorded step),
-                    # and the two must agree or the leg and the episode disagree about what
-                    # a step is.
-                    n_env_steps += 1
-                    consecutive_invalid = 0
-                    # The rest of a committed plan was written without the answer this tool
-                    # just returned, so it is re-planned rather than run on.
-                    aborted = True
-                    break
 
             action_class, action_kwargs = self._env.string_to_high_level_action(action_str)
             if action_class is None:
@@ -289,11 +224,11 @@ You are playing a GameBoy game. The current screen is shown in the image.
             if self._last_terminated:
                 self._finish_decision(steps)
                 self.report.termination_reason = "terminated"
-                return 1, n_env_steps, consecutive_invalid, error_message, tool_call_message
+                return 1, n_env_steps, consecutive_invalid, error_message
             if self._last_truncated:
                 self._finish_decision(steps)
                 self.report.termination_reason = "truncated"
-                return 2, n_env_steps, consecutive_invalid, error_message, tool_call_message
+                return 2, n_env_steps, consecutive_invalid, error_message
 
             # A failed action ends the decision: the rest of a committed plan was written
             # on the assumption that this one worked. Low-level actions report success=0
@@ -310,7 +245,7 @@ You are playing a GameBoy game. The current screen is shown in the image.
 
         if consecutive_invalid >= MAX_CONSECUTIVE_INVALID:
             self.report.termination_reason = "max_invalid"
-            return -1, n_env_steps, consecutive_invalid, error_message, tool_call_message
+            return -1, n_env_steps, consecutive_invalid, error_message
 
         # The completion check runs at a decision boundary, and only when the decision ran
         # to the end. One rule, two cadences: a single-action policy is checked after every
@@ -320,9 +255,9 @@ You are playing a GameBoy game. The current screen is shown in the image.
         if records and not aborted:
             outcome = self._maybe_self_terminate(records[-1], n_env_steps)
             if outcome is not None:
-                return outcome, n_env_steps, consecutive_invalid, error_message, tool_call_message
+                return outcome, n_env_steps, consecutive_invalid, error_message
 
-        return None, n_env_steps, consecutive_invalid, error_message, tool_call_message
+        return None, n_env_steps, consecutive_invalid, error_message
 
     def _finish_decision(self, steps: List[StepRecord]) -> None:
         """Show the history policy everything this decision did, once.

@@ -141,10 +141,6 @@ class ExecutorVLM(NamedVLM):
     NAME = "executor"
 
 
-class OCRVLM(NamedVLM):
-    NAME = "ocr"
-
-
 class ObjectDetectionVLM(NamedVLM):
     NAME = "object_detection"
 
@@ -221,10 +217,11 @@ def merge_ocr_strings(strings, min_overlap=3):
 
 def ocr(
     images: List[np.ndarray],
+    vlm: VLM,
     *,
-    vlm: VLM = None,
     text_prompt=None,
     do_merge: bool = True,
+    max_new_tokens: int = 4000,
     parameters: dict = None,
 ) -> List[str]:
     """
@@ -232,9 +229,10 @@ def ocr(
 
     Args:
         images: List of images in numpy array format (H x W x C)
-        vlm: The VLM instance to use. If None, uses the default ExecutorVLM.
+        vlm: The VLM instance to use. Required.
         text_prompt: The prompt to use for the OCR model.
         do_merge: Whether to merge similar OCR results. Use this if images are sequential frames from a game.
+        max_new_tokens: Token budget per image. Kept high because reasoning models spend tokens before answering.
         parameters: Optional dictionary of parameters. If None, loads project parameters.
     Returns:
         List of extracted text strings. May contain duplicates if images have frames containing the same text.
@@ -242,11 +240,11 @@ def ocr(
     parameters = load_parameters(parameters)
     if text_prompt is None:
         text_prompt = "If there is no text in the image, just say NONE. Otherwise, perform OCR and state the text in this image:"
-    max_new_tokens = parameters["ocr_max_new_tokens"]
-    texts = [text_prompt] * len(images)
     if vlm is None:
-        vlm = OCRVLM(parameters=parameters)
-    ocred = vlm.infer(texts=texts, images=images, max_new_tokens=max_new_tokens)["output"]
+        log_error("ocr() needs a vlm to be passed in.", parameters)
+    texts = [text_prompt] * len(images)
+    ocred = vlm.infer(texts=texts, images=[[image] for image in images], max_new_tokens=max_new_tokens)["output"]
+    ocred = [text.rsplit("Response:", 1)[1] if "Response:" in text else text for text in ocred]
     for i, res in enumerate(ocred):
         if res.strip().lower() == "none":
             log_warn(

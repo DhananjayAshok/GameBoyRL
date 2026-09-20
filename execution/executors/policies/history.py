@@ -8,8 +8,7 @@ from typing import Callable, List, Optional, Protocol
 
 from gameboy_worlds.interface.action import LowLevelAction
 
-from execution.report import (EnvironmentStepRecord, ExecutorToolCallRecord,
-                              StepRecord, tool_call_string)
+from execution.report import EnvironmentStepRecord, StepRecord
 
 #: Recent steps rendered into the prompt. Applies to every policy that keeps a list: a
 #: visual description is much longer per entry than an action name, so an untruncated
@@ -27,7 +26,7 @@ class HistoryPolicy(Protocol):
         """Forget everything. Called once before the loop starts."""
 
     def observe(self, steps: List[StepRecord]) -> None:
-        """Fold in the environment steps and tool calls one decision produced, in order."""
+        """Fold in the environment steps one decision produced, in order."""
 
     def render(self) -> str:
         """The block to splice into ``[CONTEXT_SECTION]``, or ``""`` for nothing.
@@ -57,8 +56,6 @@ class NoHistoryPolicy:
 def _action_line(record: StepRecord) -> str:
     """One past action, tagged with whether it did anything.
     """
-    if isinstance(record, ExecutorToolCallRecord):
-        return f"  {tool_call_string(record)} -> {record.result}"
     action_str = record.action_class.get_action_name(**record.kwargs)
     changed = record.frame_changed
     if issubclass(record.action_class, LowLevelAction):
@@ -135,14 +132,10 @@ In one short sentence, say what changed between the two screens as a result of t
             return
 
         # (action string, description) with description None for the entries still waiting
-        # on a frame diff. Built in step order so a tool call keeps its place in the
-        # sequence even though it does not go out to the VLM.
+        # on a frame diff.
         pending: List[list] = []
         prompts, images = [], []
         for record in steps:
-            if isinstance(record, ExecutorToolCallRecord):
-                pending.append([tool_call_string(record), str(record.result)])
-                continue
             # frame_after is the screen the *next* step starts from, so a pair is always
             # (before, after) of one action rather than two consecutive observations.
             if (self._call is None or record.frame_before is None

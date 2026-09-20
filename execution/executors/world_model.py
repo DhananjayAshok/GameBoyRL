@@ -83,9 +83,6 @@ class WorldModelExecutor(PolicyExecutor):
     #: means the benchmark game's own checkpoint. Set by the same factory.
     WORLD_MODEL_GAME: Optional[str] = None
 
-    #: A tool call produces no predicted frame, so it cannot appear among the choices.
-    available_tools: list = []
-
     DONE_CHECK_REASONING_LABEL = (
         "The reason given for choosing that predicted outcome was:"
     )
@@ -109,7 +106,7 @@ Reasoning: <your reasoning>
 Choice: <the image number you pick>
 [STOP]"""
 
-    def __init__(self, env, task, max_steps, max_tool_calls,
+    def __init__(self, env, task, max_steps,
                  observation_embedder_run_name: Optional[str] = None,
                  **kwargs):
         # Everything here must be set before super().__init__(), which runs the whole
@@ -121,7 +118,7 @@ Choice: <the image number you pick>
         self._game_for_paths = self.WORLD_MODEL_GAME or kwargs.get("game", "")
         self._frames: deque = _FRAME_STACKS.setdefault(env, deque(maxlen=FRAME_STACK))
         self._load_world_model(kwargs.get("parameters"))
-        super().__init__(env, task, max_steps, max_tool_calls, **kwargs)
+        super().__init__(env, task, max_steps, **kwargs)
 
     def _load_world_model(self, parameters) -> None:
         if not self._world_model_run_name:

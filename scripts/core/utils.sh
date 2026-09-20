@@ -298,7 +298,6 @@ declare -A ATTEMPT_TASKS_DEFAULTS
 populate_dict VLM_DEFAULTS ATTEMPT_TASKS_DEFAULTS
 ATTEMPT_TASKS_DEFAULTS["executor"]="single_actions"
 ATTEMPT_TASKS_DEFAULTS["max_steps"]=50
-ATTEMPT_TASKS_DEFAULTS["max_tool_calls"]=10
 ATTEMPT_TASKS_DEFAULTS["lookback"]=8
 ATTEMPT_TASKS_DEFAULTS["controller_variant"]="low_level"
 ATTEMPT_TASKS_DEFAULTS["max_attempts"]=5
@@ -340,11 +339,10 @@ PRACTICE_TASKS_ESSENTIALS=("guidance_path")
 populate_array VLM_ESSENTIALS PRACTICE_TASKS_ESSENTIALS
 declare -A PRACTICE_TASKS_DEFAULTS
 populate_dict VLM_DEFAULTS PRACTICE_TASKS_DEFAULTS
-PRACTICE_TASKS_DEFAULTS["n_attempts"]=3
+PRACTICE_TASKS_DEFAULTS["n_attempts"]=5
 PRACTICE_TASKS_DEFAULTS["max_total_practice_runs"]=4000
 PRACTICE_TASKS_DEFAULTS["n_random_actions"]=5
 PRACTICE_TASKS_DEFAULTS["max_steps"]=50
-PRACTICE_TASKS_DEFAULTS["max_tool_calls"]=10
 PRACTICE_TASKS_DEFAULTS["lookback"]=8
 PRACTICE_TASKS_DEFAULTS["executor"]="single_actions"
 PRACTICE_TASKS_DEFAULTS["controller_variant"]="low_level"
@@ -696,7 +694,6 @@ declare -A RUN_BENCHMARK_DEFAULTS=(
     ["supervisor_max_new_tokens"]=5000
     ["save_video"]=true
     ["max_steps"]=175
-    ["max_tool_calls"]=0
     ["n_tasks"]=none
     ["verbose"]=false
     ["regenerate"]=false

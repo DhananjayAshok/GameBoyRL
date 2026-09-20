@@ -34,7 +34,6 @@ CLI options
   --n_attempts        Number of independent attempts per task (default: 3)
   --n_random_actions  Random env steps before each attempt (default: 5)
   --max_steps         Env-step budget per attempt (default: 50)
-  --max_tool_calls    Tool-call budget per attempt (default: 10)
   --lookback          Frames passed to checker VLM (default: 8)
   --executor          Executor class short name (default: single_actions)
   --controller_variant  (default: low_level)
@@ -159,7 +158,6 @@ def _practice_episode(
     executor_class,
     max_steps: int,
     n_random_actions: int,
-    max_tool_calls: int,
     lookback: int,
     controller_variant: str,
     checker_max_new_tokens: int,
@@ -215,7 +213,6 @@ def _practice_episode(
                 env=env,
                 game=game,
                 max_steps=max_steps,
-                max_tool_calls=max_tool_calls,
                 evaluation_lookback=lookback,
                 allow_self_termination=False,
                 hint=hint,
@@ -332,12 +329,6 @@ def _practice_episode(
     help="Env-step budget per attempt.",
 )
 @click.option(
-    "--max_tool_calls",
-    default=10,
-    show_default=True,
-    help="Tool-call budget per attempt.",
-)
-@click.option(
     "--lookback",
     default=8,
     show_default=True,
@@ -377,7 +368,6 @@ def practice_tasks_cmd(
     max_total_practice_runs,
     n_random_actions,
     max_steps,
-    max_tool_calls,
     lookback,
     executor_name,
     controller_variant,
@@ -470,7 +460,6 @@ def practice_tasks_cmd(
         "max_total_practice_runs": max_total_practice_runs,
         "n_random_actions": n_random_actions,
         "max_steps": max_steps,
-        "max_tool_calls": max_tool_calls,
         "lookback": lookback,
         "checker_max_new_tokens": checker_max_new_tokens,
         "max_new_tokens": max_new_tokens,
@@ -499,7 +488,6 @@ def practice_tasks_cmd(
                 executor_class,
                 max_steps,
                 n_random_actions,
-                max_tool_calls,
                 lookback,
                 controller_variant,
                 checker_max_new_tokens,

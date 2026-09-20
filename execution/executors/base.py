@@ -9,10 +9,9 @@ from typing import Any, Dict, Optional, Type
 
 from gameboy_worlds.interface import Environment, HighLevelAction
 
-from execution.executor_action import ExecutorAction
 from execution.report import (ACTION_TAGS, EnvironmentStepRecord, ExecutorReport,
-                              InvalidStepRecord, ExecutorToolCallRecord,
-                              ExecutorVLMCallRecord, parse_completion,
+                              InvalidStepRecord, ExecutorVLMCallRecord, LogRecord,
+                              ScriptedActionRecord, parse_completion,
                               per_prompt_token_counts)
 from utils import load_parameters, log_error, log_info, log_warn, ExecutorVLM, parse_key_value
 
@@ -37,8 +36,6 @@ class Executor(ABC):
     :type task: str
     :param max_steps: Maximum number of high-level environment steps allowed.
     :type max_steps: int
-    :param max_tool_calls: Maximum number of passive tool calls allowed.
-    :type max_tool_calls: int
     :param parameters: Optional parameter overrides forwarded to
         :func:`~utils.parameter_handling.load_parameters`.
     :type parameters: Optional[dict]
@@ -52,12 +49,7 @@ class Executor(ABC):
     :param kwargs: Additional subclass-specific keyword arguments.  These are
         recorded verbatim in :attr:`report.init_kwargs` but are otherwise
         ignored by the base class.
-
-    .. attribute:: available_tools
-        :type: List[Type[ExecutorAction]]
     """
-
-    available_tools: list = []
 
     DONE_CHECK_PROMPT = """
 Task: [TASK][HINT_BLOCK]
@@ -93,7 +85,6 @@ Reasoning: <why, referring to what is visible in image 2>
         env: Environment,
         task: str,
         max_steps: int,
-        max_tool_calls: int,
         game: str = "",
         parameters: Optional[dict] = None,
         vlm_model: Optional[str] = None,
@@ -113,7 +104,6 @@ Reasoning: <why, referring to what is visible in image 2>
         self._hint = hint
         self._game = game
         self._max_steps = max_steps
-        self._max_tool_calls = max_tool_calls
         self._allow_self_termination = allow_self_termination
         if vlm_model is not None:
             self._parameters["executor_vlm_model"] = vlm_model
@@ -122,12 +112,10 @@ Reasoning: <why, referring to what is visible in image 2>
         self._vlm = ExecutorVLM(parameters=self._parameters)
         self._max_new_tokens = self._parameters.get("executor_vlm_max_new_tokens", 512)
         self._last_frame_changed = True
-        self._n_tool_calls = 0
         self._last_reasoning: Optional[str] = None
-        self._current_call: Optional[ExecutorVLMCallRecord] = None
+        self._current_call: Optional[LogRecord] = None
 
-        self.report = self._make_report(task, self._run_config(kwargs), max_steps,
-                                        max_tool_calls)
+        self.report = self._make_report(task, self._run_config(kwargs), max_steps)
 
         outcome = self._execute()
 
@@ -152,7 +140,6 @@ Reasoning: <why, referring to what is visible in image 2>
         task: str,
         init_kwargs: dict,
         max_steps: int,
-        max_tool_calls: int,
     ) -> ExecutorReport:
         """
         Factory for the report object. 
@@ -163,7 +150,6 @@ Reasoning: <why, referring to what is visible in image 2>
             game=self._game,
             init_kwargs=init_kwargs,
             max_steps=max_steps,
-            max_tool_calls=max_tool_calls,
             initial_state=self._get_state(),
         )
 
@@ -173,9 +159,8 @@ Reasoning: <why, referring to what is visible in image 2>
         Run the executor's game loop.
 
         Called automatically by :meth:`__init__`.  Has access to
-        ``self._max_steps`` and ``self._max_tool_calls`` via instance
-        attributes, and should use :meth:`_take_action` and :meth:`_use_tool`
-        to interact with the environment and passive tools respectively.
+        ``self._max_steps`` via an instance attribute, and should use
+        :meth:`_take_action` to interact with the environment.
 
         :return: Executor-defined integer outcome code stored in
             :attr:`report.outcome`.
@@ -208,8 +193,7 @@ Reasoning: <why, referring to what is visible in image 2>
         """
         File a step under the VLM call that caused it.
 
-        :param step: An :class:`~execution.report.EnvironmentStepRecord`,
-            :class:`~execution.report.ExecutorToolCallRecord` or
+        :param step: An :class:`~execution.report.EnvironmentStepRecord` or
             :class:`~execution.report.InvalidStepRecord`.
         """
         if self._current_call is None:
@@ -232,37 +216,6 @@ Reasoning: <why, referring to what is visible in image 2>
         log_warn(f"Invalid response recorded: \n{response}", parameters=self._parameters)
         if DEBUG_ON_INVALID:
             breakpoint()
-
-    def _use_tool(
-        self,
-        executor_action_class: Type[ExecutorAction],
-        **kwargs: Any,
-    ) -> ExecutorToolCallRecord:
-        """
-        Invoke a passive :class:`~execution.executor_action.ExecutorAction` and
-        record the result.
-
-        :param executor_action_class: The
-            :class:`~execution.executor_action.ExecutorAction` subclass to
-            invoke.
-        :type executor_action_class: Type[ExecutorAction]
-        :param kwargs: Additional keyword arguments forwarded to
-            :meth:`~execution.executor_action.ExecutorAction.execute`.
-        :return: The record of the tool call that was made.
-        :rtype: ExecutorToolCallRecord
-        """
-        action = executor_action_class()
-        result, success_code = action.execute(info=self._get_state(), **kwargs)
-
-        record = ExecutorToolCallRecord(
-            executor_action_class=executor_action_class,
-            kwargs=kwargs,
-            result=result,
-            success_code=success_code,
-        )
-        self._record_step(record)
-        self._n_tool_calls += 1
-        return record
 
     def _hint_block(self) -> str:
         if self._hint is None:
@@ -292,7 +245,7 @@ Reasoning: <why, referring to what is visible in image 2>
 
         Exactly **one** :class:`~execution.report.ExecutorVLMCallRecord` is appended per
         prompt, and — for a single-prompt call — it becomes :attr:`_current_call`.  Every
-        step recorded afterwards — :meth:`_take_action`, :meth:`_use_tool`,
+        step recorded afterwards — :meth:`_take_action`,
         :meth:`_record_invalid` — is filed under it, so a call owns precisely what it
         caused.  A later ``_vlm_call`` takes ownership from here on.
 
@@ -349,6 +302,12 @@ Reasoning: <why, referring to what is visible in image 2>
         self.report.vlm_call_log.append(record)
         self._current_call = record
         return result
+
+    def _begin_scripted(self, description: str) -> ScriptedActionRecord:
+        record = ScriptedActionRecord(description=description)
+        self.report.vlm_call_log.append(record)
+        self._current_call = record
+        return record
 
     def _batched_vlm_call(self, tag: str, **kwargs: Any) -> list:
         """
@@ -444,7 +403,7 @@ Reasoning: <why, referring to what is visible in image 2>
 
         One call, tagged ``"done_check"``, showing the frames either side of *record* along
         with the task, the hint, the action just taken, the reasoning that chose it and the
-        recent action history. Consumes no environment step and no tool budget.
+        recent action history. Consumes no environment step.
 
         :param record: The step record just appended by :meth:`_take_action`.
         :return: ``True`` only on an explicit ``Complete: yes``.

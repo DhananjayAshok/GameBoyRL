@@ -49,8 +49,9 @@ import pickle
 import click
 import pandas as pd
 
-from execution.report import (EnvironmentStepRecord, SupervisorVLMCallRecord,
-                              _step_summary, summarize_world_model)
+from execution.report import (ACTION_TAGS, EnvironmentStepRecord,
+                              SupervisorVLMCallRecord, _step_summary,
+                              summarize_world_model)
 from utils import log_error, log_info, log_warn, parse_action_line
 from benchmark_scripts.common import REPORT_FILENAME
 from debug_scripts import markdown as md
@@ -300,7 +301,7 @@ def _executor_call_blocks(call, index: int, frames_dir: str, report_dir: str,
 
     if decision:
         lines.append(md.para(decision.describe()))
-    else:
+    elif call.tag in ACTION_TAGS:
         action = parse_action_line(call.response)
         lines.append(md.para(f"parsed action: `{action if action else 'none'}`"))
 
