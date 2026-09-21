@@ -12,15 +12,21 @@ from typing import Any, Dict, List, Optional
 
 from utils import file_makedir
 
+#: The rungs every Pokemon title shares: eight badges in order, then the Elite Four.
+#:
+#: Deliberately unnamed. Naming the gyms, their badges or their towns would hand the agent
+#: the progression knowledge the benchmark exists to test it on discovering, and for a title
+#: set outside the region those names come from it would be wrong as well as unearned. The
+#: ordinal is the only part that is true of the series rather than of one game.
 BADGE_LADDER = [
-    "Earn the Boulder Badge from the Pewter City gym",
-    "Earn the Cascade Badge from the Cerulean City gym",
-    "Earn the Thunder Badge from the Vermilion City gym",
-    "Earn the Rainbow Badge from the Celadon City gym",
-    "Earn the Soul Badge from the Fuchsia City gym",
-    "Earn the Marsh Badge from the Saffron City gym",
-    "Earn the Volcano Badge from the Cinnabar Island gym",
-    "Earn the Earth Badge from the Viridian City gym",
+    "Earn the first gym badge",
+    "Earn the second gym badge",
+    "Earn the third gym badge",
+    "Earn the fourth gym badge",
+    "Earn the fifth gym badge",
+    "Earn the sixth gym badge",
+    "Earn the seventh gym badge",
+    "Earn the eighth gym badge",
     "Defeat the Elite Four",
 ]
 
@@ -63,15 +69,22 @@ class GoalTree:
     @classmethod
     def ladder(cls, texts: Optional[List[str]] = None) -> "GoalTree":
         tree = cls()
-        for text in (texts or BADGE_LADDER):
+        for text in texts or BADGE_LADDER:
             tree.add(text, parent_id=None, source="ladder")
         return tree
 
     # -- structure -------------------------------------------------------
 
-    def add(self, text: str, parent_id: Optional[int] = None, source: str = "discovered",
-            episode: Optional[int] = None) -> Goal:
-        goal = Goal(id=self._next_id, text=text.strip(), parent_id=parent_id, source=source)
+    def add(
+        self,
+        text: str,
+        parent_id: Optional[int] = None,
+        source: str = "discovered",
+        episode: Optional[int] = None,
+    ) -> Goal:
+        goal = Goal(
+            id=self._next_id, text=text.strip(), parent_id=parent_id, source=source
+        )
         if episode is not None:
             goal.episodes.append(episode)
         self._next_id += 1
@@ -97,7 +110,9 @@ class GoalTree:
     # -- the queue -------------------------------------------------------
 
     def current_ladder_goal(self) -> Optional[Goal]:
-        return next((goal for goal in self.roots() if goal.status in OPEN_STATUSES), None)
+        return next(
+            (goal for goal in self.roots() if goal.status in OPEN_STATUSES), None
+        )
 
     def next_goal(self) -> Optional[Goal]:
         ladder_goal = self.current_ladder_goal()
@@ -118,15 +133,24 @@ class GoalTree:
         ladder_goal = ladder_goal or self.current_ladder_goal()
         if ladder_goal is None:
             return []
-        return [goal for goal in self.descendants(ladder_goal.id) if goal.status in OPEN_STATUSES]
+        return [
+            goal
+            for goal in self.descendants(ladder_goal.id)
+            if goal.status in OPEN_STATUSES
+        ]
 
     def any_open(self) -> bool:
         return self.next_goal() is not None
 
     # -- mutation --------------------------------------------------------
 
-    def mark(self, goal_id: int, status: str, note: Optional[str] = None,
-             episode: Optional[int] = None) -> Optional[Goal]:
+    def mark(
+        self,
+        goal_id: int,
+        status: str,
+        note: Optional[str] = None,
+        episode: Optional[int] = None,
+    ) -> Optional[Goal]:
         goal = self.get(goal_id)
         if goal is None or status not in STATUSES:
             return None
@@ -142,7 +166,9 @@ class GoalTree:
         if goal is not None and episode not in goal.episodes:
             goal.episodes.append(episode)
 
-    def abandon_matching(self, text: str, reason: str = "", episode: Optional[int] = None) -> Optional[Goal]:
+    def abandon_matching(
+        self, text: str, reason: str = "", episode: Optional[int] = None
+    ) -> Optional[Goal]:
         wanted = _normalise(text)
         if not wanted:
             return None
@@ -177,7 +203,10 @@ class GoalTree:
     # -- persistence -----------------------------------------------------
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"next_id": self._next_id, "goals": [goal.to_dict() for goal in self.goals]}
+        return {
+            "next_id": self._next_id,
+            "goals": [goal.to_dict() for goal in self.goals],
+        }
 
     def save(self, path: str) -> str:
         file_makedir(path)
@@ -199,4 +228,6 @@ class GoalTree:
 
 
 def _normalise(text: str) -> str:
-    return " ".join("".join(c if c.isalnum() or c.isspace() else " " for c in text.lower()).split())
+    return " ".join(
+        "".join(c if c.isalnum() or c.isspace() else " " for c in text.lower()).split()
+    )

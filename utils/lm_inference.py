@@ -43,7 +43,7 @@ def parse_key_value(text: str, key: str) -> Optional[str]:
         return value or None
 
     text_lower = text.lower()
-    if text_lower.count("response:") == 1: # sometimes API models do this. 
+    if text_lower.count("response:") == 1:  # sometimes API models do this.
         idx = text_lower.index("response:") + len("response:")
         text = text[idx:].strip()
         text_lower = text.lower()
@@ -51,11 +51,11 @@ def parse_key_value(text: str, key: str) -> Optional[str]:
     for line, line_lower in zip(text.splitlines(), text_lower.splitlines()):
         idx = line_lower.find(marker)
         if idx != -1:
-            return clean(line[idx + len(marker):])
+            return clean(line[idx + len(marker) :])
 
     if text_lower.count(key_lower) == 1:
         idx = text_lower.index(key_lower)
-        rest_of_line = text[idx + len(key):].splitlines()
+        rest_of_line = text[idx + len(key) :].splitlines()
         return clean(rest_of_line[0]) if rest_of_line else None
 
     return None
@@ -81,7 +81,7 @@ def parse_yes_no(text: str, key: str) -> Optional[bool]:
 
 MIN_QUERIES_PER_MINUTE = 1
 
-# Placeholder per-model rate limits (queries per minute). 
+# Placeholder per-model rate limits (queries per minute).
 _RATE_LIMITS: dict[str, int] = {
     "gpt-4o-mini": 60,
     "gpt-4o": 60,
@@ -91,6 +91,9 @@ _RATE_LIMITS: dict[str, int] = {
     "claude-sonnet-4-6": 60,
     "claude-haiku-4-5-20251001": 60,
     "google/gemini-3.1-pro-preview": 60,
+    # Twice the default: Flash is the cheap, high-throughput arm, and at the 60 the
+    # fallback gives it the rate limiter rather than the model is what paces a run.
+    "google/gemini-3.6-flash": 200,
     "qwen/qwen3-vl-235b-a22b-instruct": 60,
     "google/gemma-4-31b-it": 1000,
 }
@@ -429,7 +432,7 @@ class InferenceModel(ABC):
         images: Union[list[Image.Image], list[list[Image.Image]]] = None,
     ) -> tuple[list[str], list[list[Image.Image]], bool]:
         """
-        Validates and standardizes the format of ``texts`` and ``images`` inputs as per do_infer's expectations. 
+        Validates and standardizes the format of ``texts`` and ``images`` inputs as per do_infer's expectations.
 
         :param texts: A single text prompt or a list of text prompts.
         :type texts: str or list[str]
@@ -501,7 +504,7 @@ class InferenceModel(ABC):
         temperature: Optional[float] = None,
         stop_strings: list[str] = None,
         num_return_sequences: int = 1,
-        batch_size: int = None
+        batch_size: int = None,
     ) -> dict[str, Any]:
         """
         Run inference on a batch of text prompts with associated images.
@@ -545,7 +548,9 @@ class InferenceModel(ABC):
         :rtype: dict[str, Any]
         """
         texts, images, passed_in_str = self._standardize_format(texts, images)
-        parameters = self.parameters if hasattr(self, "parameters") else load_parameters()
+        parameters = (
+            self.parameters if hasattr(self, "parameters") else load_parameters()
+        )
         if batch_size is None:
             from utils.huggingface_inference import HuggingFaceModel
 
@@ -667,8 +672,9 @@ class InferenceModel(ABC):
         )
         first_outputs = first_result["output"]
 
-
-        first_outputs_list = [first_outputs] if asked_for_single_sequence else first_outputs # always a doubly nested list. 
+        first_outputs_list = (
+            [first_outputs] if asked_for_single_sequence else first_outputs
+        )  # always a doubly nested list.
         next_batch_text = []
         next_batch_images = []
         next_batch_output_so_fars = []
@@ -680,8 +686,17 @@ class InferenceModel(ABC):
                     continue
                 output_so_far = output.split(switch_phrase)[0]
                 n_tokens_estimated = len(output_so_far.split())
-                largest_max_tokens = max(largest_max_tokens, max_new_tokens - n_tokens_estimated)
-                second_prompt = texts[og_batch_i] + "\nHere is what you said: " + output_so_far + "\n" + switch_phrase + " "
+                largest_max_tokens = max(
+                    largest_max_tokens, max_new_tokens - n_tokens_estimated
+                )
+                second_prompt = (
+                    texts[og_batch_i]
+                    + "\nHere is what you said: "
+                    + output_so_far
+                    + "\n"
+                    + switch_phrase
+                    + " "
+                )
                 next_batch_idx = len(next_batch_text)
                 next_batch_mapping[(og_batch_i, return_seq_i)] = next_batch_idx
                 next_batch_text.append(second_prompt)
@@ -700,7 +715,9 @@ class InferenceModel(ABC):
                 if passed_in_str:
                     output = [None for _ in range(num_return_sequences)]
                 else:
-                    output = [[None for _ in range(num_return_sequences)] for _ in texts]
+                    output = [
+                        [None for _ in range(num_return_sequences)] for _ in texts
+                    ]
             return {"output": output, "meta": meta}
         second_result = self.infer(
             next_batch_text,
@@ -712,20 +729,26 @@ class InferenceModel(ABC):
         )
         second_output = second_result["output"]
         for i, output in enumerate(second_output):
-            second_output[i] = next_batch_output_so_fars[i] + "\n" + switch_phrase + " " + output.lstrip(switch_phrase).lstrip()
-        
+            second_output[i] = (
+                next_batch_output_so_fars[i]
+                + "\n"
+                + switch_phrase
+                + " "
+                + output.lstrip(switch_phrase).lstrip()
+            )
+
         results = []
         for og_batch_i in range(len(first_outputs_list)):
             n_return_seqs = len(first_outputs_list[og_batch_i])
             batch_results = []
             for return_seq_i in range(n_return_seqs):
                 if (og_batch_i, return_seq_i) in next_batch_mapping:
-                    #breakpoint()
+                    # breakpoint()
                     target_i = next_batch_mapping[(og_batch_i, return_seq_i)]
                     batch_results.append(second_output[target_i])
                 else:
                     batch_results.append(None)
-            results.append(batch_results)                
+            results.append(batch_results)
         for i, result in enumerate(results):
             if passed_in_str:
                 results[i] = result[0]
@@ -830,7 +853,15 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         pass
 
     @abstractmethod
-    async def query_client(self, client: Any, messages: list[dict], max_new_tokens: int, temperature: Optional[float] = None, stop_strings: list[str] = None, num_return_sequences: int = 1) -> Any:
+    async def query_client(
+        self,
+        client: Any,
+        messages: list[dict],
+        max_new_tokens: int,
+        temperature: Optional[float] = None,
+        stop_strings: list[str] = None,
+        num_return_sequences: int = 1,
+    ) -> Any:
         """
         Send messages to the API client (asynchronously) and return the raw response.
 
@@ -850,7 +881,9 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         pass
 
     @abstractmethod
-    def get_output_texts(self, response: Any) -> tuple[list[str], list[tuple[Optional[int], Optional[int]]]]:
+    def get_output_texts(
+        self, response: Any
+    ) -> tuple[list[str], list[tuple[Optional[int], Optional[int]]]]:
         """
         Extract raw output text strings and token usage from a single model API response.
 
@@ -869,7 +902,9 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         """
         pass
 
-    def get_outputs(self, response: Any) -> tuple[list[str], list[tuple[Optional[int], Optional[int]]]]:
+    def get_outputs(
+        self, response: Any
+    ) -> tuple[list[str], list[tuple[Optional[int], Optional[int]]]]:
         """
         Extract and post-process all output texts from a single API response.
 
@@ -883,7 +918,9 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         texts, usages = self.get_output_texts(response)
         return [self.get_output_final(t) for t in texts], usages
 
-    def get_output(self, response: Any) -> tuple[str, tuple[Optional[int], Optional[int]]]:
+    def get_output(
+        self, response: Any
+    ) -> tuple[str, tuple[Optional[int], Optional[int]]]:
         """
         Extract and post-process the first output text from a single API response.
 
@@ -922,7 +959,15 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
                 f"(got temperature=None); otherwise all sequences would be identical.",
                 parameters=self.parameters,
             )
-        outputs, usages = asyncio.run(self._infer_messages_async(messages, max_new_tokens, temperature, stop_strings, num_return_sequences))
+        outputs, usages = asyncio.run(
+            self._infer_messages_async(
+                messages,
+                max_new_tokens,
+                temperature,
+                stop_strings,
+                num_return_sequences,
+            )
+        )
         meta = _collapse_meta(self._build_meta(usages=[usages]))
         if num_return_sequences == 1:
             return {"output": outputs[0], "meta": meta}
@@ -947,7 +992,14 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         async with self._make_async_client() as client:
             self.wait()
             if self.SUPPORTS_NATIVE_N:
-                response = await self.query_client(client, messages, max_new_tokens, temperature=temperature, stop_strings=stop_strings, num_return_sequences=num_return_sequences)
+                response = await self.query_client(
+                    client,
+                    messages,
+                    max_new_tokens,
+                    temperature=temperature,
+                    stop_strings=stop_strings,
+                    num_return_sequences=num_return_sequences,
+                )
                 outputs, usages = self.get_outputs(response)
                 if len(outputs) != num_return_sequences:
                     log_error(
@@ -961,11 +1013,24 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
                     )
                 return outputs, usages
             else:
-                async def query_one() -> tuple[str, tuple[Optional[int], Optional[int]]]:
-                    response = await self.query_client(client, messages, max_new_tokens, temperature=temperature, stop_strings=stop_strings)
+
+                async def query_one() -> (
+                    tuple[str, tuple[Optional[int], Optional[int]]]
+                ):
+                    response = await self.query_client(
+                        client,
+                        messages,
+                        max_new_tokens,
+                        temperature=temperature,
+                        stop_strings=stop_strings,
+                    )
                     return self.get_output(response)
 
-                return list(await asyncio.gather(*(query_one() for _ in range(num_return_sequences))))
+                return list(
+                    await asyncio.gather(
+                        *(query_one() for _ in range(num_return_sequences))
+                    )
+                )
 
     def do_infer(
         self,
@@ -1016,7 +1081,11 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
                 parameters=self.parameters,
             )
 
-        outputs, usages = asyncio.run(self._do_infer_async(inputs, max_new_tokens, temperature, stop_strings, num_return_sequences))
+        outputs, usages = asyncio.run(
+            self._do_infer_async(
+                inputs, max_new_tokens, temperature, stop_strings, num_return_sequences
+            )
+        )
         return {"output": outputs, "meta": self._build_meta(usages=usages)}
 
     async def _do_infer_async(
@@ -1039,9 +1108,17 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         async with self._make_async_client() as client:
             self.wait()
             if self.SUPPORTS_NATIVE_N:
-                async def query_one(input_message: dict) -> tuple[list[str], list[tuple[Optional[int], Optional[int]]]]:
+
+                async def query_one(
+                    input_message: dict,
+                ) -> tuple[list[str], list[tuple[Optional[int], Optional[int]]]]:
                     response = await self.query_client(
-                        client, [input_message], max_new_tokens, temperature=temperature, stop_strings=stop_strings, num_return_sequences=num_return_sequences
+                        client,
+                        [input_message],
+                        max_new_tokens,
+                        temperature=temperature,
+                        stop_strings=stop_strings,
+                        num_return_sequences=num_return_sequences,
                     )
                     seq_outputs, seq_usages = self.get_outputs(response)
                     if len(seq_outputs) != num_return_sequences:
@@ -1056,16 +1133,45 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
                         )
                     return seq_outputs, seq_usages
 
-                pairs = await asyncio.gather(*(query_one(input_message) for input_message in inputs))
+                pairs = await asyncio.gather(
+                    *(query_one(input_message) for input_message in inputs)
+                )
                 return [pair[0] for pair in pairs], [pair[1] for pair in pairs]
             else:
-                async def query_one(input_message: dict) -> tuple[str, tuple[Optional[int], Optional[int]]]:
-                    response = await self.query_client(client, [input_message], max_new_tokens, temperature=temperature, stop_strings=stop_strings)
+
+                async def query_one(
+                    input_message: dict,
+                ) -> tuple[str, tuple[Optional[int], Optional[int]]]:
+                    response = await self.query_client(
+                        client,
+                        [input_message],
+                        max_new_tokens,
+                        temperature=temperature,
+                        stop_strings=stop_strings,
+                    )
                     return self.get_output(response)
 
-                flat = await asyncio.gather(*(query_one(input_message) for input_message in inputs for _ in range(num_return_sequences)))
-                outputs = [[flat[i * num_return_sequences + j][0] for j in range(num_return_sequences)] for i in range(len(inputs))]
-                usages = [[flat[i * num_return_sequences + j][1] for j in range(num_return_sequences)] for i in range(len(inputs))]
+                flat = await asyncio.gather(
+                    *(
+                        query_one(input_message)
+                        for input_message in inputs
+                        for _ in range(num_return_sequences)
+                    )
+                )
+                outputs = [
+                    [
+                        flat[i * num_return_sequences + j][0]
+                        for j in range(num_return_sequences)
+                    ]
+                    for i in range(len(inputs))
+                ]
+                usages = [
+                    [
+                        flat[i * num_return_sequences + j][1]
+                        for j in range(num_return_sequences)
+                    ]
+                    for i in range(len(inputs))
+                ]
                 return outputs, usages
 
 
@@ -1123,7 +1229,15 @@ class OpenAIAPIModel(OpenAICompatibleAPIBase, APIModel):
             "image_url": {"url": f"data:image/jpeg;base64,{image}"},
         }
 
-    async def query_client(self, client: Any, messages: list[dict], max_new_tokens: int, temperature: Optional[float] = None, stop_strings: list[str] = None, num_return_sequences: int = 1) -> Any:
+    async def query_client(
+        self,
+        client: Any,
+        messages: list[dict],
+        max_new_tokens: int,
+        temperature: Optional[float] = None,
+        stop_strings: list[str] = None,
+        num_return_sequences: int = 1,
+    ) -> Any:
         """
         Send a message to the OpenAI chat completions endpoint (asynchronously).
 
@@ -1141,7 +1255,13 @@ class OpenAIAPIModel(OpenAICompatibleAPIBase, APIModel):
         :rtype: Any
         """
         final_stop = list(dict.fromkeys(["[STOP]"] + (stop_strings or [])))
-        kwargs = dict(model=self.model, messages=messages, max_tokens=max_new_tokens, stop=final_stop, n=num_return_sequences)
+        kwargs = dict(
+            model=self.model,
+            messages=messages,
+            max_tokens=max_new_tokens,
+            stop=final_stop,
+            n=num_return_sequences,
+        )
         if temperature is not None:
             kwargs["temperature"] = temperature
         max_tries = 5
@@ -1150,25 +1270,37 @@ class OpenAIAPIModel(OpenAICompatibleAPIBase, APIModel):
             try:
                 response = await client.chat.completions.create(**kwargs)
                 if response is None or not getattr(response, "choices", None):
-                    raise ValueError(f"API returned an invalid response (None/missing/empty choices): {response}")
+                    raise ValueError(
+                        f"API returned an invalid response (None/missing/empty choices): {response}"
+                    )
                 return response
             except Exception as e:
                 last_error = e
-                log_warn(f"OpenAI API call failed on attempt {attempt+1}/{max_tries} with error: {e}")
+                log_warn(
+                    f"OpenAI API call failed on attempt {attempt+1}/{max_tries} with error: {e}"
+                )
                 if attempt < max_tries - 1:
                     # exponential backoff with time_to_wait between attempts, plus jitter so
                     # concurrent coroutines retrying after the same failure don't all collide
-                    backoff_time = self.seconds_to_wait * (2 ** attempt) * random.uniform(1.0, 1.5)
+                    backoff_time = (
+                        self.seconds_to_wait * (2**attempt) * random.uniform(1.0, 1.5)
+                    )
                     if backoff_time < 0:
                         # Unmetered endpoints (vLLM) carry a negative seconds_to_wait, so
                         # there is no backoff to report — the retry is immediate.
                         log_info("Got connection error with vLLM, trying again.")
                     else:
-                        log_info(f"Waiting for {backoff_time:.2f} seconds before retrying...")
+                        log_info(
+                            f"Waiting for {backoff_time:.2f} seconds before retrying..."
+                        )
                     await asyncio.sleep(backoff_time)
-        raise RuntimeError(f"OpenAI API call failed after {max_tries} attempts. Last error: {last_error}") from last_error
+        raise RuntimeError(
+            f"OpenAI API call failed after {max_tries} attempts. Last error: {last_error}"
+        ) from last_error
 
-    def get_output_texts(self, response: Any) -> tuple[list[str], list[tuple[Optional[int], Optional[int]]]]:
+    def get_output_texts(
+        self, response: Any
+    ) -> tuple[list[str], list[tuple[Optional[int], Optional[int]]]]:
         """
         Extract output text strings and token usage from an OpenAI API response.
 
@@ -1208,10 +1340,12 @@ class OpenAIAPIModel(OpenAICompatibleAPIBase, APIModel):
             else:
                 # Already counted on choice 0; None stays None so a genuinely missing
                 # count is never mistaken for a zero contribution.
-                usages.append((
-                    None if input_tokens is None else 0,
-                    None if output_tokens is None else 0,
-                ))
+                usages.append(
+                    (
+                        None if input_tokens is None else 0,
+                        None if output_tokens is None else 0,
+                    )
+                )
         return texts, usages
 
 
@@ -1302,7 +1436,15 @@ class AnthropicModel(APIModel):
             },
         }
 
-    async def query_client(self, client: Any, messages: list[dict], max_new_tokens: int, temperature: Optional[float] = None, stop_strings: list[str] = None, num_return_sequences: int = 1) -> Any:
+    async def query_client(
+        self,
+        client: Any,
+        messages: list[dict],
+        max_new_tokens: int,
+        temperature: Optional[float] = None,
+        stop_strings: list[str] = None,
+        num_return_sequences: int = 1,
+    ) -> Any:
         """
         Send a message to the Anthropic messages endpoint (asynchronously).
 
@@ -1322,27 +1464,41 @@ class AnthropicModel(APIModel):
         kwargs = dict(model=self.model, messages=messages, max_tokens=max_new_tokens)
         if temperature is not None:
             kwargs["temperature"] = temperature
-        kwargs["stop_sequences"] = list(dict.fromkeys(["[STOP]"] + (stop_strings or [])))
+        kwargs["stop_sequences"] = list(
+            dict.fromkeys(["[STOP]"] + (stop_strings or []))
+        )
         max_tries = 5
         last_error = None
         for attempt in range(max_tries):
             try:
                 response = await client.messages.create(**kwargs)
                 if response is None or not getattr(response, "content", None):
-                    raise ValueError(f"API returned an invalid response (None/missing/empty content): {response}")
+                    raise ValueError(
+                        f"API returned an invalid response (None/missing/empty content): {response}"
+                    )
                 return response
             except Exception as e:
                 last_error = e
-                log_warn(f"Anthropic API call failed on attempt {attempt+1}/{max_tries} with error: {e}")
+                log_warn(
+                    f"Anthropic API call failed on attempt {attempt+1}/{max_tries} with error: {e}"
+                )
                 if attempt < max_tries - 1:
                     # exponential backoff with time_to_wait between attempts, plus jitter so
                     # concurrent coroutines retrying after the same failure don't all collide
-                    backoff_time = self.seconds_to_wait * (2 ** attempt) * random.uniform(1.0, 1.5)
-                    log_info(f"Waiting for {backoff_time:.2f} seconds before retrying...")
+                    backoff_time = (
+                        self.seconds_to_wait * (2**attempt) * random.uniform(1.0, 1.5)
+                    )
+                    log_info(
+                        f"Waiting for {backoff_time:.2f} seconds before retrying..."
+                    )
                     await asyncio.sleep(backoff_time)
-        raise RuntimeError(f"Anthropic API call failed after {max_tries} attempts. Last error: {last_error}") from last_error
+        raise RuntimeError(
+            f"Anthropic API call failed after {max_tries} attempts. Last error: {last_error}"
+        ) from last_error
 
-    def get_output_texts(self, response: Any) -> tuple[list[str], list[tuple[Optional[int], Optional[int]]]]:
+    def get_output_texts(
+        self, response: Any
+    ) -> tuple[list[str], list[tuple[Optional[int], Optional[int]]]]:
         """
         Extract the output text string and token usage from an Anthropic API response.
 

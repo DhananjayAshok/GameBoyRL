@@ -422,8 +422,14 @@ class ExecutorReport:
 
     @property
     def world_model_decisions(self) -> List[WorldModelDecision]:
-        """Every world-model decision in this run, in order. Empty for other executors."""
-        return [call.world_model for call in self.vlm_call_log if call.world_model is not None]
+        """Every world-model decision in this run, in order. Empty for other executors.
+
+        ``vlm_call_log`` holds more than one record type -- a ``ScriptedActionRecord`` has
+        no ``world_model`` field at all -- so this reads the attribute defensively rather
+        than assuming every entry is an :class:`ExecutorVLMCallRecord`.
+        """
+        decisions = (getattr(call, "world_model", None) for call in self.vlm_call_log)
+        return [decision for decision in decisions if decision is not None]
 
     def __str__(self) -> str:
         """
@@ -459,8 +465,11 @@ class ExecutorReport:
                     lines.append(f"  │ → INVALID  ({step.reason})")
                 else:
                     lines.append(f"  │ → {_step_summary(step)}")
-            if entry.world_model is not None:
-                lines.append(f"  │ → {entry.world_model.describe()}")
+            # Only an ExecutorVLMCallRecord carries a world-model decision; a
+            # ScriptedActionRecord in the same log has no such field.
+            decision = getattr(entry, "world_model", None)
+            if decision is not None:
+                lines.append(f"  │ → {decision.describe()}")
 
             if entry.tag in ACTION_TAGS and not entry.steps:
                 # An action call is expected to produce something. Nothing at all means

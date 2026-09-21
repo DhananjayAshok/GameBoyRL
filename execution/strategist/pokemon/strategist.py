@@ -13,6 +13,7 @@ import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
+from tqdm import tqdm
 
 from execution.perception.pokemon.tiles import TileRecognizer, verbalize_tiles
 from execution.pokemon.supervisors import PokemonPlayThroughSupervisor
@@ -70,14 +71,14 @@ def parse_kinded(items: List[str]) -> List[Tuple[str, Optional[str]]]:
 
 
 #: A subgoal that only says where the player should be. Synthesis emits these readily
-#: ("The player is in Pewter City"), and because :meth:`GoalTree.next_goal` serves the
+#: ("The player is in the next town"), and because :meth:`GoalTree.next_goal` serves the
 #: deepest open leaf, one of them outranks the ladder rung it hangs off and stops that rung
 #: from ever being dispatched. Walking somewhere is already implied by the goal, so these
 #: buy nothing and cost the goal. The prompt says not to write them; this is the backstop.
 #:
 #: Deliberately narrow. A false positive silently deletes a real piece of strategy, so this
 #: fires only on a bare positional statement whose object is recognisably a place -- never
-#: on possession ("the player has the Boulder Badge"), and never on a compound subgoal.
+#: on possession ("the player has the first gym badge"), and never on a compound subgoal.
 POSITION_STATEMENT = re.compile(
     r"^(?:the\s+player\s+|you\s+)?"
     r"(?:is|are|be|arrives?|arrived|reach(?:es|ed)?|travels?|walks?|goes?|went|"
@@ -152,6 +153,7 @@ class PokemonStrategist:
         #: of that name and bind to the strategist instead of being forwarded.
         self._supervisor_max_new_tokens = supervisor_max_new_tokens
         self._persist = persist
+        self._resume = resume
         self._on_episode_complete = on_episode_complete
         self._parameters = load_parameters(parameters)
         self._supervisor_kwargs = supervisor_kwargs
@@ -162,8 +164,11 @@ class PokemonStrategist:
         self.goals = (GoalTree.load(self._path(GOALS_FILE)) if resume else None) or GoalTree.ladder(ladder)
         self.location = (LocationTracker.load(self._path(LOCATION_FILE)) if resume else None) or LocationTracker()
 
+        #: Loaded under the same rule as the three stores above: --fresh starts the tile
+        #: database over too, rather than reading one built by a previous playthrough.
         self.tiles = TileRecognizer(name=name, game=game, parameters=self._parameters)
-        self.tiles.load(missing_ok=True)
+        if resume:
+            self.tiles.load(missing_ok=True)
 
         self._identified: Optional[Dict[Any, Any]] = None
         self._screen_tiles: Optional[str] = None
@@ -197,7 +202,7 @@ class PokemonStrategist:
             "knowledge_limit": self.KNOWLEDGE_LIMIT,
             "storage": self._dir,
             "episode_offset": self._episode_offset,
-            "resume": True,
+            "resume": self._resume,
             "supervisor_kwargs": dict(self._supervisor_kwargs),
         }
 
@@ -440,19 +445,34 @@ class PokemonStrategist:
                       "report accumulates, so this would merge two runs into one record.",
                       self._parameters)
         self._ran = True
+        # Bounded by max_episodes, which is the only stop reason that can be counted
+        # ahead of time; the ladder or the environment ending the run early just leaves
+        # the bar short of its total.
+        progress = tqdm(total=self._max_episodes, desc="episodes", unit="ep")
         try:
             while True:
                 stop = self._stop_reason()
                 if stop is not None:
                     self.report.stop_reason = stop
+                    progress.set_postfix_str(f"stopped: {stop}")
                     break
                 self._episodes_run += 1
-                self._run_episode(self._episodes_run + self._episode_offset)
+                record = self._run_episode(self._episodes_run + self._episode_offset)
+                progress.update(1)
+                progress.set_postfix_str(self._progress_line(record))
         finally:
+            progress.close()
             self.report.final_knowledge = self.knowledge.to_list()
             self.report.locations = list(self.location.names)
             self.save()
         return self.report
+
+    def _progress_line(self, record: EpisodeRecord) -> str:
+        """What the bar shows after each episode: ladder position, where, how it went."""
+        roots = self.goals.roots()
+        done = sum(1 for goal in roots if goal.status == "done")
+        return (f"rung {done}/{len(roots)}, at {record.location_after or '?'}, "
+                f"{record.status}, {len(self.knowledge)} facts")
 
     def _run_episode(self, n: int) -> EpisodeRecord:
         goal = self.goals.next_goal()

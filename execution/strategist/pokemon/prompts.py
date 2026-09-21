@@ -25,7 +25,7 @@ That goal sits under: [GOAL_PATH]
 The image is the current game screen. Here is what has been recognised on it:
 [SCREEN_TILES]
 
-Write one task for the player. The player is competent but has no memory of anything before this moment, gets roughly [MAX_STEPS] actions, and can only walk, talk to people, use menus and fight battles. So the task must be something reachable from this screen in that budget: "walk into the Pokemon Center and heal your team", not "beat the Pewter gym". If the goal is already small enough to do from here, the task can be the goal itself.
+Write one task for the player. The player is competent but has no memory of anything before this moment, gets roughly [MAX_STEPS] actions, and can only walk, talk to people, use menus and fight battles. So the task must be something reachable from this screen in that budget: "walk into the Pokemon Center and heal your team", not "beat the next gym". If the goal is already small enough to do from here, the task can be the goal itself.
 
 Then write the guidance: everything the player needs and could not work out from the screen. Where the thing they want is, what has already been tried and failed, what to avoid. Do not repeat the task in it.
 
@@ -46,7 +46,7 @@ This is what happened in the episode just finished:
 The image is the screen at the end of the episode. Here is what has been recognised on it:
 [SCREEN_TILES]
 
-Name the place the player is in now. Use a name from the list above if it is the same place, spelled exactly the same way; only invent a new name if this is somewhere you have not named before. Use the game's own names where you know them: "Viridian City", "Route 1", "Viridian Forest", "Pewter City Pokemon Center". Indoors is a different place from the town it is in.
+Name the place the player is in now. Use a name from the list above if it is the same place, spelled exactly the same way; only invent a new name if this is somewhere you have not named before. Use the game's own names, as the game itself has shown them to you on signs, in dialogue or on the map. Name a town, a route, a forest or a cave the way the game does, and name an interior after the building and the place it stands in. Indoors is a different place from the town it is in.
 
 Respond in exactly this format:
 Reasoning: <what the screen and the episode say about where the player is>
@@ -101,7 +101,7 @@ Subgoals you are already carrying:
 [LOCATION_BLOCK][KNOWLEDGE_BLOCK][RECENT_BLOCK]
 Decide whether anything is missing. Add a subgoal only when the goal plainly cannot be reached without it and it is not already in the list above -- a team too weak for the next gym, an item or move that is needed, a thing that has to be obtained first. Two at most, and none at all is the normal answer. Write them as states to reach, not as instructions.
 
-Do NOT add a subgoal that only says where the player should be ("the player is in Pewter City", "reach Viridian Forest"). Walking somewhere is already implied by the goal, and a subgoal like that outranks the goal itself and stops it from ever being worked on. Add a place only when something specific has to happen there that the goal does not already say.
+Do NOT add a subgoal that only says where the player should be ("the player is in the next town", "reach the forest to the north"). Walking somewhere is already implied by the goal, and a subgoal like that outranks the goal itself and stops it from ever being worked on. Add a place only when something specific has to happen there that the goal does not already say.
 
 Then say whether any subgoal you are carrying should be dropped: it is already done, it turned out to be impossible, or it no longer serves the goal.
 

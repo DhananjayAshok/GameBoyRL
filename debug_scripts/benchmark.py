@@ -283,7 +283,8 @@ def _executor_call_blocks(call, index: int, frames_dir: str, report_dir: str,
     lines = [md.para(f"**call {index}** · tag `{call.tag}`")]
     # A world-model call shows the current screen plus one prediction per action and answers
     # with an image number, not an Action: line. Its record says which image is which.
-    decision = call.world_model
+    # Read defensively: a ScriptedActionRecord shares this log and has no such field.
+    decision = getattr(call, "world_model", None)
 
     for i, image in enumerate(call.images):
         path = _save_frame(image, frames_dir, f"{prefix}_call{index}_saw{i}", overwrite)

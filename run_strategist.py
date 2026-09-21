@@ -43,8 +43,8 @@ DEFAULT_ENV_MAX_STEPS = 1_000_000
 @click.command()
 @click.option("--game", default="pokemon_red", type=str)
 @click.option("--init_state", default="starter", show_default=True, type=str,
-              help="Where the playthrough begins. 'starter' is Oak's lab beside the Poke "
-                   "Balls; 'initial' is the true start of the game, the bedroom.")
+              help="Where the playthrough begins. 'starter' is the point where the first "
+                   "party member is chosen; 'initial' is the true start of the game.")
 @click.option("--name", required=True, type=str,
               help="Identity of this playthrough. Keys the state directory AND the tile "
                    "database, so re-running the same name continues where it left off.")
@@ -71,9 +71,9 @@ DEFAULT_ENV_MAX_STEPS = 1_000_000
                    "button presses.")
 @click.option("--save_video", default=True, show_default=True, type=bool)
 @click.option("--resume/--fresh", default=True, show_default=True,
-              help="--fresh starts the ladder, knowledge and locations over. It does NOT "
-                   "reset the emulator to a later point: the run still starts at "
-                   "--init_state.")
+              help="--fresh starts the ladder, knowledge, locations and the tile database "
+                   "over, discarding what is on disk under this --name. It does NOT reset "
+                   "the emulator to a later point: the run still starts at --init_state.")
 def main(game, init_state, name, model, vlm_kind, strategist_vlm_model, strategist_vlm_kind,
          supervisor_vlm_model, supervisor_vlm_kind, executor_vlm_model, executor_vlm_kind,
          max_episodes, supervisor_max_steps, env_max_steps, strategist_max_new_tokens,
@@ -103,7 +103,9 @@ def main(game, init_state, name, model, vlm_kind, strategist_vlm_model, strategi
         save_video=save_video,
         # depathify'd for the same reason strategist_dir is: a name with spaces or
         # slashes in it becomes a directory name here, on GameBoyWorlds' storage.
-        session_name=f"strategist/{game}/{paths.depathify(name)}/{stamp}/",
+        # No game segment: GameBoyWorlds roots every session at sessions/<game>/
+        # already, so putting it here would repeat it one level down.
+        session_name=f"strategist/{paths.depathify(name)}/{stamp}/",
     )
     try:
         environment.reset()
