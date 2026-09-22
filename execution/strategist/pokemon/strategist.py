@@ -28,13 +28,16 @@ from execution.strategist.pokemon.goals import (PokemonGoalTree, check_goals, cr
 from execution.strategist.pokemon.knowledge import PokemonKnowledgeTree, remember
 from execution.strategist.pokemon.location import LocationStore, Place, follow_transitions, locate, place_text
 from execution.strategist.pokemon.notepad import ThoughtNotepad
-from execution.strategist.report import EpisodeRecord, StrategistReport, StrategistVLMCallRecord
+from execution.strategist.report import (REPORT_DETAILS, EpisodeArchive, EpisodeRecord, StrategistReport,
+                                         StrategistVLMCallRecord, save_episode_report, trim_episode)
 from python_scripts.paths import strategist_dir
 from utils import VLM, load_parameters, log_error, log_info, log_warn
 from utils.lm_inference import clean_value, parse_key_value
 from utils.parsing import parse_list
 
-PROVENANCE_FILE = "provenance.json"
+#: One file per process, stamped like the run it records: a resumed run writes its own
+#: rather than overwriting the settings the earlier episodes were played under.
+PROVENANCE_PREFIX = "provenance"
 
 
 def treat_name(name: str) -> str:
@@ -62,6 +65,7 @@ class PokemonStrategist:
         max_new_tokens: int = 4800,
         supervisor_max_new_tokens: int = 4800,
         subgoal_every: int = 5,
+        report_detail: str = "strategist",
         resume: bool = True,
         resume_run: Optional[str] = None,
         resume_episode: Union[str, int] = "latest",
@@ -82,11 +86,15 @@ class PokemonStrategist:
         #: of that name and bind to the strategist instead of being forwarded.
         self._supervisor_max_new_tokens = supervisor_max_new_tokens
         self._subgoal_every = subgoal_every
+        self._report_detail = report_detail
         self._resume = resume
         self._on_episode_complete = on_episode_complete
         self._parameters = load_parameters(parameters)
         if isinstance(subgoal_every, bool) or not isinstance(subgoal_every, int) or subgoal_every <= 0:
             log_error(f"subgoal_every must be a positive integer, got {subgoal_every!r}.", self._parameters)
+        if report_detail not in REPORT_DETAILS:
+            log_error(f"report_detail must be one of {REPORT_DETAILS}, got {report_detail!r}.",
+                      self._parameters)
         if treat_name(name)[-1:].isdigit():
             log_error(f"Strategist name {name!r} must not end in a digit.", self._parameters)
         self._supervisor_kwargs = supervisor_kwargs
@@ -165,6 +173,7 @@ class PokemonStrategist:
             "max_new_tokens": self._max_new_tokens,
             "supervisor_max_new_tokens": self._supervisor_max_new_tokens,
             "subgoal_every": self._subgoal_every,
+            "report_detail": self._report_detail,
             "storage": self._dir,
             "resume": self._resume,
             "resume_run": self._resume_run,
@@ -180,7 +189,8 @@ class PokemonStrategist:
             "strategist": self.__class__.__name__,
             "init_kwargs": self._run_config(),
         }
-        path = self._path(PROVENANCE_FILE)
+        stamp = self._started_at.strftime("%Y%m%d_%H%M%S")
+        path = self._path(f"{PROVENANCE_PREFIX}_{stamp}.json")
         with open(path, "w") as handle:
             json.dump(payload, handle, indent=2, default=str)
         log_info(f"Strategist provenance written to {path}", self._parameters)
@@ -397,6 +407,9 @@ class PokemonStrategist:
                         self._game, n, unsuccessful_for, self._parameters)
 
     def _run_episode(self, n: int) -> EpisodeRecord:
+        #: Where this episode's own calls start, so the archive holds one episode rather
+        #: than every call the run has made so far.
+        calls_from = len(self.report.event_log)
         frame = self._current_frame()
         self._perceive(frame, n)
         if self.current_location is None:
@@ -411,7 +424,7 @@ class PokemonStrategist:
         if task is None:
             record.status = "no_task"
             record.summary = "The strategist could not write a task from this screen."
-            self._finish_episode(record)
+            self._finish_episode(record, calls_from)
             return record
 
         supervisor = PokemonPlayThroughSupervisor(
@@ -441,11 +454,25 @@ class PokemonStrategist:
         if closed:
             self._absorb_notepad(closed, n)
 
-        self._finish_episode(record)
+        self._finish_episode(record, calls_from)
         return record
 
-    def _finish_episode(self, record: EpisodeRecord) -> None:
+    def _archive_episode(self, record: EpisodeRecord, calls_from: int) -> None:
+        calls = [event for event in self.report.event_log[calls_from:]
+                 if isinstance(event, StrategistVLMCallRecord)]
+        archive = EpisodeArchive(
+            game=self._game,
+            strategist_name=self.__class__.__name__,
+            init_kwargs=self._run_config(),
+            detail=self._report_detail,
+            episode=trim_episode(record, self._report_detail),
+            strategist_calls=calls,
+        )
+        save_episode_report(self._dir, record.n, archive, self._parameters)
+
+    def _finish_episode(self, record: EpisodeRecord, calls_from: int = 0) -> None:
         self.save_all(record.n)
+        self._archive_episode(record, calls_from)
         if self._on_episode_complete is not None:
             # A run of this length ends by wall clock, not by finishing, so the record has
             # to be on disk before the next episode starts. A checkpoint that cannot be

@@ -11,13 +11,12 @@ There is no task list to sweep and no per-task pass rate to average.
 
 State (tiles) persists under
 ``Paths.strategist_dir(name)`` and is resumed by default, so re-running the same --name
-continues the same playthrough. The episode record is checkpointed into the same directory
-after every episode.
+continues the same playthrough. Each process writes its own ``provenance_<stamp>.json``
+there recording the settings it ran under.
 """
 
 from __future__ import annotations
 
-import json
 import os
 from datetime import datetime
 
@@ -68,6 +67,12 @@ DEFAULT_ENV_MAX_STEPS = 1_000_000
 @click.option("--supervisor_max_new_tokens", default=4800, show_default=True, type=int)
 @click.option("--subgoal_every", default=5, show_default=True, type=int,
               help="Re-plan the current goal's subgoals every this many episodes it stays unchanged.")
+@click.option("--report_detail", default="strategist", show_default=True,
+              type=click.Choice(["strategist", "supervisor", "executor"]),
+              help="How much of each episode is archived to episode_<n>/report.pkl.gz. "
+                   "'strategist' keeps the strategist's own calls and the episode record, "
+                   "'supervisor' adds the supervisor's calls, 'executor' keeps everything "
+                   "including every frame the executors saw.")
 @click.option("--controller_variant", default="state_wise", show_default=True, type=str,
               help="The Pokemon executors act through state-wise actions, not low-level "
                    "button presses.")
@@ -79,21 +84,16 @@ DEFAULT_ENV_MAX_STEPS = 1_000_000
 def main(game, init_state, name, model, vlm_kind, strategist_vlm_model, strategist_vlm_kind,
          supervisor_vlm_model, supervisor_vlm_kind, executor_vlm_model, executor_vlm_kind,
          max_episodes, supervisor_max_steps, env_max_steps, strategist_max_new_tokens,
-         supervisor_max_new_tokens, subgoal_every, controller_variant, save_video, resume):
+         supervisor_max_new_tokens, subgoal_every, report_detail, controller_variant, save_video,
+         resume):
     """Play one long-horizon playthrough with the strategist."""
     parameters = load_parameters()
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = paths.strategist_dir(parameters, game=game, name=name)
     os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"run_{stamp}.json")
 
     log_info(f"Strategist playthrough {name!r} on {game} from {init_state!r}", parameters)
     log_info(f"State: {out_dir}", parameters)
-    log_info(f"Record: {out_path}", parameters)
-
-    def checkpoint(report) -> None:
-        with open(out_path, "w") as handle:
-            json.dump(serialise(report), handle, indent=2)
 
     environment = get_environment(
         game=game,
@@ -122,8 +122,8 @@ def main(game, init_state, name, model, vlm_kind, strategist_vlm_model, strategi
             max_new_tokens=strategist_max_new_tokens,
             supervisor_max_new_tokens=supervisor_max_new_tokens,
             subgoal_every=subgoal_every,
+            report_detail=report_detail,
             resume=resume,
-            on_episode_complete=checkpoint,
             parameters=parameters,
             # Forwarded to each episode's PokemonPlayThroughSupervisor, which forwards the
             # vlm_* pair on to every executor it spawns.
@@ -138,47 +138,9 @@ def main(game, init_state, name, model, vlm_kind, strategist_vlm_model, strategi
         # crashed run that keeps them is a run whose partial video cannot be read.
         environment.close()
 
-    checkpoint(report)
     print()
     print(str(report))
     print()
-    print(f"Record written to {out_path}")
-
-
-def serialise(report) -> dict:
-    """The run as JSON-safe data.
-
-    Supervisor reports are kept as their rendered strings rather than as structures: the
-    report's own ``__str__`` is what every existing reader of this pipeline consumes, and
-    the frames inside them are numpy arrays that JSON cannot carry anyway.
-    """
-    return {
-        "game": report.game,
-        "strategist": report.strategist_name,
-        "init_kwargs": report.init_kwargs,
-        "stop_reason": report.stop_reason,
-        "tokens": {
-            "strategist_input": report.strategist_input_tokens,
-            "strategist_output": report.strategist_output_tokens,
-            "supervisor_input": report.supervisor_input_tokens,
-            "supervisor_output": report.supervisor_output_tokens,
-            "total_input": report.total_input_tokens,
-            "total_output": report.total_output_tokens,
-        },
-        "n_invalid": report.n_invalid,
-        "episodes": [
-            {
-                "n": episode.n,
-                "task": episode.task,
-                "guidance": episode.guidance,
-                "status": episode.status,
-                "summary": episode.summary,
-                "supervisor_report": (str(episode.supervisor_report)
-                                      if episode.supervisor_report is not None else None),
-            }
-            for episode in report.episodes
-        ],
-    }
 
 
 if __name__ == "__main__":

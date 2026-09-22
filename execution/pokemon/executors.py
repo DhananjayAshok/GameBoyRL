@@ -18,7 +18,7 @@ from execution.report import EnvironmentStepRecord
 from utils import log_error, ocr, parse_int, parse_key_value, parse_yes_no
 
 
-DIALOGUE_BACKGROUND = 255
+DIALOGUE_BACKGROUND = 248
 CURSOR_MARGIN = 12
 
 
@@ -27,7 +27,7 @@ def is_prefix_crop(earlier: np.ndarray, later: np.ndarray) -> bool:
         return False
     a, b = earlier[:, :-CURSOR_MARGIN], later[:, :-CURSOR_MARGIN]
     differ = a != b
-    return bool(np.all(a[differ] == DIALOGUE_BACKGROUND))
+    return bool(np.all(a[differ] >= DIALOGUE_BACKGROUND))
 
 
 def captured_dialogue_crops(records: List[EnvironmentStepRecord]) -> List[Any]:
