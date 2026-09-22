@@ -8,119 +8,47 @@ into its own state.
 
 from __future__ import annotations
 
+import json
 import os
 import re
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from tqdm import tqdm
 
+from execution.artifact import episode_dirs
 from execution.perception.pokemon.tiles import TileRecognizer, verbalize_tiles
 from execution.pokemon.supervisors import PokemonPlayThroughSupervisor
 from execution.report import per_prompt_token_counts
 from execution.strategist.pokemon import prompts as P
-from execution.strategist.pokemon.goals import Goal, GoalTree
-from execution.strategist.pokemon.knowledge import KINDS, KnowledgeBase, clean_kind
-from execution.strategist.pokemon.location import LocationTracker
+from execution.strategist.pokemon.asking import ask, single_value
+from execution.strategist.pokemon.goals import (PokemonGoalTree, check_goals, create_subgoals, frontier_text,
+                                                goal_path_text)
+from execution.strategist.pokemon.knowledge import PokemonKnowledgeTree, remember
+from execution.strategist.pokemon.location import LocationStore, Place, follow_transitions, locate, place_text
+from execution.strategist.pokemon.notepad import ThoughtNotepad
 from execution.strategist.report import EpisodeRecord, StrategistReport, StrategistVLMCallRecord
 from python_scripts.paths import strategist_dir
 from utils import VLM, load_parameters, log_error, log_info, log_warn
-from utils.lm_inference import parse_key_value, parse_yes_no
+from utils.lm_inference import clean_value, parse_key_value
 from utils.parsing import parse_list
 
-KNOWLEDGE_FILE = "knowledge.json"
-GOALS_FILE = "goals.json"
-LOCATION_FILE = "location.json"
+PROVENANCE_FILE = "provenance.json"
 
 
-def section(output: str, key: str, next_keys: Tuple[str, ...]) -> str:
-    """The block of ``output`` under ``Key:``, cut off at the next heading.
-
-    :func:`~utils.parsing.parse_list` keeps reading past its own section when the section is
-    empty, which would file the items under ``New subgoals:`` as facts. Slicing first is the
-    cheapest way to stop that.
-    """
-    lines = output.splitlines()
-    marks = [line.strip().lower().lstrip("*#->•+ \t") for line in lines]
-    start = next((i for i, mark in enumerate(marks) if mark.startswith(f"{key.lower()}:")), None)
-    if start is None:
-        return ""
-    end = len(lines)
-    for i in range(start + 1, len(lines)):
-        if any(marks[i].startswith(f"{other.lower()}:") for other in next_keys):
-            end = i
-            break
-    return "\n".join(lines[start:end])
-
-
-def parse_kinded(items: List[str]) -> List[Tuple[str, Optional[str]]]:
-    """``["map: the gym is north"]`` -> ``[("the gym is north", "map")]``.
-
-    The prefix is only taken as a kind when it *is* one, so a fact that happens to contain
-    a colon ("The sign: Route 1 ahead") keeps its whole text instead of losing the half
-    before the colon to a kind that then falls back to the default anyway.
-    """
-    out: List[Tuple[str, Optional[str]]] = []
-    for item in items:
-        kind, separator, text = item.partition(":")
-        if separator and kind.strip().strip("*_ ").lower() in KINDS and text.strip():
-            out.append((text.strip(), kind.strip().strip("*_ ").lower()))
-        else:
-            out.append((item.strip(), None))
-    return [(text, kind) for text, kind in out if text]
-
-
-#: A subgoal that only says where the player should be. Synthesis emits these readily
-#: ("The player is in the next town"), and because :meth:`GoalTree.next_goal` serves the
-#: deepest open leaf, one of them outranks the ladder rung it hangs off and stops that rung
-#: from ever being dispatched. Walking somewhere is already implied by the goal, so these
-#: buy nothing and cost the goal. The prompt says not to write them; this is the backstop.
-#:
-#: Deliberately narrow. A false positive silently deletes a real piece of strategy, so this
-#: fires only on a bare positional statement whose object is recognisably a place -- never
-#: on possession ("the player has the first gym badge"), and never on a compound subgoal.
-POSITION_STATEMENT = re.compile(
-    r"^(?:the\s+player\s+|you\s+)?"
-    r"(?:is|are|be|arrives?|arrived|reach(?:es|ed)?|travels?|walks?|goes?|went|"
-    r"enters?|entered|returns?|moves?)\s+"
-    r"(?:in|at|to|into|inside)?\s*(.+)$",
-    re.IGNORECASE)
-PLACE_WORDS = (
-    "route", "city", "town", "forest", "cave", "island", "gym", "center", "centre", "mart",
-    "road", "tower", "mansion", "lab", "house", "league", "plateau", "path", "bridge",
-    "tunnel", "mt", "mount", "valley", "hideout", "dojo", "port", "harbor", "dock",
-    "safari", "park", "zone", "village", "station", "gate", "gatehouse",
-)
-_LEADING_THE = re.compile(r"^the\s+", re.IGNORECASE)
-
-
-def is_location_restatement(text: str, known_names: Tuple[str, ...] = ()) -> bool:
-    cleaned = " ".join((text or "").strip().rstrip(".").split())
-    if not cleaned or " and " in cleaned.lower() or "," in cleaned:
-        return False
-    match = POSITION_STATEMENT.match(cleaned)
-    if match is None:
-        return False
-    tail = _LEADING_THE.sub("", match.group(1).strip()).lower()
-    if any(tail == name.lower() for name in known_names):
-        return True
-    return any(word in tail.split() for word in PLACE_WORDS)
-
-
-def clean_value(value: Optional[str]) -> Optional[str]:
-    value = (value or "").strip().strip('"\'').strip()
-    if not value or value.lower() in ("none", "n/a", "na", "unknown"):
-        return None
-    return value
+def treat_name(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]", "", name)
 
 
 class PokemonStrategist:
-    REORGANISE_AT = 60
-    REORGANISE_EVERY = 10
-    SYNTHESISE_EVERY = 5
-    KNOWLEDGE_LIMIT = 3000
     RECENT_EPISODES = 5
     MAX_DISPATCH_ATTEMPTS = 2
+    MAX_EXTRACT_ATTEMPTS = 2
+    MAX_NOTEPAD_ATTEMPTS = 3
+    MAX_FACTS = 15
+    TRANSITION_CONTEXT_FRAMES = 3
+    TRANSITION_FRAME_STRIDE = 30
 
     def __init__(
         self,
@@ -133,9 +61,10 @@ class PokemonStrategist:
         strategist_vlm_kind: Optional[str] = None,
         max_new_tokens: int = 4800,
         supervisor_max_new_tokens: int = 4800,
-        ladder: Optional[List[str]] = None,
+        subgoal_every: int = 5,
         resume: bool = True,
-        persist: bool = True,
+        resume_run: Optional[str] = None,
+        resume_episode: Union[str, int] = "latest",
         on_episode_complete: Optional[Callable[["StrategistReport"], None]] = None,
         parameters: Optional[dict] = None,
         **supervisor_kwargs: Any,
@@ -152,40 +81,79 @@ class PokemonStrategist:
         #: called ``max_new_tokens``, which would collide with this class's own parameter
         #: of that name and bind to the strategist instead of being forwarded.
         self._supervisor_max_new_tokens = supervisor_max_new_tokens
-        self._persist = persist
+        self._subgoal_every = subgoal_every
         self._resume = resume
         self._on_episode_complete = on_episode_complete
         self._parameters = load_parameters(parameters)
+        if isinstance(subgoal_every, bool) or not isinstance(subgoal_every, int) or subgoal_every <= 0:
+            log_error(f"subgoal_every must be a positive integer, got {subgoal_every!r}.", self._parameters)
+        if treat_name(name)[-1:].isdigit():
+            log_error(f"Strategist name {name!r} must not end in a digit.", self._parameters)
         self._supervisor_kwargs = supervisor_kwargs
         self._vlm_instance: Optional[VLM] = None
 
         self._dir = strategist_dir(self._parameters, game=game, name=name)
-        self.knowledge = (KnowledgeBase.load(self._path(KNOWLEDGE_FILE)) if resume else None) or KnowledgeBase()
-        self.goals = (GoalTree.load(self._path(GOALS_FILE)) if resume else None) or GoalTree.ladder(ladder)
-        self.location = (LocationTracker.load(self._path(LOCATION_FILE)) if resume else None) or LocationTracker()
+        self._resume_run = resume_run
+        self._resume_episode = resume_episode
+        self._resume_dir = self._dir
 
-        #: Loaded under the same rule as the three stores above: --fresh starts the tile
-        #: database over too, rather than reading one built by a previous playthrough.
-        self.tiles = TileRecognizer(name=name, game=game, parameters=self._parameters)
-        if resume:
-            self.tiles.load(missing_ok=True)
+        if resume_episode != "latest":
+            try:
+                self._resume_episode = int(resume_episode)
+            except (TypeError, ValueError):
+                log_error(f"resume_episode must be 'latest' or an integer, got {resume_episode!r}.",
+                          self._parameters)
+        if resume_run is not None and resume_run != name:
+            if not resume:
+                log_error(f"resume_run={resume_run!r} was given with resume=False, which asks "
+                          f"to start from that run's state and from nothing at the same time.",
+                          self._parameters)
+            if os.path.exists(self._dir):
+                log_error(f"resume_run={resume_run!r} would fork that run's state into {name!r}, "
+                          f"but {self._dir} already exists.", self._parameters)
+            self._resume_dir = strategist_dir(self._parameters, game=game, name=resume_run)
+
+        #: --fresh starts every artifact over too, rather than reading one built by a
+        #: previous playthrough.
+        load_episode = None if self._resume_episode == "latest" else self._resume_episode
+        self.tiles = self._load_or_default(
+            TileRecognizer, lambda: TileRecognizer(name=name, game=game, parameters=self._parameters),
+            load_episode)
+        self.goals = self._load_or_default(PokemonGoalTree, PokemonGoalTree, load_episode)
+        self.locations = self._load_or_default(LocationStore, LocationStore, load_episode)
+        self.knowledge = self._load_or_default(PokemonKnowledgeTree, PokemonKnowledgeTree, load_episode)
+        self.notepad = self._load_or_default(ThoughtNotepad, ThoughtNotepad, load_episode)
+
+        if not resume:
+            self.start_episode = 0
+        elif self._resume_episode != "latest":
+            self.start_episode = self._resume_episode + 1
+        else:
+            resumed_from = episode_dirs(self._resume_dir)
+            self.start_episode = (max(resumed_from) + 1) if resumed_from else 0
+        if self.start_episode in episode_dirs(self._dir):
+            log_error(f"episode_{self.start_episode} already exists under {self._dir!r}; "
+                      "refusing to overwrite it.", self._parameters)
+        if self.start_episode > 0:
+            self._env.load_custom_state(
+                self._emulator_state_name(self._resume_run or name, self.start_episode - 1))
 
         self._identified: Optional[Dict[Any, Any]] = None
         self._screen_tiles: Optional[str] = None
         #: Episodes run by *this* instance, which is what ``max_episodes`` bounds.
         self._episodes_run = 0
-        #: Episodes lived by this playthrough before this instance started. Provenance is
-        #: recorded against ``_episodes_run + _episode_offset``, so a resumed run does not
-        #: restart at 1 and stamp a fact with an episode number it already used.
-        self._episode_offset = self._episodes_in_state()
         self._ran = False
+
+        self._started_at = datetime.now()
+        os.makedirs(self._dir, exist_ok=True)
 
         self.report = StrategistReport(
             game=game,
             strategist_name=self.__class__.__name__,
             init_kwargs=self._run_config(),
-            task_ladder=[goal.text for goal in self.goals.roots()],
         )
+        self._write_provenance()
+        self.save_all(self.start_episode)
 
     def _run_config(self) -> dict:
         return {
@@ -196,27 +164,38 @@ class PokemonStrategist:
             "strategist_vlm_kind": self._strategist_vlm_kind,
             "max_new_tokens": self._max_new_tokens,
             "supervisor_max_new_tokens": self._supervisor_max_new_tokens,
-            "reorganise_at": self.REORGANISE_AT,
-            "reorganise_every": self.REORGANISE_EVERY,
-            "synthesise_every": self.SYNTHESISE_EVERY,
-            "knowledge_limit": self.KNOWLEDGE_LIMIT,
+            "subgoal_every": self._subgoal_every,
             "storage": self._dir,
-            "episode_offset": self._episode_offset,
             "resume": self._resume,
+            "resume_run": self._resume_run,
+            "resume_episode": self._resume_episode,
+            "resume_dir": self._resume_dir,
             "supervisor_kwargs": dict(self._supervisor_kwargs),
         }
+
+    def _write_provenance(self) -> str:
+        payload = {
+            "started_at": self._started_at.isoformat(timespec="seconds"),
+            "game": self._game,
+            "strategist": self.__class__.__name__,
+            "init_kwargs": self._run_config(),
+        }
+        path = self._path(PROVENANCE_FILE)
+        with open(path, "w") as handle:
+            json.dump(payload, handle, indent=2, default=str)
+        log_info(f"Strategist provenance written to {path}", self._parameters)
+        return path
 
     def _path(self, filename: str) -> str:
         return os.path.join(self._dir, filename)
 
-    def _episodes_in_state(self) -> int:
-        """The highest episode number anything already on disk was stamped with."""
-        seen = [0]
-        seen += [fact.last_seen_episode or 0 for fact in self.knowledge.facts]
-        seen += [fact.first_seen_episode or 0 for fact in self.knowledge.facts]
-        seen += [episode for goal in self.goals.goals for episode in goal.episodes]
-        seen += [t.episode or 0 for t in self.location.transitions]
-        return max(seen)
+    def _load_or_default(self, cls, factory: Callable[[], Any], episode_number: Optional[int]) -> Any:
+        if self._resume and cls.exists(self._resume_dir):
+            artifact = cls.load(self._resume_dir, episode_number, parameters=self._parameters)
+            if self._resume_dir != self._dir:
+                artifact.last_written = None
+            return artifact
+        return factory()
 
     # ------------------------------------------------------------------
     # Recording
@@ -266,163 +245,104 @@ class PokemonStrategist:
     # Screen and prompt blocks
     # ------------------------------------------------------------------
 
+    @property
+    def current_location(self) -> Optional[Place]:
+        return self.locations.current
+
     def _current_frame(self) -> np.ndarray:
         return self._env.get_info()["core"]["current_frame"]
 
     def _env_done(self) -> bool:
         return bool(self._env._emulator.check_if_done())
 
-    def _perceive(self, frame: np.ndarray) -> str:
+    def _perceive(self, frame: np.ndarray, episode_number: int) -> str:
         self.tiles.set_vlm_call(self._vlm_caller("perception"))
-        self.tiles.record_tiles(frame)
+        self.tiles.record_tiles(frame, episode_number)
         self._identified = self.tiles.identify_tiles(frame)
         self._screen_tiles = verbalize_tiles(self._identified)
         return self._screen_tiles
-
-    def _knowledge_block(self) -> str:
-        return P.STRATEGIST_KNOWLEDGE_BLOCK.replace(
-            "[KNOWLEDGE]", self.knowledge.render(self.location.current, self.KNOWLEDGE_LIMIT))
-
-    def _location_block(self) -> str:
-        return (P.STRATEGIST_LOCATION_BLOCK
-                .replace("[LOCATION]", self.location.current or "somewhere you have not named yet")
-                .replace("[KNOWN_LOCATIONS]", self.location.known_names())
-                .replace("[TRANSITIONS]", self.location.render_transitions()))
 
     def _recent_block(self) -> str:
         recent = self.report.episodes[-self.RECENT_EPISODES:]
         if not recent:
             return ""
-        lines = [f"- episode {e.n} in {e.location_after or 'an unnamed place'}, task \"{e.task}\" "
+        lines = [f"- episode {e.n}, task \"{e.task}\" "
                  f"[{e.status}]: {e.summary or 'no summary'}" for e in recent]
         return P.STRATEGIST_RECENT_BLOCK.replace("[RECENT]", "\n".join(lines))
 
     def _fill(self, prompt: str) -> str:
         return (prompt.replace("[GAME]", self._game)
-                .replace("[KNOWLEDGE_KINDS]", P.KNOWLEDGE_KINDS)
-                .replace("[LOCATION_BLOCK]", self._location_block())
-                .replace("[KNOWLEDGE_BLOCK]", self._knowledge_block())
                 .replace("[RECENT_BLOCK]", self._recent_block())
-                .replace("[MAX_STEPS]", str(self._supervisor_max_steps)))
+                .replace("[MAX_STEPS]", str(self._supervisor_max_steps))
+                .replace("[GOAL]", frontier_text(self.goals))
+                .replace("[CURRENT]", place_text(self.current_location))
+                .replace("[NOTEPAD]", self.notepad.text.strip() or "(empty)"))
 
     # ------------------------------------------------------------------
     # The strategist's own calls
     # ------------------------------------------------------------------
 
-    def _dispatch(self, goal: Goal, frame: np.ndarray) -> Tuple[Optional[str], Optional[str]]:
+    def _dispatch(self, frame: np.ndarray) -> Tuple[Optional[str], Optional[str]]:
         prompt = (self._fill(P.DISPATCH_PROMPT)
-                  .replace("[GOAL]", goal.text)
-                  .replace("[GOAL_PATH]", self.goals.render_path(goal))
                   .replace("[SCREEN_TILES]", self._screen_tiles or "(nothing was recognised)"))
-        for attempt in range(self.MAX_DISPATCH_ATTEMPTS):
-            output = self._vlm_call("dispatch", texts=prompt, images=[frame])
-            task = clean_value(parse_key_value(output, "Task"))
-            if task:
-                return task, clean_value(parse_key_value(output, "Guidance"))
-            log_warn(f"Could not read a task from the dispatch reply (attempt {attempt + 1}): "
-                     f"{output!r}", self._parameters)
-        return None, None
+        dispatched = ask(self._vlm_caller("dispatch"), prompt, _parse_dispatch, "Dispatch",
+                         self.MAX_DISPATCH_ATTEMPTS, self._parameters, images=[frame])
+        return dispatched if dispatched is not None else (None, None)
 
-    def _locate(self, frame: np.ndarray, narrative: List[str]) -> Tuple[Optional[str], bool, Optional[str]]:
-        prompt = (self._fill(P.LOCATE_PROMPT)
-                  .replace("[PREVIOUS]", self.location.current or "somewhere you have not named yet")
-                  .replace("[KNOWN_LOCATIONS]", self.location.known_names())
-                  .replace("[NARRATIVE]", _bullets(narrative))
-                  .replace("[SCREEN_TILES]", self._screen_tiles or "(nothing was recognised)"))
-        output = self._vlm_call("locate", texts=prompt, images=[frame])
-        name = clean_value(parse_key_value(output, "Location"))
-        if name is None:
-            log_warn(f"Could not read a location from: {output!r}", self._parameters)
-        return name, bool(parse_yes_no(output, "Changed")), clean_value(parse_key_value(output, "How"))
-
-    def _review(self, goal: Goal, task: str, result: Dict[str, Any],
-                narrative: List[str]) -> Tuple[bool, List[Tuple[str, Optional[str]]], List[str], str]:
-        reason = clean_value(result.get("reason")) or clean_value(result.get("summary"))
-        reason_block = P.REVIEW_REASON_BLOCK.replace("[REASON]", reason) if reason else ""
-        prompt = (self._fill(P.REVIEW_PROMPT)
-                  .replace("[GOAL]", goal.text)
-                  .replace("[TASK]", task)
-                  .replace("[LOCATION]", self.location.current or "somewhere you have not named yet")
-                  .replace("[STATUS]", str(result.get("status", "unknown")))
-                  .replace("[REASON_BLOCK]", reason_block)
-                  .replace("[NARRATIVE]", _bullets(narrative)))
+    def _review(self, digest: str) -> str:
+        prompt = self._fill(P.REVIEW_PROMPT).replace("[DIGEST]", digest)
         output = self._vlm_call("review", texts=prompt)
-        facts = parse_kinded(parse_list(section(output, "Facts", ("New subgoals", "Summary")), "Facts"))
-        subgoals = parse_list(section(output, "New subgoals", ("Facts", "Summary")), "New subgoals")
-        summary = clean_value(parse_key_value(output, "Summary")) or ""
-        return bool(parse_yes_no(output, "Goal complete")), facts, subgoals, summary
+        return clean_value(parse_key_value(output, "Summary")) or ""
 
-    def _synthesise(self, episode: int) -> Tuple[List[str], List[str]]:
-        ladder_goal = self.goals.current_ladder_goal()
-        if ladder_goal is None:
-            return [], []
-        prompt = (self._fill(P.SYNTHESISE_PROMPT)
-                  .replace("[GOAL]", ladder_goal.text)
-                  .replace("[OPEN_SUBGOALS]", self.goals.render_open(ladder_goal)))
-        output = self._vlm_call("synthesise", texts=prompt)
-        added = []
-        for text in parse_list(section(output, "New subgoals", ("Abandon",)), "New subgoals"):
-            if is_location_restatement(text, tuple(self.location.names)):
-                log_warn(f"Dropping the synthesised subgoal {text!r}: it only says where the "
-                         f"player should be, which would outrank the goal it hangs off.",
-                         self._parameters)
-                continue
-            added.append(self.goals.add(text, ladder_goal.id, "synthesised", episode).text)
-        dropped = []
-        for item in parse_list(section(output, "Abandon", ("New subgoals",)), "Abandon"):
-            text, _, why = item.partition(":")
-            goal = self.goals.abandon_matching(text, why.strip(), episode)
-            if goal is not None:
-                dropped.append(goal.text)
-        if added or dropped:
-            log_info(f"Synthesis added {added} and abandoned {dropped}")
-        return added, dropped
+    def _extract_knowledge(self, digest: str, before: np.ndarray, after: np.ndarray, n: int) -> None:
+        prompt = (self._fill(P.KNOWLEDGE_EXTRACT_PROMPT)
+                  .replace("[DIGEST]", digest)
+                  .replace("[MAX_FACTS]", str(self.MAX_FACTS)))
+        facts = ask(self._vlm_caller("extract"), prompt, _parse_facts, "Knowledge extraction",
+                    self.MAX_EXTRACT_ATTEMPTS, self._parameters, images=[before, after])
+        self._remember_all(facts or [], n)
 
-    def _reorganise(self, episode: int) -> int:
-        before = len(self.knowledge)
-        if not before:
-            return 0
-        prompt = (self._fill(P.REORGANISE_PROMPT)
-                  .replace("[KNOWLEDGE]", self.knowledge.render_all()))
-        output = self._vlm_call("reorganise", texts=prompt)
-        entries = []
-        for item in parse_list(output, "Facts"):
-            parts = [part.strip() for part in item.split("|")]
-            if len(parts) < 3:
-                # A line that came back without its "kind | place |" prefix keeps its text
-                # and becomes game-wide. Defaulting to the current location instead would
-                # silently re-tag facts about everywhere else as facts about here, which
-                # the knowledge filter would then hide from every other location.
-                entries.append((item.strip(), None, None))
-                continue
-            kind, place, text = parts[0], parts[1], "|".join(parts[2:]).strip()
-            entries.append((text, clean_kind(kind), None if place.lower().startswith("game") else place))
-        if not entries:
-            log_warn(f"Reorganisation returned no facts, keeping the base as it was: {output!r}",
-                     self._parameters)
-            return before
-        if self._persist:
-            # Save before archiving: the archive is a copy of the file, and the facts this
-            # episode added are only in memory until the end-of-episode save. Archiving
-            # first would keep a version that predates them, so the thing the archive
-            # exists to protect is exactly the thing it would lose.
-            self.knowledge.save(self._path(KNOWLEDGE_FILE))
-            self.knowledge.archive(self._path(KNOWLEDGE_FILE))
-        self.knowledge.replace(entries, episode)
-        log_info(f"Reorganised the knowledge base: {before} facts -> {len(self.knowledge)}")
-        return len(self.knowledge)
+    def _remember_all(self, facts: List[str], n: int) -> None:
+        for fact in facts:
+            remember(self.knowledge, fact, self._vlm_caller("knowledge"), self._game, n, self._parameters)
+
+    def _update_notepad(self, digest: str, summary: str, n: int) -> None:
+        prompt = (self._fill(P.NOTEPAD_UPDATE_PROMPT)
+                  .replace("[DIGEST]", digest)
+                  .replace("[SUMMARY]", summary or "(none)"))
+        update = ask(self._vlm_caller("notepad_update"), prompt, _parse_notepad_update, "Notepad update",
+                     self.MAX_NOTEPAD_ATTEMPTS, self._parameters)
+        if update is None:
+            log_warn("No usable notepad update; leaving the notepad as it was.", self._parameters)
+            return
+        action, notes = update
+        if action == "APPEND":
+            self.notepad.add(notes, episode_number=n)
+        else:
+            self.notepad.update(notes, episode_number=n)
+
+    def _absorb_notepad(self, closed: List[Tuple[Tuple[str, ...], str]], n: int) -> None:
+        if self.notepad.text.strip():
+            prompt = (self._fill(P.NOTEPAD_EXTRACT_PROMPT)
+                      .replace("[CLOSED]", "\n".join(f"- {goal_path_text(path)} [{status}]" for path, status in closed))
+                      .replace("[MAX_FACTS]", str(self.MAX_FACTS)))
+            facts = ask(self._vlm_caller("notepad_extract"), prompt, _parse_facts, "Notepad extraction",
+                        self.MAX_EXTRACT_ATTEMPTS, self._parameters)
+            self._remember_all(facts or [], n)
+        self.notepad.clear(episode_number=n)
 
     # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
 
-    def save(self) -> None:
-        if not self._persist:
-            return
-        self.knowledge.save(self._path(KNOWLEDGE_FILE))
-        self.goals.save(self._path(GOALS_FILE))
-        self.location.save(self._path(LOCATION_FILE))
-        self.tiles.save()
+    def save_all(self, episode_number: int) -> None:
+        for artifact in (self.tiles, self.goals, self.locations, self.knowledge, self.notepad):
+            artifact.save(self._dir, episode_number, parameters=self._parameters)
+        self._env.save_custom_state(self._emulator_state_name(self._name, episode_number))
+
+    @staticmethod
+    def _emulator_state_name(run_name: str, episode_number: int) -> str:
+        return f"{treat_name(run_name)}{episode_number}"
 
     # ------------------------------------------------------------------
     # The loop
@@ -431,12 +351,10 @@ class PokemonStrategist:
     def _stop_reason(self) -> Optional[str]:
         if self._episodes_run >= self._max_episodes:
             return "max_episodes"
+        if self.goals.tree.root.status == "complete":
+            return "goals_complete"
         if self._env_done():
             return "env_done"
-        if self.goals.current_ladder_goal() is None:
-            return "ladder_complete"
-        if self.goals.next_goal() is None:
-            return "all_goals_abandoned"
         return None
 
     def run(self) -> StrategistReport:
@@ -446,99 +364,88 @@ class PokemonStrategist:
                       self._parameters)
         self._ran = True
         # Bounded by max_episodes, which is the only stop reason that can be counted
-        # ahead of time; the ladder or the environment ending the run early just leaves
-        # the bar short of its total.
+        # ahead of time; the environment ending the run early just leaves the bar short
+        # of its total.
         progress = tqdm(total=self._max_episodes, desc="episodes", unit="ep")
-        try:
-            while True:
-                stop = self._stop_reason()
-                if stop is not None:
-                    self.report.stop_reason = stop
-                    progress.set_postfix_str(f"stopped: {stop}")
-                    break
-                self._episodes_run += 1
-                record = self._run_episode(self._episodes_run + self._episode_offset)
-                progress.update(1)
-                progress.set_postfix_str(self._progress_line(record))
-        finally:
-            progress.close()
-            self.report.final_knowledge = self.knowledge.to_list()
-            self.report.locations = list(self.location.names)
-            self.save()
+        while True:
+            stop = self._stop_reason()
+            if stop is not None:
+                self.report.stop_reason = stop
+                progress.set_postfix_str(f"stopped: {stop}")
+                break
+            record = self._run_episode(self.start_episode + self._episodes_run)
+            self._episodes_run += 1
+            progress.update(1)
+            progress.set_postfix_str(record.status)
+        progress.close()
         return self.report
 
-    def _progress_line(self, record: EpisodeRecord) -> str:
-        """What the bar shows after each episode: ladder position, where, how it went."""
-        roots = self.goals.roots()
-        done = sum(1 for goal in roots if goal.status == "done")
-        return (f"rung {done}/{len(roots)}, at {record.location_after or '?'}, "
-                f"{record.status}, {len(self.knowledge)} facts")
+    def _plan_goals(self, n: int) -> None:
+        subtree = self.goals.frontier()
+        if subtree is None:
+            return
+        path = self.goals.path_to(subtree)
+        since = subtree.root.frontier_since
+        if path != self.goals.frontier_path or since is None:
+            self.goals.set_frontier(path, n, episode_number=n)
+            unsuccessful_for = 0
+        else:
+            unsuccessful_for = n - since
+            if unsuccessful_for <= 0 or unsuccessful_for % self._subgoal_every:
+                return
+        create_subgoals(self.goals, self.knowledge, self.locations, self.notepad.text, self._vlm_caller,
+                        self._game, n, unsuccessful_for, self._parameters)
 
     def _run_episode(self, n: int) -> EpisodeRecord:
-        goal = self.goals.next_goal()
         frame = self._current_frame()
-        self._perceive(frame)
-        task, guidance = self._dispatch(goal, frame)
+        self._perceive(frame, n)
+        if self.current_location is None:
+            locate(self.locations, frame, self._screen_tiles, self._identified, self._vlm_caller, self._game, n,
+                   self._parameters)
+        self._plan_goals(n)
+        task, guidance = self._dispatch(frame)
 
-        record = EpisodeRecord(n=n, goal=goal.text, task=task or "", guidance=guidance,
-                               location_before=self.location.current,
-                               location_after=self.location.current)
+        record = EpisodeRecord(n=n, task=task or "", guidance=guidance)
         self.report.episodes.append(record)
 
         if task is None:
-            self.goals.mark(goal.id, "abandoned",
-                            "No task could be written for this goal from this screen.", n)
             record.status = "no_task"
-            record.summary = "The strategist could not write a task for this goal, so it was abandoned."
-            self._finish_episode(n, record)
+            record.summary = "The strategist could not write a task from this screen."
+            self._finish_episode(record)
             return record
 
-        self.goals.mark(goal.id, "active", None, n)
         supervisor = PokemonPlayThroughSupervisor(
             task=task, env=self._env, game=self._game, max_steps=self._supervisor_max_steps,
-            tile_recognizer=self.tiles, guidance=guidance, parameters=self._parameters,
+            tile_recognizer=self.tiles, episode_number=n, guidance=guidance, parameters=self._parameters,
             max_new_tokens=self._supervisor_max_new_tokens,
             **self._supervisor_kwargs,
         )
         result = supervisor.evaluate()
-        record.supervisor_report = result["report"]
+        report = result["report"]
+        record.supervisor_report = report
         record.status = str(result.get("status", "unknown"))
-        self.report.event_log.append(result["report"])
-        narrative = list(result["report"].narrative)
+        self.report.event_log.append(report)
+        follow_transitions(self.locations, report, self.tiles, self._vlm_caller, self._game, n,
+                           self.TRANSITION_CONTEXT_FRAMES, self.TRANSITION_FRAME_STRIDE, self._parameters)
 
-        frame = self._current_frame()
-        self._perceive(frame)
-        name, changed, how = self._locate(frame, narrative)
-        self.location.update(name, changed, how, n)
-        record.location_after = self.location.current
+        before, frame = frame, self._current_frame()
+        self._perceive(frame, n)
 
-        complete, facts, subgoals, summary = self._review(goal, task, result, narrative)
-        record.goal_complete = complete
+        closed = check_goals(self.goals, report.digest, self.notepad.text, self._vlm_caller, self._game, n,
+                             self._parameters)
+        summary = self._review(report.digest)
         record.summary = summary or record.summary
-        record.facts_added = [fact.text for fact in
-                              self.knowledge.add_many(facts, self.location.current, n)]
+        if report.narrative or any(r.notes and r.notes.strip() for r in report.executor_reports):
+            self._extract_knowledge(report.digest, before, frame, n)
+        self._update_notepad(report.digest, summary, n)
+        if closed:
+            self._absorb_notepad(closed, n)
 
-        ladder_goal = self.goals.current_ladder_goal()
-        for text in subgoals:
-            added = self.goals.add(text, ladder_goal.id if ladder_goal else None, "discovered", n)
-            record.subgoals_added.append(added.text)
-
-        if complete:
-            self.goals.mark(goal.id, "done", summary, n)
-        else:
-            self.goals.mark(goal.id, "pending", None, n)
-
-        self._finish_episode(n, record)
+        self._finish_episode(record)
         return record
 
-    def _finish_episode(self, n: int, record: EpisodeRecord) -> None:
-        if len(self.knowledge) >= self.REORGANISE_AT or n % self.REORGANISE_EVERY == 0:
-            self._reorganise(n)
-        if n % self.SYNTHESISE_EVERY == 0:
-            self._synthesise(n)
-        self.report.knowledge_snapshots.append(self.knowledge.to_list())
-        self.report.locations = list(self.location.names)
-        self.save()
+    def _finish_episode(self, record: EpisodeRecord) -> None:
+        self.save_all(record.n)
         if self._on_episode_complete is not None:
             # A run of this length ends by wall clock, not by finishing, so the record has
             # to be on disk before the next episode starts. A checkpoint that cannot be
@@ -549,7 +456,34 @@ class PokemonStrategist:
                 log_warn(f"Could not checkpoint the strategist report: {error}", self._parameters)
 
 
-def _bullets(entries: List[str]) -> str:
-    if not entries:
-        return "(the player did nothing that was worth recording)"
-    return "\n".join(f"- {entry}" for entry in entries)
+def _parse_dispatch(output: str) -> Tuple[Any, Optional[str]]:
+    task = clean_value(parse_key_value(output, "Task"))
+    if task is None:
+        return None, "The `Task:` line was missing or empty. It must be one concrete sentence."
+    return (task, clean_value(parse_key_value(output, "Guidance"))), None
+
+
+def _parse_notepad_update(output: str) -> Tuple[Any, Optional[str]]:
+    action, problem = single_value(output, "Action")
+    action = (action or "").rstrip(".").strip().upper()
+    if problem is not None or action not in ("APPEND", "REWRITE"):
+        return None, "There must be exactly one `Action:` line, saying APPEND or REWRITE."
+    lines = output.splitlines()
+    starts = [i for i, line in enumerate(lines) if line.replace("**", "").strip().lower().startswith("notes:")]
+    if len(starts) != 1:
+        return None, f"There must be exactly one `Notes:` line, found {len(starts)}."
+    first = lines[starts[0]].replace("**", "").strip()[len("notes:"):].strip()
+    body = [first] + lines[starts[0] + 1:]
+    notes = "\n".join(line for line in body if line.strip() != "[STOP]").strip()
+    if not notes:
+        return None, "The notes under `Notes:` were empty."
+    return (action, notes), None
+
+
+def _parse_facts(output: str) -> Tuple[Any, Optional[str]]:
+    if "facts:" not in output.lower():
+        return None, "There was no `Facts:` line. Give the facts as a list under it, or write `Facts: None`."
+    facts = [fact for fact in (clean_value(item) for item in parse_list(output, "Facts")) if fact]
+    if len(facts) > PokemonStrategist.MAX_FACTS:
+        return None, f"{len(facts)} facts were given. Write at most {PokemonStrategist.MAX_FACTS}."
+    return facts, None

@@ -3,13 +3,13 @@ Entry point for a strategist playthrough. Use --help for CLI options.
 
 Not a benchmark arm. Every arm in ``run_benchmark.py`` sweeps a fixed list of short tasks
 and scores each independently; a strategist run is the opposite shape -- one long-horizon
-ladder, one emulator session, and a sequence of tasks the strategist chooses as it goes.
+playthrough, one emulator session, and a sequence of tasks the strategist chooses as it goes.
 There is no task list to sweep and no per-task pass rate to average.
 
     python run_strategist.py --name gemma_starter --init_state starter \\
         --model google/gemma-4-31b-it --vlm_kind vllm --max_episodes 400
 
-State (knowledge, goals, locations, tiles) persists under
+State (tiles) persists under
 ``Paths.strategist_dir(name)`` and is resumed by default, so re-running the same --name
 continues the same playthrough. The episode record is checkpointed into the same directory
 after every episode.
@@ -30,7 +30,7 @@ from python_scripts import paths
 from utils import load_parameters, log_info
 
 #: As high as the emulator allows: its own budget must never be what ends a playthrough.
-#: The strategist stops on its own ladder, its episode count or the wall clock, and an
+#: The strategist stops on its episode count or the wall clock, and an
 #: emulator that truncated underneath it would look exactly like the agent giving up.
 #:
 #: This IS the ceiling -- ``gameboy_hard_max_steps`` in GameBoyWorlds' config is 1,000,000
@@ -42,7 +42,7 @@ DEFAULT_ENV_MAX_STEPS = 1_000_000
 
 @click.command()
 @click.option("--game", default="pokemon_red", type=str)
-@click.option("--init_state", default="starter", show_default=True, type=str,
+@click.option("--init_state", default="initial", show_default=True, type=str,
               help="Where the playthrough begins. 'starter' is the point where the first "
                    "party member is chosen; 'initial' is the true start of the game.")
 @click.option("--name", required=True, type=str,
@@ -66,18 +66,20 @@ DEFAULT_ENV_MAX_STEPS = 1_000_000
 @click.option("--env_max_steps", default=DEFAULT_ENV_MAX_STEPS, show_default=True, type=int)
 @click.option("--strategist_max_new_tokens", default=4800, show_default=True, type=int)
 @click.option("--supervisor_max_new_tokens", default=4800, show_default=True, type=int)
+@click.option("--subgoal_every", default=5, show_default=True, type=int,
+              help="Re-plan the current goal's subgoals every this many episodes it stays unchanged.")
 @click.option("--controller_variant", default="state_wise", show_default=True, type=str,
               help="The Pokemon executors act through state-wise actions, not low-level "
                    "button presses.")
 @click.option("--save_video", default=True, show_default=True, type=bool)
 @click.option("--resume/--fresh", default=True, show_default=True,
-              help="--fresh starts the ladder, knowledge, locations and the tile database "
+              help="--fresh starts the tile database "
                    "over, discarding what is on disk under this --name. It does NOT reset "
                    "the emulator to a later point: the run still starts at --init_state.")
 def main(game, init_state, name, model, vlm_kind, strategist_vlm_model, strategist_vlm_kind,
          supervisor_vlm_model, supervisor_vlm_kind, executor_vlm_model, executor_vlm_kind,
          max_episodes, supervisor_max_steps, env_max_steps, strategist_max_new_tokens,
-         supervisor_max_new_tokens, controller_variant, save_video, resume):
+         supervisor_max_new_tokens, subgoal_every, controller_variant, save_video, resume):
     """Play one long-horizon playthrough with the strategist."""
     parameters = load_parameters()
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -119,6 +121,7 @@ def main(game, init_state, name, model, vlm_kind, strategist_vlm_model, strategi
             strategist_vlm_kind=strategist_vlm_kind or vlm_kind,
             max_new_tokens=strategist_max_new_tokens,
             supervisor_max_new_tokens=supervisor_max_new_tokens,
+            subgoal_every=subgoal_every,
             resume=resume,
             on_episode_complete=checkpoint,
             parameters=parameters,
@@ -154,9 +157,6 @@ def serialise(report) -> dict:
         "strategist": report.strategist_name,
         "init_kwargs": report.init_kwargs,
         "stop_reason": report.stop_reason,
-        "task_ladder": report.task_ladder,
-        "locations": report.locations,
-        "final_knowledge": report.final_knowledge,
         "tokens": {
             "strategist_input": report.strategist_input_tokens,
             "strategist_output": report.strategist_output_tokens,
@@ -169,16 +169,10 @@ def serialise(report) -> dict:
         "episodes": [
             {
                 "n": episode.n,
-                "goal": episode.goal,
                 "task": episode.task,
                 "guidance": episode.guidance,
-                "location_before": episode.location_before,
-                "location_after": episode.location_after,
                 "status": episode.status,
                 "summary": episode.summary,
-                "goal_complete": episode.goal_complete,
-                "facts_added": episode.facts_added,
-                "subgoals_added": episode.subgoals_added,
                 "supervisor_report": (str(episode.supervisor_report)
                                       if episode.supervisor_report is not None else None),
             }

@@ -1,210 +1,302 @@
 """
-The knowledge base: short facts the strategist has learned, tagged by kind and by the
-location they were learned in.
+What the strategist knows: a tree of knowledge, organised by topic rather than by episode.
 """
 
 from __future__ import annotations
 
-import json
-import os
-import re
-from dataclasses import asdict, dataclass
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
-from utils import file_makedir
+from execution.artifact import StrategistArtifact, update
+from execution.strategist.pokemon import prompts as P
+from execution.strategist.pokemon.asking import Parser, ask
+from utils import log_error
+from utils.lm_inference import clean_value, parse_key_value
 
-KINDS = ("map", "npc", "item", "mechanic", "blocker", "objective")
-DEFAULT_KIND = "mechanic"
-RENDER_LIMIT = 3000
+KnowledgePath = Tuple[str, ...]
 
-_PUNCTUATION = re.compile(r"[^a-z0-9 ]+")
-
-
-def normalise(text: str) -> str:
-    return " ".join(_PUNCTUATION.sub(" ", (text or "").lower()).split())
-
-
-def clean_kind(kind: Optional[str]) -> str:
-    kind = (kind or "").strip().lower()
-    return kind if kind in KINDS else DEFAULT_KIND
+KNOWLEDGE_ATTEMPTS = 3
+RECALL_MAX_BRANCHES = 3
 
 
 @dataclass
-class Fact:
-    id: int
-    text: str
-    kind: str
-    location: Optional[str] = None
-    first_seen_episode: Optional[int] = None
-    last_seen_episode: Optional[int] = None
-    uses: int = 0
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Fact":
-        return cls(
-            id=int(data["id"]),
-            text=data["text"],
-            kind=clean_kind(data.get("kind")),
-            location=data.get("location"),
-            first_seen_episode=data.get("first_seen_episode"),
-            last_seen_episode=data.get("last_seen_episode"),
-            uses=int(data.get("uses", 0)),
-        )
-
-    def render(self, with_location: bool = False) -> str:
-        where = f", {self.location}" if with_location and self.location else ""
-        return f"- ({self.kind}{where}) {self.text}"
+class KnowledgeNode:
+    title: str
+    description: str
 
 
-class KnowledgeBase:
-    def __init__(self, facts: Optional[List[Fact]] = None) -> None:
-        self.facts: List[Fact] = list(facts or [])
-        self._next_id = max((fact.id for fact in self.facts), default=0) + 1
+class KnowledgeSubtree:
+    def __init__(self, root: KnowledgeNode, leaves: Optional[List["KnowledgeSubtree"]] = None,
+                 depth: int = 0) -> None:
+        self.root = root
+        self.depth = depth
+        self.leaves: List["KnowledgeSubtree"] = []
+        for leaf in leaves or []:
+            self.add(leaf)
 
-    def __len__(self) -> int:
-        return len(self.facts)
+    def add(self, child) -> "KnowledgeSubtree":
+        node = child if isinstance(child, KnowledgeSubtree) else KnowledgeSubtree(child)
+        node._set_depth(self.depth + 1)
+        self.leaves.append(node)
+        return node
 
-    # -- adding ----------------------------------------------------------
+    def _set_depth(self, depth: int) -> None:
+        self.depth = depth
+        for leaf in self.leaves:
+            leaf._set_depth(depth + 1)
 
-    def duplicate_of(self, text: str) -> Optional[Fact]:
-        wanted = normalise(text)
-        if not wanted:
+    def walk(self) -> Iterator["KnowledgeSubtree"]:
+        yield self
+        for leaf in self.leaves:
+            yield from leaf.walk()
+
+    def nodes(self) -> List[KnowledgeNode]:
+        return [tree.root for tree in self.walk()]
+
+    def find(self, title: str) -> Optional["KnowledgeSubtree"]:
+        wanted = title.strip().lower()
+        return next((tree for tree in self.walk()
+                     if tree.root.title.strip().lower() == wanted), None)
+
+    def paths(self, prefix: KnowledgePath = ()) -> Dict[KnowledgePath, KnowledgeNode]:
+        path = prefix + (self.root.title,)
+        out = {path: self.root}
+        for leaf in self.leaves:
+            out.update(leaf.paths(path))
+        return out
+
+    def at(self, path: KnowledgePath) -> Optional["KnowledgeSubtree"]:
+        if not path or path[0] != self.root.title:
             return None
-        for fact in self.facts:
-            existing = normalise(fact.text)
-            if existing == wanted:
-                return fact
-            if len(wanted) > 20 and (wanted in existing or existing in wanted):
-                return fact
-        return None
+        if len(path) == 1:
+            return self
+        return next((found for leaf in self.leaves if (found := leaf.at(path[1:])) is not None), None)
 
-    def add(self, text: str, kind: Optional[str] = None, location: Optional[str] = None,
-            episode: Optional[int] = None) -> Optional[Fact]:
-        text = (text or "").strip()
-        if not text:
-            return None
-        existing = self.duplicate_of(text)
-        if existing is not None:
-            existing.last_seen_episode = episode if episode is not None else existing.last_seen_episode
-            existing.uses += 1
-            return None
-        fact = Fact(id=self._next_id, text=text, kind=clean_kind(kind), location=location,
-                    first_seen_episode=episode, last_seen_episode=episode)
-        self._next_id += 1
-        self.facts.append(fact)
-        return fact
+    def render(self, indent: int = 0) -> str:
+        lines = [f"{'  ' * indent}- {self.root.title}: {self.root.description}"]
+        for leaf in self.leaves:
+            lines.append(leaf.render(indent + 1))
+        return "\n".join(lines)
 
-    def add_many(self, entries: Iterable[Tuple[str, Optional[str]]], location: Optional[str] = None,
-                 episode: Optional[int] = None) -> List[Fact]:
-        added = []
-        for text, kind in entries:
-            fact = self.add(text, kind, location, episode)
-            if fact is not None:
-                added.append(fact)
-        return added
 
-    # -- reading ---------------------------------------------------------
+class KnowledgeTree(StrategistArtifact):
+    def __init__(self, tree: KnowledgeSubtree) -> None:
+        self.tree = tree
 
-    def render(self, location: Optional[str] = None, limit: int = RENDER_LIMIT) -> str:
-        here = [f for f in self.facts if location and f.location == location]
-        game_wide = [f for f in self.facts if f.location is None]
-        seen = {id(f) for f in here} | {id(f) for f in game_wide}
-        elsewhere = [f for f in self.facts if id(f) not in seen]
-        sections = [
-            (f"What you know about {location}:" if location else None, here, False),
-            ("What you know about the game:", game_wide, False),
-            ("What you know about other places:", elsewhere, True),
-        ]
-        lines: List[str] = []
-        used = 0
-        for heading, facts, with_location in sections:
-            if not facts or heading is None:
-                continue
-            block = [heading] + [fact.render(with_location) for fact in facts]
-            for line in block:
-                if used + len(line) + 1 > limit:
-                    lines.append("... (older facts not shown)")
-                    return "\n".join(lines)
-                lines.append(line)
-                used += len(line) + 1
-            lines.append("")
-            used += 1
-        rendered = "\n".join(lines).strip()
-        return rendered or "You have not learned anything yet."
+    def _at(self, path: KnowledgePath) -> KnowledgeSubtree:
+        subtree = self.tree.at(path)
+        if subtree is None:
+            log_error(f"No knowledge at {' > '.join(path)!r}.")
+        return subtree
 
-    def render_all(self) -> str:
-        if not self.facts:
-            return "(the knowledge base is empty)"
-        return "\n".join(
-            f"- ({fact.kind}, {fact.location or 'game-wide'}) {fact.text}" for fact in self.facts
-        )
+    @update
+    def add_under(self, path: KnowledgePath, child) -> KnowledgeSubtree:
+        return self._at(path).add(child)
 
-    def counts_by_kind(self) -> Dict[str, int]:
-        counts: Dict[str, int] = {}
-        for fact in self.facts:
-            counts[fact.kind] = counts.get(fact.kind, 0) + 1
-        return counts
+    @update
+    def set_description(self, path: KnowledgePath, description: str) -> None:
+        self._at(path).root.description = description
 
-    # -- reorganising ----------------------------------------------------
+    def render(self) -> str:
+        return self.tree.render()
 
-    def replace(self, entries: Iterable[Tuple[str, Optional[str], Optional[str]]],
-                episode: Optional[int] = None) -> None:
-        by_text = {normalise(fact.text): fact for fact in self.facts}
-        rebuilt: List[Fact] = []
-        next_id = 1
-        for text, kind, location in entries:
-            text = (text or "").strip()
-            if not text:
-                continue
-            old = by_text.get(normalise(text))
-            rebuilt.append(Fact(
-                id=next_id,
-                text=text,
-                kind=clean_kind(kind),
-                location=location,
-                first_seen_episode=old.first_seen_episode if old else episode,
-                last_seen_episode=episode,
-                uses=old.uses if old else 0,
-            ))
-            next_id += 1
-        self.facts = rebuilt
-        self._next_id = next_id
+    def diff(self, old: "KnowledgeTree") -> Dict[str, Any]:
+        new_nodes = self.tree.paths()
+        old_nodes = old.tree.paths()
+        description_changed = {
+            path: (old_nodes[path].description, node.description)
+            for path, node in new_nodes.items()
+            if path in old_nodes and old_nodes[path].description != node.description
+        }
+        return {
+            "description_changed": description_changed,
+            "added": [p for p in new_nodes if p not in old_nodes],
+            "removed": [p for p in old_nodes if p not in new_nodes],
+        }
 
-    # -- persistence -----------------------------------------------------
 
-    def to_list(self) -> List[Dict[str, Any]]:
-        return [fact.to_dict() for fact in self.facts]
+class PokemonKnowledgeTree(KnowledgeTree):
+    def __init__(self) -> None:
+        tree = KnowledgeSubtree(KnowledgeNode(title="All", description="All"))
+        tree.add(KnowledgeNode(title="Active Story",
+                               description="What is currently happening and what the player is in the middle of."))
+        tree.add(KnowledgeNode(title="Game Lore",
+                               description="Background world knowledge that does not change as the game is played."))
+        tree.add(KnowledgeNode(title="NPCs",
+                               description="Who has been met, what they said, and what they want."))
+        tree.add(KnowledgeNode(title="Locations",
+                               description="Where places are, how they connect, and what is in them."))
+        tree.add(KnowledgeNode(title="Items",
+                               description="What has been found, what is available, and where."))
+        tree.add(KnowledgeNode(title="Pokemon",
+                               description="What has been caught, trained, or fought, and how it performed."))
+        tree.add(KnowledgeNode(title="Game Control Meta",
+                               description="How to issue tasks and guidance to the player effectively: which kinds "
+                                           "of instructions worked or failed, and why, so later tasks are "
+                                           "phrased and scoped better."))
+        super().__init__(tree)
 
-    def save(self, path: str) -> str:
-        file_makedir(path)
-        with open(path, "w") as f:
-            json.dump({"next_id": self._next_id, "facts": self.to_list()}, f, indent=2)
-        return path
 
-    def archive(self, path: str) -> Optional[str]:
-        """Copy the current file aside as ``knowledge_<n>.json`` before it is rewritten."""
-        if not os.path.exists(path):
-            return None
-        stem, extension = os.path.splitext(path)
-        n = 1
-        while os.path.exists(f"{stem}_{n}{extension}"):
-            n += 1
-        archived = f"{stem}_{n}{extension}"
-        with open(path) as source, open(archived, "w") as target:
-            target.write(source.read())
-        return archived
+def _path_text(path: KnowledgePath) -> str:
+    return " > ".join(path)
 
-    @classmethod
-    def load(cls, path: str, missing_ok: bool = True) -> Optional["KnowledgeBase"]:
-        if not os.path.exists(path):
-            if missing_ok:
-                return None
-            raise FileNotFoundError(path)
-        with open(path) as f:
-            data = json.load(f)
-        base = cls([Fact.from_dict(entry) for entry in data.get("facts", [])])
-        base._next_id = max(base._next_id, int(data.get("next_id", 0)))
-        return base
+
+def _node_prompt(template: str, game: str, text: str, path: KnowledgePath, node: KnowledgeSubtree) -> str:
+    children = "\n".join(f"{i}. {child.root.title}: {child.root.description}"
+                         for i, child in enumerate(node.leaves))
+    siblings = "\n".join(f"- {child.root.title}" for child in node.leaves)
+    return (template.replace("[GAME]", game)
+            .replace("[KNOWLEDGE]", text)
+            .replace("[QUERY]", text)
+            .replace("[PATH]", _path_text(path))
+            .replace("[DESCRIPTION]", node.root.description)
+            .replace("[CHILDREN]", children)
+            .replace("[SIBLINGS]", siblings or "(none)")
+            .replace("[LAST]", node.root.title))
+
+
+def _child_index(choice: str, children: List[KnowledgeSubtree]) -> Optional[int]:
+    choice = choice.strip().rstrip(".").strip()
+    if choice.isdigit():
+        return int(choice) if int(choice) < len(children) else None
+    matches = [i for i, child in enumerate(children) if child.root.title.strip().lower() == choice.lower()]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _parse_navigation(children: List[KnowledgeSubtree]) -> Parser:
+    valid = f"one of the entry numbers 0 to {len(children) - 1}, or NEW"
+
+    def parse(output: str) -> Tuple[Any, Optional[str]]:
+        choice = clean_value(parse_key_value(output, "Choice"))
+        if choice is None:
+            return None, f"The `Choice:` line was missing or empty. It must be {valid}."
+        if choice.upper() == "NEW":
+            return "NEW", None
+        index = _child_index(choice, children)
+        if index is None:
+            return None, f"{choice!r} is not a valid choice. It must be {valid}."
+        return index, None
+    return parse
+
+
+def _parse_recall(children: List[KnowledgeSubtree]) -> Parser:
+    valid = (f"at most {RECALL_MAX_BRANCHES} entry numbers from 0 to {len(children) - 1} separated by commas, "
+             "or NOT FOUND")
+
+    def parse(output: str) -> Tuple[Any, Optional[str]]:
+        choice = clean_value(parse_key_value(output, "Choice"))
+        if choice is None:
+            return None, f"The `Choice:` line was missing or empty. It must be {valid}."
+        if choice.upper().replace("_", " ") == "NOT FOUND":
+            return [], None
+        indices: List[int] = []
+        for part in choice.split(","):
+            index = _child_index(part, children)
+            if index is None:
+                return None, f"{part.strip()!r} is not a valid entry. The choice must be {valid}."
+            if index not in indices:
+                indices.append(index)
+        if len(indices) > RECALL_MAX_BRANCHES:
+            return None, f"{len(indices)} entries were chosen. The choice must be {valid}."
+        return indices, None
+    return parse
+
+
+def _parse_leaf(output: str) -> Tuple[Any, Optional[str]]:
+    choice = clean_value(parse_key_value(output, "Choice"))
+    if choice is None or choice.upper() not in ("KNOWN", "UPDATE", "NEW"):
+        return None, f"The `Choice:` line must be KNOWN, UPDATE or NEW, got {choice!r}."
+    choice = choice.upper()
+    description = clean_value(parse_key_value(output, "New Description"))
+    if choice == "UPDATE" and description is None:
+        return None, "UPDATE needs the full rewritten description on the `New Description:` line."
+    return (choice, description), None
+
+
+def _parse_create(sibling_titles: List[str]) -> Parser:
+    taken = {title.strip().lower() for title in sibling_titles}
+
+    def parse(output: str) -> Tuple[Any, Optional[str]]:
+        parent_title = clean_value(parse_key_value(output, "Parent Title"))
+        parent_description = clean_value(parse_key_value(output, "Parent Description"))
+        entry_title = clean_value(parse_key_value(output, "Entry Title"))
+        entry_description = clean_value(parse_key_value(output, "Entry Description"))
+        if entry_title is None or entry_description is None:
+            return None, "Both `Entry Title:` and `Entry Description:` must be filled in."
+        if (parent_title is None) != (parent_description is None):
+            return None, "`Parent Title:` and `Parent Description:` must both be filled in, or both be None."
+        top_title = parent_title or entry_title
+        if top_title.strip().lower() in taken:
+            return None, f"The title {top_title!r} is already used by an entry there. Choose a different title."
+        if parent_title is not None and parent_title.strip().lower() == entry_title.strip().lower():
+            return None, "The entry's title must differ from its parent's."
+        entry = KnowledgeNode(title=entry_title, description=entry_description)
+        if parent_title is None:
+            return KnowledgeSubtree(entry), None
+        return KnowledgeSubtree(KnowledgeNode(title=parent_title, description=parent_description),
+                                [KnowledgeSubtree(entry)]), None
+    return parse
+
+
+def _create(knowledge: KnowledgeTree, knowledge_text: str, path: KnowledgePath, vlm_call: Callable[..., str],
+            game: str, episode_number: int, parameters: Optional[dict]) -> Dict[str, Any]:
+    at = knowledge.tree.at(path)
+    prompt = _node_prompt(P.KNOWLEDGE_CREATE_PROMPT, game, knowledge_text, path, at)
+    subtree = ask(vlm_call, prompt, _parse_create([child.root.title for child in at.leaves]),
+                  "Knowledge create", KNOWLEDGE_ATTEMPTS, parameters)
+    if subtree is None:
+        return {"outcome": "failed", "stage": "create", "path": path}
+    knowledge.add_under(path, subtree, episode_number=episode_number)
+    added = path + tuple(node.title for node in [subtree.root] + [leaf.root for leaf in subtree.leaves])
+    return {"outcome": "added", "path": added}
+
+
+def remember(knowledge: KnowledgeTree, knowledge_text: str, vlm_call: Callable[..., str], game: str,
+             episode_number: int, parameters: Optional[dict] = None) -> Dict[str, Any]:
+    node = knowledge.tree
+    path: KnowledgePath = (node.root.title,)
+    while node.leaves:
+        prompt = _node_prompt(P.KNOWLEDGE_NAVIGATE_PROMPT, game, knowledge_text, path, node)
+        choice = ask(vlm_call, prompt, _parse_navigation(node.leaves), "Knowledge navigation",
+                     KNOWLEDGE_ATTEMPTS, parameters)
+        if choice is None:
+            return {"outcome": "failed", "stage": "navigation", "path": path}
+        if choice == "NEW":
+            return _create(knowledge, knowledge_text, path, vlm_call, game, episode_number, parameters)
+        node = node.leaves[choice]
+        path = path + (node.root.title,)
+    if len(path) == 1:
+        return _create(knowledge, knowledge_text, path, vlm_call, game, episode_number, parameters)
+    prompt = _node_prompt(P.KNOWLEDGE_LEAF_PROMPT, game, knowledge_text, path, node)
+    decision = ask(vlm_call, prompt, _parse_leaf, "Knowledge leaf", KNOWLEDGE_ATTEMPTS, parameters)
+    if decision is None:
+        return {"outcome": "failed", "stage": "leaf", "path": path}
+    choice, description = decision
+    if choice == "KNOWN":
+        return {"outcome": "known", "path": path}
+    if choice == "UPDATE":
+        knowledge.set_description(path, description, episode_number=episode_number)
+        return {"outcome": "updated", "path": path}
+    return _create(knowledge, knowledge_text, path[:-1], vlm_call, game, episode_number, parameters)
+
+
+def _recall_at(node: KnowledgeSubtree, path: KnowledgePath, query: str, vlm_call: Callable[..., str],
+               game: str, parameters: Optional[dict]) -> List[Dict[str, Any]]:
+    if not node.leaves:
+        if len(path) == 1:
+            return []
+        return [{"path": path, "title": node.root.title, "description": node.root.description}]
+    prompt = (_node_prompt(P.KNOWLEDGE_RECALL_PROMPT, game, query, path, node)
+              .replace("[MAX_BRANCHES]", str(RECALL_MAX_BRANCHES)))
+    indices = ask(vlm_call, prompt, _parse_recall(node.leaves), "Knowledge recall", KNOWLEDGE_ATTEMPTS,
+                  parameters)
+    found: List[Dict[str, Any]] = []
+    for index in indices or []:
+        child = node.leaves[index]
+        found += _recall_at(child, path + (child.root.title,), query, vlm_call, game, parameters)
+    return found
+
+
+def recall(knowledge: KnowledgeTree, query: str, vlm_call: Callable[..., str], game: str,
+           parameters: Optional[dict] = None) -> List[Dict[str, Any]]:
+    return _recall_at(knowledge.tree, (knowledge.tree.root.title,), query, vlm_call, game, parameters)

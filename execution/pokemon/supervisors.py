@@ -90,11 +90,12 @@ class PokemonPlayThroughSupervisor(Supervisor):
     MAX_REPLANS = 2
 
     def __init__(self, task: str, env, game: str, max_steps: int,
-                 tile_recognizer: TileRecognizer, guidance: Optional[str] = None,
+                 tile_recognizer: TileRecognizer, episode_number: int, guidance: Optional[str] = None,
                  **kwargs: Any) -> None:
         self._current_tag: Optional[str] = None
         self._guidance = guidance
         self._tile_recognizer = tile_recognizer
+        self._episode_number = episode_number
         self._screen_tiles: Optional[str] = None
         self._identified = None
         self._calls = 0
@@ -108,6 +109,7 @@ class PokemonPlayThroughSupervisor(Supervisor):
         config = super()._run_config()
         config["guidance"] = self._guidance
         config["tile_recognizer"] = self._tile_recognizer.name
+        config["episode_number"] = self._episode_number
         config["max_executor_calls"] = self._max_steps
         config["max_subgoal_attempts"] = self.MAX_SUBGOAL_ATTEMPTS
         config["max_replans"] = self.MAX_REPLANS
@@ -124,7 +126,7 @@ class PokemonPlayThroughSupervisor(Supervisor):
         return self._env.get_info()["pokemon_core"]["agent_state"]
 
     def _perceive(self, frame) -> str:
-        self._tile_recognizer.record_tiles(frame)
+        self._tile_recognizer.record_tiles(frame, self._episode_number)
         self._identified = self._tile_recognizer.identify_tiles(frame)
         self._screen_tiles = verbalize_tiles(self._identified)
         return self._screen_tiles
@@ -266,7 +268,7 @@ class PokemonPlayThroughSupervisor(Supervisor):
         after = report.final_state["core"]["current_frame"]
         after_block = ""
         if report.final_state["pokemon_core"]["agent_state"] == AgentState.FREE_ROAM:
-            self._tile_recognizer.record_tiles(after)
+            self._tile_recognizer.record_tiles(after, self._episode_number)
             after_tiles = verbalize_tiles(self._tile_recognizer.identify_tiles(after))
             after_block = PLAYTHROUGH_AFTER_BLOCK.replace("[AFTER_TILES]", after_tiles)
         text = result.get("dialogue") or ""
@@ -447,7 +449,26 @@ class PokemonPlayThroughSupervisor(Supervisor):
                 return "complete", attempts
         return "stuck", attempts
 
+    def _digest(self, status: str, reason: Optional[str], summary: Optional[str]) -> str:
+        lines = [f"Task: {self._task}"]
+        if self._guidance:
+            lines.append(f"Guidance: {self._guidance}")
+        lines.append(f"Outcome: {status}" + (f" ({reason})" if reason else ""))
+        if summary:
+            lines.append(f"Final check: {summary}")
+        if self.plan:
+            lines.append("Last plan:")
+            lines += [f"{n + 1}. {subgoal}" for n, subgoal in enumerate(self.plan)]
+        lines.append("What happened, in order:")
+        lines += [f"- {entry}" for entry in self.report.narrative] or ["- (nothing was recorded)"]
+        texts = [report for report in self.report.executor_reports if report.notes and report.notes.strip()]
+        if texts:
+            lines.append("Text seen along the way, in order:")
+            lines += [f"- while doing \"{report.task}\": {report.notes.strip()}" for report in texts]
+        return "\n".join(lines)
+
     def _finish(self, status: str, reason: Optional[str] = None, summary: Optional[str] = None) -> dict:
+        self.report.digest = self._digest(status, reason, summary)
         return {
             "status": status,
             "reason": reason,

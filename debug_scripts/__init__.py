@@ -24,6 +24,7 @@ from debug_scripts.compare import debug_compare
 from debug_scripts.info import debug_info
 from debug_scripts.retrieval import debug_retrieval
 from debug_scripts.practice import debug_practice
+from debug_scripts.strategist import debug_strategist
 
 __all__ = [
     "check_paths",
@@ -36,4 +37,5 @@ __all__ = [
     "debug_info",
     "debug_retrieval",
     "debug_practice",
+    "debug_strategist",
 ]

@@ -31,17 +31,11 @@ class StrategistVLMCallRecord:
 @dataclass
 class EpisodeRecord:
     n: int
-    goal: str
     task: str
     guidance: Optional[str] = None
-    location_before: Optional[str] = None
-    location_after: Optional[str] = None
     supervisor_report: Optional[SupervisorReport] = None
     status: str = "incomplete"
     summary: str = ""
-    goal_complete: bool = False
-    facts_added: List[str] = field(default_factory=list)
-    subgoals_added: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -49,11 +43,7 @@ class StrategistReport:
     game: str
     strategist_name: str
     init_kwargs: Dict[str, Any] = field(default_factory=dict)
-    task_ladder: List[str] = field(default_factory=list)
     episodes: List[EpisodeRecord] = field(default_factory=list)
-    knowledge_snapshots: List[List[Dict[str, Any]]] = field(default_factory=list)
-    final_knowledge: List[Dict[str, Any]] = field(default_factory=list)
-    locations: List[str] = field(default_factory=list)
     event_log: List[Union[StrategistVLMCallRecord, SupervisorReport]] = field(default_factory=list)
     stop_reason: str = "incomplete"
 
@@ -94,21 +84,15 @@ class StrategistReport:
         return sum(report.n_invalid for report in self.supervisor_reports)
 
     def summary_table(self) -> str:
-        lines = [f"{'#':>3}  {'status':<24} {'location':<24} {'facts':>5}  goal / task"]
+        lines = [f"{'#':>3}  {'status':<24} task"]
         for episode in self.episodes:
-            lines.append(
-                f"{episode.n:>3}  {episode.status:<24} {(episode.location_after or '?'):<24} "
-                f"{len(episode.facts_added):>5}  {episode.goal}"
-            )
-            lines.append(f"{'':>3}  {'':<24} {'':<24} {'':>5}  -> {episode.task}")
+            lines.append(f"{episode.n:>3}  {episode.status:<24} {episode.task}")
         return "\n".join(lines)
 
     def __str__(self) -> str:
         lines = [
             f"Strategist: {self.strategist_name} on {self.game}",
             f"Stopped: {self.stop_reason} after {len(self.episodes)} episodes",
-            f"Locations seen: {', '.join(self.locations) or '(none)'}",
-            f"Knowledge: {len(self.final_knowledge)} facts",
             "",
             self.summary_table(),
         ]

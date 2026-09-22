@@ -1,6 +1,5 @@
 """
-The layer above the supervisor: long-horizon goals, a knowledge base, and where the
-player is.
+The layer above the supervisor: a map of the world and the sequence of tasks it hands down.
 """
 
 from execution.strategist.report import (EpisodeRecord, StrategistReport,

@@ -1,15 +1,13 @@
-import os
-import pickle
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from execution.artifact import StrategistArtifact, update
 from execution.perception.matching import cell_key, split_quarters
 from execution.perception.pokemon.grid import GRID_SKIP, cell_box, draw_box, split_grid
 from execution.perception.pokemon.prompts import PLAYER_SIDES, TILE_IN_CELL_PROMPT, TILE_TAGS, fill_player_note
-from python_scripts.paths import tile_recognizer_file
-from utils import file_makedir, log_error, log_info, parse_key_value
+from utils import log_error, parse_key_value
 
 TileKey = Tuple[int, int, str]
 
@@ -115,7 +113,11 @@ def verbalize_neighbourhood(identified: Dict[TileKey, Tile]) -> str:
     )
 
 
-class TileRecognizer:
+class TileRecognizer(StrategistArtifact):
+    #: Not picklable -- it closes over the strategist's bound VLM call. Callers must
+    #: call set_vlm_call() again after load().
+    _TRANSIENT = ("vlm_call",)
+
     def __init__(
         self,
         name: str,
@@ -134,29 +136,13 @@ class TileRecognizer:
     def set_vlm_call(self, vlm_call: Callable[..., Any]) -> None:
         self.vlm_call = vlm_call
 
-    @property
-    def path(self) -> str:
-        return tile_recognizer_file(self.parameters, game=self.game, name=self.name)
-
-    def save(self, path: Optional[str] = None) -> str:
-        path = path or self.path
-        file_makedir(path)
-        with open(path, "wb") as f:
-            pickle.dump(self.tiles, f)
-        log_info(f"Saved {len(self.tiles)} tiles for tile recognizer {self.name!r} to {path}")
-        return path
-
-    def load(self, path: Optional[str] = None, missing_ok: bool = False) -> None:
-        path = path or self.path
-        if not os.path.exists(path):
-            if missing_ok:
-                return
-            log_error(f"No saved tiles for tile recognizer {self.name!r} at {path}", self.parameters)
-        with open(path, "rb") as f:
-            tiles = pickle.load(f)
-        self.tiles = list(tiles)
-        self._by_hash = {tile.hash: tile for tile in self.tiles}
-        log_info(f"Loaded {len(self.tiles)} tiles for tile recognizer {self.name!r} from {path}")
+    def diff(self, old: "TileRecognizer") -> Dict[str, Any]:
+        old_hashes = {tile.hash for tile in old.tiles}
+        new_tiles = [tile for tile in self.tiles if tile.hash not in old_hashes]
+        by_tag: Dict[str, int] = {}
+        for tile in new_tiles:
+            by_tag[tile.tag] = by_tag.get(tile.tag, 0) + 1
+        return {"new_tiles": new_tiles, "new_tile_count_by_tag": by_tag}
 
     def _split(self, frame: np.ndarray) -> Dict[TileKey, np.ndarray]:
         pieces = {}
@@ -174,7 +160,7 @@ class TileRecognizer:
                 identified[key] = self._by_hash.get(cell_key(piece), UNKNOWN_TILE)
         return identified
 
-    def record_tiles(self, frame: np.ndarray) -> None:
+    def record_tiles(self, frame: np.ndarray, episode_number: int) -> None:
         pieces = self._split(frame)
         new_groups: Dict[str, List[TileKey]] = {}
         for key, piece in pieces.items():
@@ -207,9 +193,14 @@ class TileRecognizer:
             ])
 
         outputs = self.vlm_call(texts=texts, images=images, max_new_tokens=self.max_new_tokens)
-        for tile_hash, output in zip(hashes, outputs):
-            key = new_groups[tile_hash][0]
-            tile = Tile(image=np.array(pieces[key]), hash=tile_hash, tag=parse_tag(output),
-                        description=parse_description(output))
+        self._add_tiles([
+            Tile(image=np.array(pieces[new_groups[tile_hash][0]]), hash=tile_hash, tag=parse_tag(output),
+                 description=parse_description(output))
+            for tile_hash, output in zip(hashes, outputs)
+        ], episode_number=episode_number)
+
+    @update
+    def _add_tiles(self, tiles: List[Tile]) -> None:
+        for tile in tiles:
             self.tiles.append(tile)
-            self._by_hash[tile_hash] = tile
+            self._by_hash[tile.hash] = tile

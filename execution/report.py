@@ -637,6 +637,7 @@ class SupervisorReport:
     init_kwargs: Dict[str, Any] = field(default_factory=dict)
     event_log: List[Union[SupervisorVLMCallRecord, ExecutorReport]] = field(default_factory=list)
     narrative: List[str] = field(default_factory=list)
+    digest: Optional[str] = None
 
     @property
     def supervisor_calls(self) -> List[SupervisorVLMCallRecord]:

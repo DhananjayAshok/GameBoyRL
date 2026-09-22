@@ -61,6 +61,13 @@ def parse_key_value(text: str, key: str) -> Optional[str]:
     return None
 
 
+def clean_value(value: Optional[str]) -> Optional[str]:
+    value = (value or "").strip().strip('"\'').strip()
+    if not value or value.lower() in ("none", "n/a", "na", "unknown"):
+        return None
+    return value
+
+
 def parse_yes_no(text: str, key: str) -> Optional[bool]:
     """
     Return the yes/no verdict on the ``"Key:"`` line of ``text``.
