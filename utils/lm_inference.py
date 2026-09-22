@@ -1,5 +1,5 @@
 import httpx
-from openai import AsyncOpenAI
+from openai import APITimeoutError, AsyncOpenAI
 from anthropic import AsyncAnthropic
 from time import sleep, perf_counter
 import asyncio
@@ -87,6 +87,33 @@ def parse_yes_no(text: str, key: str) -> Optional[bool]:
 
 
 MIN_QUERIES_PER_MINUTE = 1
+
+#: Retries for a timed-out call to a hosted API. A timeout means the provider stopped
+#: answering, not that we asked too fast, so the rate-limit-derived backoff below is far
+#: too short to outlast it: a 200 queries/minute model waits 0.3s, and five of those are
+#: spent inside a few minutes of a stall that can last much longer. A run is hours long
+#: and its state is checkpointed per episode, so waiting is nearly always better than
+#: dying. Local vLLM is excluded: a hung server there will not heal on its own.
+TIMEOUT_MAX_TRIES = 20
+TIMEOUT_BACKOFF_FLOOR = 60.0
+TIMEOUT_BACKOFF_CAP = 600.0
+
+
+def _is_timeout(error: Exception) -> bool:
+    return isinstance(error, (APITimeoutError, httpx.TimeoutException, asyncio.TimeoutError))
+
+
+def _retry_backoff(attempt: int, seconds_to_wait: float, timeout_retry: bool) -> float:
+    """Seconds to wait before the retry following ``attempt`` (0-based), with jitter.
+
+    Jitter spreads coroutines that all failed together, which matters most here: one
+    perception batch can be tens of concurrent calls that time out in the same second.
+    """
+    if timeout_retry:
+        backoff = TIMEOUT_BACKOFF_FLOOR * (2**attempt) * random.uniform(1.0, 1.5)
+        return min(backoff, TIMEOUT_BACKOFF_CAP)
+    return seconds_to_wait * (2**attempt) * random.uniform(1.0, 1.5)
+
 
 # Placeholder per-model rate limits (queries per minute).
 _RATE_LIMITS: dict[str, int] = {
@@ -776,6 +803,10 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
 
     SUPPORTS_NATIVE_N: bool = False
 
+    #: Whether the endpoint is one we run ourselves (vLLM), where a timeout means the
+    #: server is hung or dead rather than a provider being briefly unreachable.
+    LOCAL_ENDPOINT: bool = False
+
     def __init__(
         self,
         model: str,
@@ -1273,7 +1304,8 @@ class OpenAIAPIModel(OpenAICompatibleAPIBase, APIModel):
             kwargs["temperature"] = temperature
         max_tries = 5
         last_error = None
-        for attempt in range(max_tries):
+        attempt = 0
+        while True:
             try:
                 response = await client.chat.completions.create(**kwargs)
                 if response is None or not getattr(response, "choices", None):
@@ -1283,24 +1315,28 @@ class OpenAIAPIModel(OpenAICompatibleAPIBase, APIModel):
                 return response
             except Exception as e:
                 last_error = e
+                timeout_retry = _is_timeout(e) and not self.LOCAL_ENDPOINT
+                if timeout_retry:
+                    max_tries = max(max_tries, TIMEOUT_MAX_TRIES)
                 log_warn(
                     f"OpenAI API call failed on attempt {attempt+1}/{max_tries} with error: {e}"
                 )
-                if attempt < max_tries - 1:
-                    # exponential backoff with time_to_wait between attempts, plus jitter so
-                    # concurrent coroutines retrying after the same failure don't all collide
-                    backoff_time = (
-                        self.seconds_to_wait * (2**attempt) * random.uniform(1.0, 1.5)
+                attempt += 1
+                if attempt >= max_tries:
+                    break
+                backoff_time = _retry_backoff(
+                    attempt - 1, self.seconds_to_wait, timeout_retry
+                )
+                if backoff_time < 0:
+                    # Unmetered endpoints (vLLM) carry a negative seconds_to_wait, so
+                    # there is no backoff to report — the retry is immediate.
+                    log_info("Got connection error with vLLM, trying again.")
+                else:
+                    log_info(
+                        f"Waiting for {backoff_time:.2f} seconds before retrying"
+                        f"{' after a timeout' if timeout_retry else ''}..."
                     )
-                    if backoff_time < 0:
-                        # Unmetered endpoints (vLLM) carry a negative seconds_to_wait, so
-                        # there is no backoff to report — the retry is immediate.
-                        log_info("Got connection error with vLLM, trying again.")
-                    else:
-                        log_info(
-                            f"Waiting for {backoff_time:.2f} seconds before retrying..."
-                        )
-                    await asyncio.sleep(backoff_time)
+                await asyncio.sleep(backoff_time)
         raise RuntimeError(
             f"OpenAI API call failed after {max_tries} attempts. Last error: {last_error}"
         ) from last_error
@@ -1476,7 +1512,8 @@ class AnthropicModel(APIModel):
         )
         max_tries = 5
         last_error = None
-        for attempt in range(max_tries):
+        attempt = 0
+        while True:
             try:
                 response = await client.messages.create(**kwargs)
                 if response is None or not getattr(response, "content", None):
@@ -1486,19 +1523,23 @@ class AnthropicModel(APIModel):
                 return response
             except Exception as e:
                 last_error = e
+                timeout_retry = _is_timeout(e) and not self.LOCAL_ENDPOINT
+                if timeout_retry:
+                    max_tries = max(max_tries, TIMEOUT_MAX_TRIES)
                 log_warn(
                     f"Anthropic API call failed on attempt {attempt+1}/{max_tries} with error: {e}"
                 )
-                if attempt < max_tries - 1:
-                    # exponential backoff with time_to_wait between attempts, plus jitter so
-                    # concurrent coroutines retrying after the same failure don't all collide
-                    backoff_time = (
-                        self.seconds_to_wait * (2**attempt) * random.uniform(1.0, 1.5)
-                    )
-                    log_info(
-                        f"Waiting for {backoff_time:.2f} seconds before retrying..."
-                    )
-                    await asyncio.sleep(backoff_time)
+                attempt += 1
+                if attempt >= max_tries:
+                    break
+                backoff_time = _retry_backoff(
+                    attempt - 1, self.seconds_to_wait, timeout_retry
+                )
+                log_info(
+                    f"Waiting for {backoff_time:.2f} seconds before retrying"
+                    f"{' after a timeout' if timeout_retry else ''}..."
+                )
+                await asyncio.sleep(backoff_time)
         raise RuntimeError(
             f"Anthropic API call failed after {max_tries} attempts. Last error: {last_error}"
         ) from last_error
@@ -1536,6 +1577,8 @@ class vLLMModel(OpenAIAPIModel):
     Uses the OpenAI client pointed at a local or remote vLLM server. The base
     URL is read from ``parameters["vLLM_base_url"]``.
     """
+
+    LOCAL_ENDPOINT: bool = True
 
     def __init__(
         self,
