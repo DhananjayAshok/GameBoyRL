@@ -19,10 +19,7 @@
 
 <img src="assets/logo.png" width="70px"> is the first testbed for self-improvement in complex, long-horizon video games. It challenges models to learn from experience alone, and learn continually during deployment in unfamiliar environments. 
 
-<div align="center">
-  <video src="https://github.com/DhananjayAshok/GameBoyRL/raw/main/assets/GameBoyWorldsTeaser.mp4" controls muted loop width="700"></video>
-  <br>
-</div>
+![](assets/GameBoyWorldsTeaser.gif)
 
 This repository established two things:
 
