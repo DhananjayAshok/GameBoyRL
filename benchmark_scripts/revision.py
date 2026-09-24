@@ -20,7 +20,7 @@ from python_scripts import paths
 
 SUMMARY_COLUMNS = ["n_attempts", "n_supervisor_calls"]
 
-_EMPTY_SUMMARY = {"n_attempts": 0, "n_supervisor_calls": 0}
+_EMPTY_SUMMARY = {key: 0 for key in SUMMARY_COLUMNS}
 
 
 def _summary(result: dict, report) -> dict:

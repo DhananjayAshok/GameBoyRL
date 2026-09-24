@@ -1,20 +1,20 @@
+#!/usr/bin/env bash
+# guidance -> practice -> clean -> dataset, for every title with zeroshot attempts to
+# practice from. See runs/games.sh PRACTICE_GAMES.
+
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
+source configs/config.env || { echo "Could not source configs/config.env"; exit 1; }
+source runs/games.sh || { echo "Could not source runs/games.sh"; exit 1; }
 
 MODEL="google/gemma-4-31b-it"
 VLM_KIND="vllm"
 EXECUTOR="single_visual"
 CONTROLLER_VARIANT="low_level"
 
-PRACTICE_GAMES="deja_vu_1 \
-                pokemon_red \
-                sword_of_hope_1 \
-                legend_of_zelda_links_awakening \
-                bomberman_quest"
-
 declare -A STEMS
 MISSING=""
 
-for GAME in $PRACTICE_GAMES; do
+for GAME in "${PRACTICE_GAMES[@]}"; do
     base=$(path_of zeroshot_dir --game "$GAME" --model_name "$MODEL")
     stem="$base/zeroshot_tasks_${EXECUTOR}_${CONTROLLER_VARIANT}_attempts/success_trajectories"
     if [[ -f "$stem.json" && -f "$stem.pkl" ]]; then
@@ -36,7 +36,7 @@ echo "Will run guidance -> practice -> clean -> dataset for: ${!STEMS[@]}"
 
 bash scripts/core/serve_vllm.sh "$MODEL" || { echo "Could not serve vLLM"; exit 1; }
 
-for GAME in $PRACTICE_GAMES; do
+for GAME in "${PRACTICE_GAMES[@]}"; do
     [[ -z "${STEMS[$GAME]}" ]] && continue
     echo ""
     echo "############################################################"

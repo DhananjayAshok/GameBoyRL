@@ -1,18 +1,24 @@
 #!/usr/bin/env bash
-# Reports zero-shot task proposal: for every init_state, the first frame the proposer saw,
-# the tasks it proposed, and the benchmark tasks actually anchored to that state. Writes
-# <results_dir>/debug/<game>/zeroshot/report.md.
+# One long-horizon strategist playthrough. The invocation the slurm/strategist_*.sh files
+# wrap, so the six of them stop each carrying their own copy.
 #
-# This is the only debug script that starts an emulator (the first frame is saved nowhere),
-# so it needs the game's ROM. No GPU and no VLM.
+# Does NOT start a vLLM server. For --vlm_kind vllm, bring one up first.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
+source configs/config.env || { echo "Could not source configs/config.env"; exit 1; }
 
 declare -A ARGS
-REQUIRED_ARGS=()
+REQUIRED_ARGS=("name" "model")
 
-populate_array DEBUG_MODEL_ESSENTIALS REQUIRED_ARGS
-populate_dict DEBUG_MODEL_DEFAULTS ARGS
+ARGS["game"]="pokemon_red"
+ARGS["init_state"]="initial"
+ARGS["vlm_kind"]="openrouter"
+ARGS["max_episodes"]=75
+ARGS["supervisor_max_steps"]=10
+ARGS["subgoal_every"]=5
+ARGS["report_detail"]="strategist"
+ARGS["controller_variant"]="state_wise"
+ARGS["resume"]=true
 
 # --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -51,13 +57,29 @@ done
 if [ "$FAILED" = true ]; then usage; fi
 # --- End argument parsing ---
 
-# Print active variables
 echo "Script: $0 Active variables:"
 for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
-group_flags=$(debug_group_flags ARGS)
+# --resume/--fresh is a click flag pair, not a --flag value option.
+if [[ "${ARGS["resume"]}" == "true" || "${ARGS["resume"]}" == "yes" || "${ARGS["resume"]}" == "y" ]]; then
+    resume_flag="--resume"
+else
+    resume_flag="--fresh"
+fi
 
-python debug.py $group_flags zeroshot \
-    --model_name "${ARGS["model_name"]}" || exit 1
+python run_strategist.py \
+    --game "${ARGS["game"]}" \
+    --init_state "${ARGS["init_state"]}" \
+    --name "${ARGS["name"]}" \
+    --model "${ARGS["model"]}" \
+    --vlm_kind "${ARGS["vlm_kind"]}" \
+    --max_episodes "${ARGS["max_episodes"]}" \
+    --supervisor_max_steps "${ARGS["supervisor_max_steps"]}" \
+    --subgoal_every "${ARGS["subgoal_every"]}" \
+    --report_detail "${ARGS["report_detail"]}" \
+    --controller_variant "${ARGS["controller_variant"]}" \
+    $resume_flag
+
+echo "DONE: ${ARGS["name"]} on ${ARGS["game"]}"

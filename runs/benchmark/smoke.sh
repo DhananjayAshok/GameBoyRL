@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
-# Reports zero-shot task proposal: for every init_state, the first frame the proposer saw,
-# the tasks it proposed, and the benchmark tasks actually anchored to that state. Writes
-# <results_dir>/debug/<game>/zeroshot/report.md.
-#
-# This is the only debug script that starts an emulator (the first frame is saved nowhere),
-# so it needs the game's ROM. No GPU and no VLM.
+# Two-step smoke test of the benchmark path on a cheap API model. Proves the plumbing,
+# measures nothing.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
+source configs/config.env || { echo "Could not source configs/config.env"; exit 1; }
 
 declare -A ARGS
 REQUIRED_ARGS=()
 
-populate_array DEBUG_MODEL_ESSENTIALS REQUIRED_ARGS
-populate_dict DEBUG_MODEL_DEFAULTS ARGS
+ARGS["model"]="gpt-4o-mini"
+ARGS["games"]="harry_potter_philosophers_stone,harry_potter_chamber_of_secrets"
+ARGS["executor"]="single_actions"
+ARGS["max_steps"]=2
 
 # --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -51,13 +50,25 @@ done
 if [ "$FAILED" = true ]; then usage; fi
 # --- End argument parsing ---
 
-# Print active variables
 echo "Script: $0 Active variables:"
 for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
-group_flags=$(debug_group_flags ARGS)
+IFS=',' read -ra games <<< "${ARGS["games"]}"
 
-python debug.py $group_flags zeroshot \
-    --model_name "${ARGS["model_name"]}" || exit 1
+for game in "${games[@]}"; do
+    echo ""
+    echo "=== smoke: $game | ${ARGS["model"]} | ${ARGS["executor"]} ==="
+    if ! bash scripts/benchmark/run_benchmark.sh \
+            --game "$game" \
+            --executor "${ARGS["executor"]}" \
+            --executor_vlm_model "${ARGS["model"]}" \
+            --executor_vlm_kind openrouter \
+            --max_steps "${ARGS["max_steps"]}" \
+            --regenerate true; then
+        echo "FAILED: $game"
+    fi
+done
+
+echo "DONE ALL"

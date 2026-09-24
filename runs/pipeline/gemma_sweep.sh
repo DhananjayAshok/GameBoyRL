@@ -1,4 +1,10 @@
+#!/usr/bin/env bash
+# The gemma no-doc subgoal sweep followed by the info-parametric sweep, with one vLLM server
+# held for both. Was runs/runner.sh.
+
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
+source configs/config.env || { echo "Could not source configs/config.env"; exit 1; }
+source runs/games.sh || { echo "Could not source runs/games.sh"; exit 1; }
 
 MODEL="google/gemma-4-31b-it"
 VLM_KIND="vllm"
@@ -6,15 +12,9 @@ EXECUTOR="single_visual"
 CONTROLLER_VARIANT="low_level"
 MAX_STEPS=175
 
-BENCH_GAMES="bomberman_pocket bomberman_quest \
-             deja_vu_1 deja_vu_2 \
-             legend_of_zelda_links_awakening legend_of_zelda_the_oracle_of_seasons \
-             pokemon_crystal pokemon_red \
-             sword_of_hope_1 sword_of_hope_2"
-
 bash scripts/core/serve_vllm.sh "$MODEL" -tp 4 || { echo "Could not start vLLM"; exit 1; }
 
-for GAME in $BENCH_GAMES; do
+for GAME in "${BENCH_GAMES[@]}"; do
     echo ""
     echo "############################################################"
     echo "# $GAME  —  no-doc subgoal benchmark"
@@ -31,7 +31,7 @@ for GAME in $BENCH_GAMES; do
     fi
 done
 
-for GAME in $BENCH_GAMES; do
+for GAME in "${BENCH_GAMES[@]}"; do
     echo ""
     echo "############################################################"
     echo "# $GAME  —  info parametric benchmark"

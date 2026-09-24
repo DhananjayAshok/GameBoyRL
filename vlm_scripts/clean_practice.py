@@ -65,7 +65,7 @@ HINT_RE = re.compile(r'\n?\[HINT_START\].*?\[HINT_END\]', re.DOTALL)
 STEP_INFO_RE = re.compile(r'\n?\[STEP_INFO\].*?\[STEP_INFO_END\]', re.DOTALL)
 
 
-PARAPHRASE_PROMPT = """You are given a canonical task string:
+AUGMENT_PARAPHRASE_PROMPT = """You are given a canonical task string:
 "[CORE_TASK]"
 
 Generate at least [N] diverse, valid paraphrases of this task. Vary the wording,
@@ -141,7 +141,7 @@ def _strip_blocks(text: str) -> str:
 def _paraphrase_task(task: str, vlm: VLM, max_new_tokens: int, k: int) -> list[str]:
     """Ask the VLM for paraphrases of a single task string. Returns up to k of them."""
     prompt = (
-        PARAPHRASE_PROMPT
+        AUGMENT_PARAPHRASE_PROMPT
         .replace("[CORE_TASK]", task)
         .replace("[N]", str(k))
     )

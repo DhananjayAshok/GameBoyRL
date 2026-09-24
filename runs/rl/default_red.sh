@@ -1,4 +1,9 @@
+#!/usr/bin/env bash
+# The pokemon_red default sweep: collect trajectories, group them, render the high-reward set.
+
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
+source configs/config.env || { echo "Could not source configs/config.env"; exit 1; }
+
 init_state_group="default"
 game="pokemon_red"
 init_states="default,train_0,train_1,train_2,train_3,train_4"

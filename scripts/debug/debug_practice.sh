@@ -36,6 +36,7 @@ function usage() { echo "$USAGE_STR"; exit 1; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -h|--help) usage ;;
         --*)
             FLAG=${1#--}
             VALID=false
@@ -44,7 +45,6 @@ while [[ $# -gt 0 ]]; do
             done
             if [ "$VALID" = false ]; then echo "Error: Unknown flag --$FLAG"; usage; fi
             ARGS["$FLAG"]="$2"; shift 2 ;;
-        -h|--help) usage ;;
         *) echo "Unknown argument: $1"; usage ;;
     esac
 done

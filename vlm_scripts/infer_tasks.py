@@ -115,20 +115,6 @@ Respond in exactly this format:
 Task: <single canonical imperative task string>
 [STOP]"""
 
-PARAPHRASE_PROMPT = """You are given a canonical task string for a game task:
-"[CORE_TASK]"
-
-Here are other phrasings that have been suggested for the same task:
-[CANDIDATE_LIST]
-
-Generate as many diverse, valid paraphrases as possible. Vary the wording, phrasing style, and level of specificity, but preserve the core meaning. Use imperative tone throughout.
-
-Respond in exactly this format (one per line):
-- <paraphrase 1>
-- <paraphrase 2>
-...
-[STOP]"""
-
 DISTILL_PROMPT = """You are given several candidate descriptions of a task performed in a game of [GAME], all inferred from similar game states:
 
 [CANDIDATE_LIST]

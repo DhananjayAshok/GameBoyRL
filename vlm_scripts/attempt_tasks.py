@@ -405,21 +405,14 @@ def attempt_tasks_cmd(
             "task_string": res["task_string"],
             "success": res["success"],
             "n_tries": res["n_tries"],
-            # TODO(legacy-cols): the .get defaults exist only so a run resuming from a
-            # checkpoint.json written before 2026-07-20 (which has no final_hint key) does
-            # not KeyError. Once every in-flight job has finished and no pre-2026-07-20
-            # checkpoint remains on disk, index these directly.
-            "final_hint": res.get("final_hint", ""),
-            "judge_description": res.get("description", ""),
-            "judge_reasoning": res.get("reasoning", ""),
-            # .get for the same legacy-checkpoint reason as final_hint above: a resumed run
-            # can hold records written before these keys existed.
-            "termination_reason": res.get("termination_reason"),
-            "n_env_steps": res.get("n_env_steps"),
-            "max_steps": res.get("max_steps"),
-            # .get for the same legacy-checkpoint reason as final_hint above.
-            "critique_input_tokens": res.get("critique_input_tokens"),
-            "critique_output_tokens": res.get("critique_output_tokens"),
+            "final_hint": res["final_hint"],
+            "judge_description": res["description"],
+            "judge_reasoning": res["reasoning"],
+            "termination_reason": res["termination_reason"],
+            "n_env_steps": res["n_env_steps"],
+            "max_steps": res["max_steps"],
+            "critique_input_tokens": res["critique_input_tokens"],
+            "critique_output_tokens": res["critique_output_tokens"],
         }
         for group_idx, res in results.items()
     ]).to_csv(csv_path, index=False)

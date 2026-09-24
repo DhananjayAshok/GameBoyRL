@@ -1,4 +1,9 @@
+#!/usr/bin/env bash
+# One fine-tuned adapter per title with a practice dataset. See runs/games.sh TRAIN_GAMES.
+
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
+source configs/config.env || { echo "Could not source configs/config.env"; exit 1; }
+source runs/games.sh || { echo "Could not source runs/games.sh"; exit 1; }
 
 MODEL="google/gemma-4-31b-it"
 EXECUTOR="single_visual"
@@ -8,21 +13,15 @@ OVERWRITE="false"
 PUSH_TO_HUB="true"
 
 if [[ -z "$huggingface_repo_namespace" ]]; then
-    echo "Error: huggingface_repo_namespace is unset. Source configs/config.env before running."
+    echo "Error: huggingface_repo_namespace is unset even after sourcing configs/config.env."
     exit 1
 fi
-
-TRAIN_GAMES="deja_vu_1 \
-             pokemon_red \
-             sword_of_hope_1 \
-             legend_of_zelda_links_awakening \
-             bomberman_quest"
 
 declare -A TRAIN_FILES
 declare -A VAL_FILES
 MISSING=""
 
-for GAME in $TRAIN_GAMES; do
+for GAME in "${TRAIN_GAMES[@]}"; do
     attempts=$(path_of attempts_dir --game "$GAME" --model_name "$MODEL" \
                  --executor "$EXECUTOR" --controller_variant "$CONTROLLER_VARIANT")
     practice_path="$attempts/practice_${EXECUTOR}"
@@ -54,7 +53,7 @@ echo "Will fine-tune one adapter per game for: ${!TRAIN_FILES[@]}"
 
 FAILED_GAMES=""
 
-for GAME in $TRAIN_GAMES; do
+for GAME in "${TRAIN_GAMES[@]}"; do
     [[ -z "${TRAIN_FILES[$GAME]}" ]] && continue
     echo ""
     echo "############################################################"

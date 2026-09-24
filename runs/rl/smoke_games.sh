@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Reports zero-shot task proposal: for every init_state, the first frame the proposer saw,
-# the tasks it proposed, and the benchmark tasks actually anchored to that state. Writes
-# <results_dir>/debug/<game>/zeroshot/report.md.
+# Short RL run per title, to check a game's environment starts and steps at all. Measures
+# nothing — 1000 timesteps. Was runs/test_games.sh.
 #
-# This is the only debug script that starts an emulator (the first frame is saved nowhere),
-# so it needs the game's ROM. No GPU and no VLM.
+# Disable train logging before running this over many titles.
 
 source scripts/core/utils.sh || { echo "Could not source utils"; exit 1; }
+source configs/config.env || { echo "Could not source configs/config.env"; exit 1; }
 
 declare -A ARGS
 REQUIRED_ARGS=()
 
-populate_array DEBUG_MODEL_ESSENTIALS REQUIRED_ARGS
-populate_dict DEBUG_MODEL_DEFAULTS ARGS
+ARGS["games"]="harry_potter_philosophers_stone,harry_potter_chamber_of_secrets"
+ARGS["timesteps"]=1000
+ARGS["log_dir"]="logs/smoke_games"
 
 # --- Argument parsing (copy verbatim) ---
 ALLOWED_FLAGS=("${REQUIRED_ARGS[@]}" "${!ARGS[@]}")
@@ -51,13 +51,26 @@ done
 if [ "$FAILED" = true ]; then usage; fi
 # --- End argument parsing ---
 
-# Print active variables
 echo "Script: $0 Active variables:"
 for key in "${!ARGS[@]}"; do
     echo "  -$key = ${ARGS[$key]}"
 done
 
-group_flags=$(debug_group_flags ARGS)
+IFS=',' read -ra games <<< "${ARGS["games"]}"
+log_dir="${ARGS["log_dir"]}"
+mkdir -p "$log_dir"
 
-python debug.py $group_flags zeroshot \
-    --model_name "${ARGS["model_name"]}" || exit 1
+FAILED_GAMES=""
+for game in "${games[@]}"; do
+    echo "Testing game: $game -> $log_dir/${game}.out"
+    if ! bash scripts/core_rl/default_rl.sh \
+            --game "$game" \
+            --timesteps "${ARGS["timesteps"]}" &> "$log_dir/${game}.out"; then
+        echo "FAILED: $game"
+        FAILED_GAMES+="$game "
+    fi
+done
+
+echo ""
+[[ -n "$FAILED_GAMES" ]] && echo "Failed games: $FAILED_GAMES"
+echo "DONE ALL"
