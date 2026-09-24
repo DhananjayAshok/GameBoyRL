@@ -36,36 +36,6 @@ window.RESULTS_DATA = {
   ],
   "series": [
     {
-      "id": "bomberman",
-      "name": "Bomberman",
-      "games": [
-        {
-          "id": "bomberman_quest",
-          "name": "Bomberman Quest"
-        },
-        {
-          "id": "bomberman_pocket",
-          "name": "Bomberman Pocket"
-        }
-      ],
-      "rates": {
-        "bomberman_quest": {
-          "gemini-3.6-flash": 38.0,
-          "claude-haiku-4.5": 20.0,
-          "gpt-5-mini": 20.0,
-          "gemma-4-31b-it": 38.0,
-          "qwen3-vl-32b-instruct": 20.0
-        },
-        "bomberman_pocket": {
-          "gemini-3.6-flash": 82.0,
-          "claude-haiku-4.5": 52.0,
-          "gpt-5-mini": 86.0,
-          "gemma-4-31b-it": 72.0,
-          "qwen3-vl-32b-instruct": 70.0
-        }
-      }
-    },
-    {
       "id": "deja_vu",
       "name": "Déjà Vu",
       "games": [
@@ -182,6 +152,36 @@ window.RESULTS_DATA = {
           "gpt-5-mini": 34.0,
           "gemma-4-31b-it": 66.0,
           "qwen3-vl-32b-instruct": 54.0
+        }
+      }
+    },
+    {
+      "id": "bomberman",
+      "name": "Bomberman",
+      "games": [
+        {
+          "id": "bomberman_quest",
+          "name": "Bomberman Quest"
+        },
+        {
+          "id": "bomberman_pocket",
+          "name": "Bomberman Pocket"
+        }
+      ],
+      "rates": {
+        "bomberman_quest": {
+          "gemini-3.6-flash": 38.0,
+          "claude-haiku-4.5": 20.0,
+          "gpt-5-mini": 20.0,
+          "gemma-4-31b-it": 38.0,
+          "qwen3-vl-32b-instruct": 20.0
+        },
+        "bomberman_pocket": {
+          "gemini-3.6-flash": 82.0,
+          "claude-haiku-4.5": 52.0,
+          "gpt-5-mini": 86.0,
+          "gemma-4-31b-it": 72.0,
+          "qwen3-vl-32b-instruct": 70.0
         }
       }
     }

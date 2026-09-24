@@ -25,28 +25,6 @@ window.IMPROVEMENT_DATA = {
   ],
   "series": [
     {
-      "id": "bomberman",
-      "name": "Bomberman",
-      "games": [
-        {
-          "id": "bomberman_quest",
-          "name": "Bomberman Quest",
-          "base": 38.0,
-          "wm": 36.0,
-          "pae": 16.0,
-          "guide": 36.0
-        },
-        {
-          "id": "bomberman_pocket",
-          "name": "Bomberman Pocket",
-          "base": 72.0,
-          "wm": 74.0,
-          "pae": 76.0,
-          "guide": 88.0
-        }
-      ]
-    },
-    {
       "id": "deja_vu",
       "name": "Déjà Vu",
       "games": [
@@ -131,6 +109,28 @@ window.IMPROVEMENT_DATA = {
           "wm": 66.0,
           "pae": 32.0,
           "guide": 72.0
+        }
+      ]
+    },
+    {
+      "id": "bomberman",
+      "name": "Bomberman",
+      "games": [
+        {
+          "id": "bomberman_quest",
+          "name": "Bomberman Quest",
+          "base": 38.0,
+          "wm": 36.0,
+          "pae": 16.0,
+          "guide": 36.0
+        },
+        {
+          "id": "bomberman_pocket",
+          "name": "Bomberman Pocket",
+          "base": 72.0,
+          "wm": 74.0,
+          "pae": 76.0,
+          "guide": 88.0
         }
       ]
     }
