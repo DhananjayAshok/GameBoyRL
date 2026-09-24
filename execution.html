@@ -1469,17 +1469,24 @@
                 </div>
             </div>
             <div class="highlight-box is-info-light" style="max-width:900px;margin:2rem auto 0;">
-                <strong>No method improves performance consistently.</strong> Every approach here learns only from the
-                agent's own interaction data &mdash; no demonstrations, no documentation, no stronger teacher. World
-                modelling costs 3.4% on average, because the learned model cannot predict the next frame accurately
-                enough to plan over. Autonomous skill discovery (PAE) is far worse, dropping task completion by 44.3%
-                (40.7% &rarr; 22.6%) with near-total collapses on Pok&eacute;mon Red (38.8% &rarr; 8.2%) and Crystal
-                (36.0% &rarr; 4.0%); degradation is consistently larger on the test-only games, which points to
-                overfitting to the training title, compounded by the agent misjudging its own successes during
-                practice. Only our curiosity-written guides help at all, gaining up to 16 points on Bomberman Pocket
-                (72.0% &rarr; 88.0%) and transferring to unseen games like Sword of Hope 2 (66.0% &rarr; 72.0%) &mdash;
-                but they lose 29 points on D&eacute;j&agrave; Vu 1, and the average gain is just 0.8 points
-                (40.7% &rarr; 41.5%). Self-improvement on GameBoyWorlds-Execution remains open.
+                <strong>No approach consistently improves performance across all game environments.</strong> World
+                modelling reduces average task completion by 3.4%. Qualitatively, we observe that the world model is
+                unable to predict the next observation with sufficient accuracy to serve as a useful tool. The skill
+                discovery approach performs even worse, degrading task completion by 44.3% on average
+                (40.7% &rarr; 22.6%), with catastrophic collapses on Pok&eacute;monCrystal (36.0% &rarr; 4.0%),
+                Pok&eacute;monRed (38.8% &rarr; 8.2%) and ZeldaOracleOfSeasons (40.0% &rarr; 14.0%). The performance
+                degradation is always greater for test-only games, suggesting an overfitting to the training
+                distribution. We hypothesize the extent of degradation is caused by an inability to accurately judge
+                task completion during practice, a known failure scenario for skill acquisition methods. The only
+                method that achieves partial success is our novel utilization of curiosity-based exploration to write
+                game-specific documentation. Here, task completion increases by as much as 22% on select games like
+                BombermanPocket (72.0% &rarr; 88.0%), and the boost applies to both games seen during training time and
+                unseen test games like SwordOfHope2 (66.0% &rarr; 72.0%). However, even this approach leads to
+                considerable performance degradation on some games (DejaVu1, &minus;29%; DejaVu2, &minus;25%;
+                Pok&eacute;monCrystal, &minus;17%), and the average task completion rate improves by only 2.0%
+                (40.7% &rarr; 41.5%). The failure of these standard implementations establishes
+                GameBoyWorlds-Execution as a challenging benchmark and calls for further research on acquiring
+                short-horizon task execution capabilities via self-improvement.
             </div>
         </div>
     </section>

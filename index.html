@@ -1260,49 +1260,54 @@
             <br>
             <h3 class="title is-4" style="color:#1a1a2e;">Specific Contributions</h3>
             <p style="color:#444; margin-bottom:1.25rem;">
-                Powered by expert guidance, embodied agents can operate in interactive environments &mdash; but it is
-                unclear whether they can learn autonomously and continually from their own experience. Reinforcement
-                learning needs hand-crafted rewards, Minecraft agents lean on human gameplay, and VLAs are pretrained on
-                large corpora of human teleoperation. GameBoyWorlds removes all of it. Agents get free access to
-                training games with <strong>no demonstrations, no documentation, no task exemplars and no
-                    game-specific rewards</strong>, and must ground themselves through self-directed exploration. The
-                metric that matters is not raw success but <em>task completion gain</em>: how much an agent improves
-                after learning from nothing but its own interaction data.
+                Powered by expert guidance, embodied agents can operate in interactive environments; however, it is
+                unclear whether they can learn autonomously and continually from their own experience. To evaluate such
+                self-improvement methods, we introduce a two-legged benchmark, GameBoyWorlds, the first testbed for
+                self-improvement in complex video games. We define self-learning as procedures that exclusively use data
+                generated from the agent's interactions with the training environment; i.e., not distillation from human
+                trajectories, a stronger teacher or external knowledge bases. Our metric of interest is task completion
+                gain, i.e., the increase in task completion after self-learning in the training environments.
             </p>
             <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
                 <strong>GameBoyWorlds Framework</strong><br />
-                A Gymnasium-compatible set of environments that lets agents play GameBoy and GameBoy Color titles
-                through a unified interface, from classic franchises such as Pok&eacute;mon and Legend of Zelda to
-                obscure fan-made ROM hacks that frontier models have barely seen in training. Observations are raw
-                screen frames and actions are raw button presses &mdash; no observation engineering, no harnesses, no
-                privileged access to emulator memory.
+                A Gymnasium compatible set of environments that allow agents to play GameBoy and GameBoy Color titles,
+                including releases from classic franchises such as Pok&eacute;mon and Legend of Zelda. Titles include
+                more obscure ROM hacks (i.e. fan made games), which are considerably less exposed to frontier Language
+                Models during their training. The action space is an action space of buttons, with <strong>no</strong>
+                harnesses, and the observation space consists of screen frames, with no observation engineering.
             </div>
             <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
                 <strong>GameBoyWorlds-Execution</strong><br />
-                Short-horizon task execution across five game series &mdash; 10 games, 50 hand-crafted tasks each, 500
-                tasks in total, each with a programmatic completion check. Training is restricted to the first
-                installment of every series, so anything learned has to transfer to a held-out title. Success demands
-                precise perception, localized planning and game-specific mechanics. Frontier models struggle: the best,
-                Gemini 3.6 Flash, completes just <strong>49.3%</strong>, with consistent failures in perception and
-                timely interaction.
+                A testbed for short-horizon task execution across five different game series, with each marking a
+                dedicated training game and a distinct, test-only game. Agents are allowed indefinite access to
+                dedicated training games but are provided no demonstrations, documentation, or rewards, and must ground
+                themselves in the environment through self-directed exploration and by inferring actionable knowledge
+                from their own experience. With 50 hand-crafted tasks per game, we test agents on a wide range of 500
+                tasks, including navigation, interaction, combat and game-specific control across 10 distinct games.
+                Even frontier models like Gemini-3.6-Flash achieve an out-of-the-box task success rate of less than
+                50%, due to failures in precise perception and gaps in game-specific understanding, establishing that
+                self-improvement methods have considerable room to push performance.
             </div>
             <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
-                <strong>Curiosity-Driven Guide Writing</strong><br />
-                We use curiosity-based RL not to play the game but as a <em>search procedure</em>, surfacing
-                subtrajectories that end in surprising observations and therefore tend to contain game-specific
-                mechanics. A VLM then sweeps those snippets, infers what task was implicitly being performed, and
-                distills the result into a game-specific guide the agent can read at test time. It is the only method
-                we tested that helps at all &mdash; up to +22% on select games &mdash; while standard world modelling
-                (&minus;3.4%) and autonomous skill discovery (&minus;44.3%) both degrade performance outright.
+                <strong>Curiosity-Based Exploration as Search</strong><br />
+                We adapt curiosity-based RL to serve as a search procedure to identify `interesting' snippets of
+                gameplay. Our core intuition is that subtrajectories which end in a highly novel observation likely
+                implicitly contain information regarding key, game-specific mechanics. We sweep these subtrajectories
+                with the VLM and distill insights from them into game-specific guidance documents to aid task execution.
+                We show that contemporary approaches to self-improvement are lacking, with standard implementations of
+                world modelling and autonomous skill discovery failing, and this novel strategy achieving only partial
+                success.
             </div>
             <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
                 <strong>GameBoyWorlds-Playthrough</strong><br />
-                End-to-end completion of Pok&eacute;mon Brown and Pok&eacute;mon Prism, fan-made games with novel
-                regions and unseen mechanics, across 10 milestones each. Frontier models recover progression steps for
-                Pok&eacute;mon Red and Crystal almost perfectly but score under <strong>30%</strong> on our test games,
-                so parametric knowledge cannot carry them &mdash; they have to acquire it in-game. Our agent, with
-                three-tiered hierarchical controllers, dedicated memory and self-reflective planning, fails to reach
-                even the first milestone in both titles.
+                Tests end-to-end game completion in two fan-made Pok&eacute;mon games. We show that while frontier
+                models have been pre-exposed to official releases such as Pok&eacute;mon Red, they lack essential
+                information on the games in our testbed, recovering less than 30% of their progression steps. Instead of
+                relying on their parametric knowledge to succeed, agents must learn from their own experience and
+                autonomously improve over the course of the playthrough. We show that a sophisticated agentic pipeline
+                with self-reflection, memory and hierarchical agent controllers fails to reach even the first major
+                milestone in both games, establishing that GameBoyWorlds is an ambitious target for self-improving
+                agents.
             </div>
         </div>
 
