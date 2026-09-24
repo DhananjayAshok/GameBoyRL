@@ -1,39 +1,39 @@
-// Placeholder task success-rate data for the GameBoyWorlds leaderboard chart.
-// Replace with real numbers once evaluation results are available.
+// Task success rates (%) on GameBoyWorlds-Execution, subgoal supervisor +
+// single_visual executor, low_level controller. Generated from
+// results/benchmark/<game>/subgoal_single_visual_low_level_<model>.csv
 window.RESULTS_DATA = {
   "models": [
     {
-      "id": "gemini-3-1-pro",
-      "name": "Gemini-3.1-Pro",
-      "provider": "Google"
+      "id": "gemini-3.6-flash",
+      "name": "Gemini 3.6 Flash",
+      "logo": "gemini",
+      "color": "#1a73e8"
     },
     {
-      "id": "claude-4-opus",
-      "name": "Claude-4-Opus",
-      "provider": "Anthropic"
+      "id": "claude-haiku-4.5",
+      "name": "Claude Haiku 4.5",
+      "logo": "anthropic",
+      "color": "#d97757"
     },
     {
-      "id": "gpt-5",
-      "name": "GPT-5",
-      "provider": "OpenAI"
+      "id": "gpt-5-mini",
+      "name": "GPT-5 mini",
+      "logo": "openai",
+      "color": "#10a37f"
     },
     {
-      "id": "qwen3-vl-32b",
-      "name": "Qwen3-VL-32B",
-      "provider": "Qwen"
+      "id": "gemma-4-31b-it",
+      "name": "Gemma 4 31B",
+      "logo": "google",
+      "color": "#8ab4f8"
     },
     {
-      "id": "gemma-4-31b",
-      "name": "Gemma-4-31B",
-      "provider": "Google"
+      "id": "qwen3-vl-32b-instruct",
+      "name": "Qwen3-VL 32B",
+      "logo": "qwen",
+      "color": "#615ced"
     }
   ],
-  "providerColors": {
-    "Google": "#4285F4",
-    "Anthropic": "#D97757",
-    "OpenAI": "#10A37F",
-    "Qwen": "#7C3AED"
-  },
   "series": [
     {
       "id": "bomberman",
@@ -46,275 +46,151 @@ window.RESULTS_DATA = {
         {
           "id": "bomberman_pocket",
           "name": "Bomberman Pocket"
-        },
-        {
-          "id": "bomberman_max",
-          "name": "Bomberman Max"
         }
       ],
       "rates": {
         "bomberman_quest": {
-          "gemini-3-1-pro": 68.9,
-          "claude-4-opus": 29.6,
-          "gpt-5": 45.6,
-          "qwen3-vl-32b": 42.3,
-          "gemma-4-31b": 75.1
+          "gemini-3.6-flash": 38.0,
+          "claude-haiku-4.5": 20.0,
+          "gpt-5-mini": 20.0,
+          "gemma-4-31b-it": 38.0,
+          "qwen3-vl-32b-instruct": 20.0
         },
         "bomberman_pocket": {
-          "gemini-3-1-pro": 71.3,
-          "claude-4-opus": 85.1,
-          "gpt-5": 33.6,
-          "qwen3-vl-32b": 55.0,
-          "gemma-4-31b": 29.9
-        },
-        "bomberman_max": {
-          "gemini-3-1-pro": 42.0,
-          "claude-4-opus": 60.3,
-          "gpt-5": 29.7,
-          "qwen3-vl-32b": 40.7,
-          "gemma-4-31b": 69.6
+          "gemini-3.6-flash": 82.0,
+          "claude-haiku-4.5": 52.0,
+          "gpt-5-mini": 86.0,
+          "gemma-4-31b-it": 72.0,
+          "qwen3-vl-32b-instruct": 70.0
         }
       }
     },
     {
       "id": "deja_vu",
-      "name": "Deja Vu",
+      "name": "Déjà Vu",
       "games": [
         {
           "id": "deja_vu_1",
-          "name": "Deja Vu 1"
+          "name": "Déjà Vu 1"
         },
         {
           "id": "deja_vu_2",
-          "name": "Deja Vu 2"
+          "name": "Déjà Vu 2"
         }
       ],
       "rates": {
         "deja_vu_1": {
-          "gemini-3-1-pro": 62.9,
-          "claude-4-opus": 42.1,
-          "gpt-5": 65.7,
-          "qwen3-vl-32b": 79.8,
-          "gemma-4-31b": 28.4
+          "gemini-3.6-flash": 20.0,
+          "claude-haiku-4.5": 6.0,
+          "gpt-5-mini": 8.0,
+          "gemma-4-31b-it": 14.0,
+          "qwen3-vl-32b-instruct": 8.0
         },
         "deja_vu_2": {
-          "gemini-3-1-pro": 79.6,
-          "claude-4-opus": 72.7,
-          "gpt-5": 49.8,
-          "qwen3-vl-32b": 38.0,
-          "gemma-4-31b": 89.3
-        }
-      }
-    },
-    {
-      "id": "harry_potter",
-      "name": "Harry Potter",
-      "games": [
-        {
-          "id": "harry_potter_philosophers_stone",
-          "name": "Harry Potter Philosophers Stone"
-        },
-        {
-          "id": "harry_potter_chamber_of_secrets",
-          "name": "Harry Potter Chamber Of Secrets"
-        }
-      ],
-      "rates": {
-        "harry_potter_philosophers_stone": {
-          "gemini-3-1-pro": 49.5,
-          "claude-4-opus": 33.9,
-          "gpt-5": 34.2,
-          "qwen3-vl-32b": 82.2,
-          "gemma-4-31b": 66.6
-        },
-        "harry_potter_chamber_of_secrets": {
-          "gemini-3-1-pro": 79.7,
-          "claude-4-opus": 74.7,
-          "gpt-5": 62.3,
-          "qwen3-vl-32b": 90.3,
-          "gemma-4-31b": 52.2
-        }
-      }
-    },
-    {
-      "id": "harvest_moon",
-      "name": "Harvest Moon",
-      "games": [
-        {
-          "id": "harvest_moon_1",
-          "name": "Harvest Moon 1"
-        },
-        {
-          "id": "harvest_moon_2",
-          "name": "Harvest Moon 2"
-        },
-        {
-          "id": "harvest_moon_3",
-          "name": "Harvest Moon 3"
-        }
-      ],
-      "rates": {
-        "harvest_moon_1": {
-          "gemini-3-1-pro": 63.3,
-          "claude-4-opus": 81.1,
-          "gpt-5": 67.6,
-          "qwen3-vl-32b": 83.1,
-          "gemma-4-31b": 65.0
-        },
-        "harvest_moon_2": {
-          "gemini-3-1-pro": 73.1,
-          "claude-4-opus": 30.9,
-          "gpt-5": 42.6,
-          "qwen3-vl-32b": 46.5,
-          "gemma-4-31b": 33.1
-        },
-        "harvest_moon_3": {
-          "gemini-3-1-pro": 42.9,
-          "claude-4-opus": 34.5,
-          "gpt-5": 45.8,
-          "qwen3-vl-32b": 68.7,
-          "gemma-4-31b": 51.3
+          "gemini-3.6-flash": 22.0,
+          "claude-haiku-4.5": 2.0,
+          "gpt-5-mini": 2.0,
+          "gemma-4-31b-it": 8.0,
+          "qwen3-vl-32b-instruct": 2.0
         }
       }
     },
     {
       "id": "legend_of_zelda",
-      "name": "Legend Of Zelda",
+      "name": "Zelda",
       "games": [
         {
           "id": "legend_of_zelda_links_awakening",
-          "name": "Legend Of Zelda Links Awakening"
+          "name": "Link's Awakening"
         },
         {
           "id": "legend_of_zelda_the_oracle_of_seasons",
-          "name": "Legend Of Zelda The Oracle Of Seasons"
+          "name": "Oracle of Seasons"
         }
       ],
       "rates": {
         "legend_of_zelda_links_awakening": {
-          "gemini-3-1-pro": 51.7,
-          "claude-4-opus": 41.4,
-          "gpt-5": 45.1,
-          "qwen3-vl-32b": 87.9,
-          "gemma-4-31b": 69.5
+          "gemini-3.6-flash": 54.0,
+          "claude-haiku-4.5": 36.0,
+          "gpt-5-mini": 30.0,
+          "gemma-4-31b-it": 38.0,
+          "qwen3-vl-32b-instruct": 24.0
         },
         "legend_of_zelda_the_oracle_of_seasons": {
-          "gemini-3-1-pro": 67.0,
-          "claude-4-opus": 39.0,
-          "gpt-5": 74.7,
-          "qwen3-vl-32b": 38.5,
-          "gemma-4-31b": 52.3
+          "gemini-3.6-flash": 46.0,
+          "claude-haiku-4.5": 14.0,
+          "gpt-5-mini": 22.0,
+          "gemma-4-31b-it": 40.0,
+          "qwen3-vl-32b-instruct": 18.0
         }
       }
     },
     {
       "id": "pokemon",
-      "name": "Pokemon",
+      "name": "Pokémon",
       "games": [
         {
           "id": "pokemon_red",
-          "name": "Pokemon Red"
+          "name": "Pokémon Red"
+        },
+        {
+          "id": "pokemon_crystal",
+          "name": "Pokémon Crystal"
         }
       ],
       "rates": {
         "pokemon_red": {
-          "gemini-3-1-pro": 91.3,
-          "claude-4-opus": 69.0,
-          "gpt-5": 63.6,
-          "qwen3-vl-32b": 71.8,
-          "gemma-4-31b": 81.9
-        }
-      }
-    },
-    {
-      "id": "runes_of_virtue",
-      "name": "Runes Of Virtue",
-      "games": [
-        {
-          "id": "runes_of_virtue_1",
-          "name": "Runes Of Virtue 1"
+          "gemini-3.6-flash": 61.2,
+          "claude-haiku-4.5": 2.0,
+          "gpt-5-mini": 18.4,
+          "gemma-4-31b-it": 38.8,
+          "qwen3-vl-32b-instruct": 22.4
         },
-        {
-          "id": "runes_of_virtue_2",
-          "name": "Runes Of Virtue 2"
-        }
-      ],
-      "rates": {
-        "runes_of_virtue_1": {
-          "gemini-3-1-pro": 77.7,
-          "claude-4-opus": 42.7,
-          "gpt-5": 30.1,
-          "qwen3-vl-32b": 48.2,
-          "gemma-4-31b": 45.1
-        },
-        "runes_of_virtue_2": {
-          "gemini-3-1-pro": 41.5,
-          "claude-4-opus": 88.3,
-          "gpt-5": 84.1,
-          "qwen3-vl-32b": 48.1,
-          "gemma-4-31b": 69.9
-        }
-      }
-    },
-    {
-      "id": "survival_kids",
-      "name": "Survival Kids",
-      "games": [
-        {
-          "id": "survival_kids_1",
-          "name": "Survival Kids 1"
-        },
-        {
-          "id": "survival_kids_2",
-          "name": "Survival Kids 2"
-        }
-      ],
-      "rates": {
-        "survival_kids_1": {
-          "gemini-3-1-pro": 53.3,
-          "claude-4-opus": 86.5,
-          "gpt-5": 57.4,
-          "qwen3-vl-32b": 45.0,
-          "gemma-4-31b": 43.8
-        },
-        "survival_kids_2": {
-          "gemini-3-1-pro": 63.9,
-          "claude-4-opus": 44.8,
-          "gpt-5": 65.4,
-          "qwen3-vl-32b": 85.5,
-          "gemma-4-31b": 53.6
+        "pokemon_crystal": {
+          "gemini-3.6-flash": 56.0,
+          "claude-haiku-4.5": 4.0,
+          "gpt-5-mini": 12.0,
+          "gemma-4-31b-it": 36.0,
+          "qwen3-vl-32b-instruct": 10.0
         }
       }
     },
     {
       "id": "sword_of_hope",
-      "name": "Sword Of Hope",
+      "name": "Sword of Hope",
       "games": [
         {
           "id": "sword_of_hope_1",
-          "name": "Sword Of Hope 1"
+          "name": "Sword of Hope 1"
         },
         {
           "id": "sword_of_hope_2",
-          "name": "Sword Of Hope 2"
+          "name": "Sword of Hope 2"
         }
       ],
       "rates": {
         "sword_of_hope_1": {
-          "gemini-3-1-pro": 42.0,
-          "claude-4-opus": 91.8,
-          "gpt-5": 60.6,
-          "qwen3-vl-32b": 33.8,
-          "gemma-4-31b": 31.0
+          "gemini-3.6-flash": 56.0,
+          "claude-haiku-4.5": 32.0,
+          "gpt-5-mini": 40.0,
+          "gemma-4-31b-it": 56.0,
+          "qwen3-vl-32b-instruct": 38.0
         },
         "sword_of_hope_2": {
-          "gemini-3-1-pro": 35.0,
-          "claude-4-opus": 68.2,
-          "gpt-5": 78.7,
-          "qwen3-vl-32b": 55.0,
-          "gemma-4-31b": 32.1
+          "gemini-3.6-flash": 58.0,
+          "claude-haiku-4.5": 40.0,
+          "gpt-5-mini": 34.0,
+          "gemma-4-31b-it": 66.0,
+          "qwen3-vl-32b-instruct": 54.0
         }
       }
     }
-  ]
+  ],
+  "averages": {
+    "gemini-3.6-flash": 49.3,
+    "claude-haiku-4.5": 20.8,
+    "gpt-5-mini": 27.2,
+    "gemma-4-31b-it": 40.7,
+    "qwen3-vl-32b-instruct": 26.6
+  }
 };

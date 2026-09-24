@@ -1222,33 +1222,9 @@
         </div>
     </section>
 
-    <!-- ════════════════════════════════════════════════════════════
-     TASK EXPLORER – BENCHMARK BROWSER
-════════════════════════════════════════════════════════════ -->
-    <section class="section is-light-alt" id="gameboyworlds">
-        <div class="container">
-            <h2 class="section-heading">GameBoyWorlds</h2>
-            <div class="section-divider"></div>
-            <p
-                style="text-align:center; color:#555; margin-bottom:1.5rem; max-width:600px; margin-left:auto; margin-right:auto;">
-                Browse the benchmark by game, or see the full test suite on
-                <a href="https://github.com/DhananjayAshok/GameBoyWorlds/tree/main/benchmark/tests"
-                    target="_blank">GitHub</a>.
-            </p>
-            <div class="task-explorer">
-                <nav class="task-explorer-sidebar" id="task-explorer-sidebar" aria-label="Game selector"></nav>
-                <div class="task-explorer-content">
-                    <h3 class="task-explorer-game-title" id="task-explorer-game-title"></h3>
-                    <p class="task-explorer-game-desc" id="task-explorer-game-desc"></p>
-                    <div class="task-explorer-task-list" id="task-explorer-task-list"></div>
-                </div>
-            </div>
-        </div>
-    </section>
-
     <script src="assets/tasks_data.js"></script>
     <script>
-        (function () {
+        document.addEventListener('DOMContentLoaded', function () {
             var data = window.GAMEBOYWORLDS_TASKS || [];
             var sidebar = document.getElementById('task-explorer-sidebar');
             var titleEl = document.getElementById('task-explorer-game-title');
@@ -1309,7 +1285,7 @@
                     }
                 });
             });
-        })();
+        });
     </script>
 
 
@@ -1365,14 +1341,34 @@
                 return 'rgb(' + r + ',' + g + ',' + b + ')';
             }
 
-            var TINTS = [0, 0.38, 0.62, 0.8];
+            var TINTS = [0, 0.45];
+
+            // Provider logos, drawn under each model's x-axis group (mirrors plots.py).
+            var LOGOS = {};
+            DATA.models.forEach(function (m) {
+                var img = new Image();
+                img.src = 'assets/logos/' + m.logo + '.png';
+                img.addEventListener('load', function () { if (chart) chart.draw(); });
+                LOGOS[m.id] = img;
+            });
+
+            var logoAxisPlugin = {
+                id: 'logoAxis',
+                afterDraw: function (c) {
+                    var x = c.scales.x, ctx = c.ctx, size = 26;
+                    DATA.models.forEach(function (m, i) {
+                        var img = LOGOS[m.id];
+                        if (!img || !img.complete || !img.naturalWidth) return;
+                        ctx.drawImage(img, x.getPixelForTick(i) - size / 2, x.bottom + 6, size, size);
+                    });
+                }
+            };
 
             function buildChartData(series) {
                 var labels = DATA.models.map(function (m) { return m.name; });
                 var datasets = series.games.map(function (game, gameIdx) {
                     var colors = DATA.models.map(function (m) {
-                        var base = DATA.providerColors[m.provider] || '#999999';
-                        return shade(base, TINTS[gameIdx % TINTS.length]);
+                        return shade(m.color || '#999999', TINTS[gameIdx % TINTS.length]);
                     });
                     return {
                         label: game.name,
@@ -1392,9 +1388,11 @@
                 chart = new Chart(canvas, {
                     type: 'bar',
                     data: chartData,
+                    plugins: [logoAxisPlugin],
                     options: {
                         responsive: true,
                         animation: { duration: 650, easing: 'easeOutQuart' },
+                        layout: { padding: { bottom: 34 } },
                         scales: {
                             y: {
                                 beginAtZero: true,
@@ -1449,6 +1447,42 @@
             });
         })();
     </script>
+
+    <!-- ════════════════════════════════════════════════════════════
+     SELF-IMPROVEMENT — BASE VS WM / PAE / GUIDES
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-light-alt" id="results">
+        <div class="container">
+            <h2 class="section-heading">Self-Improvement</h2>
+            <div class="section-divider"></div>
+            <p
+                style="text-align:center;color:#555;margin-bottom:1.5rem;max-width:700px;margin-left:auto;margin-right:auto;">
+                Task success rates (%) for Gemma 4 31B before and after each self-improvement method, broken down by
+                game series. Select a series below.
+            </p>
+            <div class="results-chart-wrap">
+                <div class="results-chart-canvas-wrap">
+                    <canvas id="improvement-chart" height="120"></canvas>
+                </div>
+                <div class="results-series-tabs" style="margin-top:1.5rem;">
+                    <ul class="tabs is-centered is-toggle is-medium" id="improvement-tab-list"></ul>
+                </div>
+            </div>
+            <div class="highlight-box is-info-light" style="max-width:900px;margin:2rem auto 0;">
+                <strong>No method improves performance consistently.</strong> Every approach here learns only from the
+                agent's own interaction data &mdash; no demonstrations, no documentation, no stronger teacher. World
+                modelling costs 3.4% on average, because the learned model cannot predict the next frame accurately
+                enough to plan over. Autonomous skill discovery (PAE) is far worse, dropping task completion by 44.3%
+                (40.7% &rarr; 22.6%) with near-total collapses on Pok&eacute;mon Red (38.8% &rarr; 8.2%) and Crystal
+                (36.0% &rarr; 4.0%); degradation is consistently larger on the test-only games, which points to
+                overfitting to the training title, compounded by the agent misjudging its own successes during
+                practice. Only our curiosity-written guides help at all, gaining up to 16 points on Bomberman Pocket
+                (72.0% &rarr; 88.0%) and transferring to unseen games like Sword of Hope 2 (66.0% &rarr; 72.0%) &mdash;
+                but they lose 29 points on D&eacute;j&agrave; Vu 1, and the average gain is just 0.8 points
+                (40.7% &rarr; 41.5%). Self-improvement on GameBoyWorlds-Execution remains open.
+            </div>
+        </div>
+    </section>
 
     <!-- ════════════════════════════════════════════════════════════
      ROLLOUT VIEWER – GEMINI-3-PRO ON POKEMON RED
@@ -1654,73 +1688,9 @@
     <!-- ════════════════════════════════════════════════════════════
      METHOD
 ════════════════════════════════════════════════════════════ -->
-    <section class="section is-white-alt" id="method">
-        <div class="container">
-            <h2 class="section-heading">Method</h2>
-            <div class="section-divider"></div>
-
-            <div style="margin-bottom:2rem;">
-                <div style="display: flex; justify-content: center;">
-                    <img src="assets/method.jpg" alt="Method overview"
-                        style="width:100%; display:block; border-radius:8px;">
-                </div>
-                <h3 class="title is-4" style="color:#1a1a2e; margin-top:1.7rem;">Unstructured Exploration &rarr; Task
-                    Identification &rarr; Task Rehearsal</h3>
-                <div class="columns">
-                    <div class="column">
-                        <div class="highlight-box is-info-light" style="height:100%; margin-bottom:0;">
-                            <strong>Curiosity Based Task Discovery</strong><br />
-                            Uses RL (PPO) with a simple CNN agent to seek out novel experiences in the environment.
-                            The most unique trajectories are ones where "tasks" are potentially being implicitly
-                            executed.
-                        </div>
-                    </div>
-                    <div class="column">
-                        <div class="highlight-box is-warning-light" style="height:100%; margin-bottom:0;">
-                            <strong>Synthetic Annotation</strong><br />
-                            The agent VLM observes the trajectories and infers the task being performed. Similar
-                            trajectories are grouped together and the model attempts to extract insight on how to
-                            properly achieve the specific task.
-                        </div>
-                    </div>
-                    <div class="column">
-                        <div class="highlight-box is-success-light" style="height:100%; margin-bottom:0;">
-                            <strong>Agent Rehearsal</strong><br />
-                            The agent attempts to complete the task from many starting positions, assessing its own
-                            progress and saving the successful rollouts to a separate dataset. Fine-tuning on this
-                            dataset yields a high-quality Vision Language Action model.
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-        </div>
-    </section>
-
-    <!-- ════════════════════════════════════════════════════════════
-     RESULTS — BASE VS IMPROVED BAR CHART
-════════════════════════════════════════════════════════════ -->
-    <section class="section is-light-alt" id="results">
-        <div class="container">
-            <h2 class="section-heading">Results</h2>
-            <div class="section-divider"></div>
-            <p style="text-align:center;color:#555;margin-bottom:1.5rem;max-width:650px;margin-left:auto;margin-right:auto;">
-                Task success rates (%) before and after self-improvement, broken down by game series. Select a series below.
-            </p>
-            <div class="results-chart-wrap">
-                <div class="results-chart-canvas-wrap">
-                    <canvas id="improvement-chart" height="120"></canvas>
-                </div>
-                <div class="results-series-tabs" style="margin-top:1.5rem;">
-                    <ul class="tabs is-centered is-toggle is-medium" id="improvement-tab-list"></ul>
-                </div>
-            </div>
-        </div>
-    </section>
-
     <script src="assets/improvement_data.js"></script>
     <script>
-        (function () {
+        document.addEventListener('DOMContentLoaded', function () {
             var DATA = window.IMPROVEMENT_DATA;
             if (!DATA) return;
 
@@ -1733,22 +1703,15 @@
                 var labels = series.games.map(function (g) { return g.name; });
                 var chartData = {
                     labels: labels,
-                    datasets: [
-                        {
-                            label: 'Base',
-                            data: series.games.map(function (g) { return g.base; }),
-                            backgroundColor: '#94a3b8',
+                    datasets: DATA.methods.map(function (m) {
+                        return {
+                            label: m.name,
+                            data: series.games.map(function (g) { return g[m.id]; }),
+                            backgroundColor: m.color,
                             borderRadius: 4,
                             maxBarThickness: 52
-                        },
-                        {
-                            label: 'Improved',
-                            data: series.games.map(function (g) { return g.improved; }),
-                            backgroundColor: '#3273dc',
-                            borderRadius: 4,
-                            maxBarThickness: 52
-                        }
-                    ]
+                        };
+                    })
                 };
 
                 if (chart) chart.destroy();
@@ -1795,7 +1758,7 @@
                 renderSeries(series);
             }
 
-            DATA.forEach(function (series, idx) {
+            DATA.series.forEach(function (series, idx) {
                 var li = document.createElement('li');
                 if (idx === 0) li.classList.add('is-active');
                 var a = document.createElement('a');
@@ -1805,7 +1768,7 @@
                 tabList.appendChild(li);
                 if (idx === 0) renderSeries(series);
             });
-        })();
+        });
     </script>
 
     <!-- ════════════════════════════════════════════════════════════
@@ -1873,27 +1836,49 @@
         })();
     </script>
 
+    <!-- ════════════════════════════════════════════════════════════
+     TASK EXPLORER – BENCHMARK BROWSER
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-light-alt" id="gameboyworlds">
+        <div class="container">
+            <h2 class="section-heading">Benchmark Tasks</h2>
+            <div class="section-divider"></div>
+            <p
+                style="text-align:center; color:#555; margin-bottom:1.5rem; max-width:600px; margin-left:auto; margin-right:auto;">
+                Browse the benchmark by game, or see the full test suite on
+                <a href="https://github.com/DhananjayAshok/GameBoyWorlds/tree/main/benchmark/tests"
+                    target="_blank">GitHub</a>.
+            </p>
+            <div class="task-explorer">
+                <nav class="task-explorer-sidebar" id="task-explorer-sidebar" aria-label="Game selector"></nav>
+                <div class="task-explorer-content">
+                    <h3 class="task-explorer-game-title" id="task-explorer-game-title"></h3>
+                    <p class="task-explorer-game-desc" id="task-explorer-game-desc"></p>
+                    <div class="task-explorer-task-list" id="task-explorer-task-list"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- ── Left-margin hover nav ────────────────────────────────── -->
     <div id="left-nav-trigger"></div>
     <nav id="left-nav-panel">
         <div class="left-nav-label">On this page</div>
-        <a class="left-nav-link" href="#gameboyworlds">Task Explorer</a>
         <a class="left-nav-link" href="#leaderboard">Leaderboard</a>
+        <a class="left-nav-link" href="#results">Self-Improvement</a>
         <a class="left-nav-link" href="#rollouts">Rollouts</a>
         <a class="left-nav-link" href="#submissions">Submissions</a>
-        <a class="left-nav-link" href="#method">Method</a>
-        <a class="left-nav-link" href="#results">Results</a>
+        <a class="left-nav-link" href="#gameboyworlds">Benchmark Tasks</a>
     </nav>
     <!-- Mobile drawer -->
     <div class="left-nav-drawer-overlay" id="left-drawer-overlay" onclick="closeLeftDrawer()"></div>
     <div class="left-nav-drawer" id="left-nav-drawer">
         <div class="drawer-nav-label">On this page</div>
-        <a class="drawer-nav-link" href="#gameboyworlds" onclick="closeLeftDrawer()">Task Explorer</a>
         <a class="drawer-nav-link" href="#leaderboard" onclick="closeLeftDrawer()">Leaderboard</a>
+        <a class="drawer-nav-link" href="#results" onclick="closeLeftDrawer()">Self-Improvement</a>
         <a class="drawer-nav-link" href="#rollouts" onclick="closeLeftDrawer()">Rollouts</a>
         <a class="drawer-nav-link" href="#submissions" onclick="closeLeftDrawer()">Submissions</a>
-        <a class="drawer-nav-link" href="#method" onclick="closeLeftDrawer()">Method</a>
-        <a class="drawer-nav-link" href="#results" onclick="closeLeftDrawer()">Results</a>
+        <a class="drawer-nav-link" href="#gameboyworlds" onclick="closeLeftDrawer()">Benchmark Tasks</a>
     </div>
     <button class="left-nav-mobile-btn" onclick="openLeftDrawer()" aria-label="Page navigation">&#9776;</button>
     <script>
@@ -1908,7 +1893,7 @@
             panel.addEventListener('mouseleave',   function () { t = setTimeout(function () { panel.classList.remove('is-open'); }, 180); });
         })();
         (function () {
-            var ids = ['gameboyworlds', 'leaderboard', 'rollouts', 'submissions', 'method', 'results'];
+            var ids = ['leaderboard', 'results', 'rollouts', 'submissions', 'gameboyworlds'];
             var links = document.querySelectorAll('.left-nav-link, .drawer-nav-link');
             function spy() {
                 var active = null;
