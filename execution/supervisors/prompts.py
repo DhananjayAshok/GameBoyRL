@@ -1,15 +1,12 @@
 """
 Every prompt used by a supervisor.
 
-Supervisor prompts live here rather than on the classes that send them because none
-of them is ever overridden: each belongs to exactly one supervisor.  Keeping them in
-one module means finding the prompt behind a call does not require knowing which
-convention its author happened to use.
+Supervisor prompts live here, not on the classes that send them: none is ever overridden,
+and each belongs to exactly one supervisor.
 
-Executor prompts stay as class attributes on the executor instead, because they are
-assembled per arm: :class:`~execution.executors.executor.PolicyExecutor` owns one step
-template and the action and history policies fill its named slots. (This used to say
-"overridden by seven subclasses" — that hierarchy is gone; there is one executor class.)
+Executor prompts stay as class attributes, since they are assembled per arm —
+:class:`~execution.executors.executor.PolicyExecutor` owns one step template and the action
+and history policies fill its named slots.
 """
 
 CRITIQUE_SLICE_PROMPT = """You are analysing a segment of a failed attempt to complete a task in a game of [GAME].
@@ -42,13 +39,8 @@ Hint: <one or two sentence hint for a better approach>
 [STOP]"""
 
 # --- Plan arm (InfoSubgoalSupervisor) -----------------------------------------------------
-# Module level because two parties share it: the planner prompt tells the model to emit it,
-# and InfoSubgoalSupervisor splits on it — so the token the model is asked for and the token
-# the code looks for cannot drift apart.
-#
-# It now lives in utils.parsing alongside parse_steps, the only code that splits on it, and
-# is re-exported here so `from execution.supervisors import PLAN_SEPARATOR` — which
-# benchmark_scripts/plan.py does — keeps working.
+# Defined in utils.parsing alongside parse_steps and re-exported here, so the token the
+# planner prompt asks for and the token the code splits on cannot drift apart.
 
 
 # The planner writes for an executor that will be handed each step in isolation, with no

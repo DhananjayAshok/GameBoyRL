@@ -1,23 +1,23 @@
 source scripts/core/utils.sh
 
 games=(
-    "bomberman_pocket"
+#    "bomberman_pocket"
     "bomberman_quest"
-    "deja_vu_1"
+#    "deja_vu_1"
     "deja_vu_2"
-    "legend_of_zelda_links_awakening"
+#    "legend_of_zelda_links_awakening"
     "legend_of_zelda_the_oracle_of_seasons"
     "pokemon_crystal"
-    "pokemon_red"
-    "sword_of_hope_1"
+#    "pokemon_red"
+#    "sword_of_hope_1"
     "sword_of_hope_2"
 )
 
 models=(
     "google/gemini-3.1-pro-preview"
-    "google/gemini-3.6-flash"
-    "anthropic/claude-haiku-4.5"
-    "openai/gpt-5-mini"
+#    "google/gemini-3.6-flash"
+#    "anthropic/claude-haiku-4.5"
+#    "openai/gpt-5-mini"
 )
 
 executors=("single_visual")

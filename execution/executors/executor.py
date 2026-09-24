@@ -1,29 +1,19 @@
 """
-The one executor. Everything that used to be a subclass is now a pair of policies.
+The one executor.
 
 :class:`PolicyExecutor` owns the loop, the budget, the prompt assembly and the environment
-plumbing.  What varies between arms lives in two collaborators:
+plumbing. What varies between arms lives in two collaborators:
 
 - an :class:`~execution.executors.policies.action.ActionPolicy` — how a decision is made
 - a :class:`~execution.executors.policies.history.HistoryPolicy` — what is remembered
 
-Nine arms, three plus three plus one class.  The hierarchy this replaces had one class per
-variant and a hook surface (``_query_vlm``, ``_pick_action``, ``_context_section``,
-``_step_template``, ``_on_step_start``, ``_on_env_step``, …) whose only job was to let
-those classes reach into a loop they could not otherwise change — and even then the two
-axes could not be combined, because a variant that rewrote ``STEP_PROMPT`` to change the
-response format silently dropped the ``[CONTEXT_SECTION]`` placeholder that carried the
-history.
-
-**A decision yields a list of actions.**  That is the change that removes the last reason
-for a second loop: the sequence planner used to override ``_execute`` outright because one
-of its calls produced several steps, and that override reimplemented budget accounting,
-invalid handling and the completion check, each subtly differently.
+Nine arms, three plus three plus one class. A decision yields a *list* of actions, so a
+sequence planner needs no loop of its own.
 """
 
 from __future__ import annotations
 
-from typing import Any, List, Optional, Type
+from typing import List, Optional, Type
 
 from gameboy_worlds.interface import HighLevelAction
 
@@ -177,9 +167,7 @@ You are playing a GameBoy game. The current screen is shown in the image.
                     return -1
                 continue
 
-            # Captured here, once per decision, because this is the single funnel every
-            # response passes through. A sequence decision covers several steps with one
-            # reasoning, which is what the completion check is then shown.
+            # One reasoning per decision, however many steps it covers.
             self._last_reasoning = decision.reasoning or self._last_reasoning
 
             outcome, n_env_steps, consecutive_invalid, error_message = self._run_decision(
@@ -230,9 +218,8 @@ You are playing a GameBoy game. The current screen is shown in the image.
                 self.report.termination_reason = "truncated"
                 return 2, n_env_steps, consecutive_invalid, error_message
 
-            # A failed action ends the decision: the rest of a committed plan was written
-            # on the assumption that this one worked. Low-level actions report success=0
-            # by convention rather than as a failure, so they never trigger this.
+            # A failed action ends the decision. Low-level actions report success=0 by
+            # convention, not as a failure, so they never trigger this.
             if (len(decision.actions) > 1
                     and not _is_low_level(action_class)
                     and record.action_success == 0):
@@ -260,11 +247,8 @@ You are playing a GameBoy game. The current screen is shown in the image.
         return None, n_env_steps, consecutive_invalid, error_message
 
     def _finish_decision(self, steps: List[StepRecord]) -> None:
-        """Show the history policy everything this decision did, once.
-
-        Batched at the decision boundary rather than per step so a policy that summarises
-        frames pays one round trip for a five-action plan instead of five.
-        """
+        """Show the history policy everything this decision did, once, batched at the
+        decision boundary."""
         if steps:
             self._history_policy.observe(steps)
 
@@ -275,12 +259,11 @@ def _is_low_level(action_class) -> bool:
 
 
 def make_executor_class(action_name: str, history_name: str) -> type:
-    """A named subclass for one ``<action>_<history>`` arm.
+    """A named subclass for one ``<action>_<history>`` arm. The class name reaches the report
+    as ``executor_name`` and names the on-disk results directory.
 
-    Real subclasses rather than ``functools.partial`` because the arm's name has to survive
-    into the report: :meth:`Executor._make_report` stamps ``__class__.__name__`` as
-    ``executor_name``, and that string names the on-disk results directory. A partial would
-    collapse all nine arms onto one name and one directory.
+    :return: The arm's executor class.
+    :rtype: type
     """
     name = f"{action_name}_{history_name}"
     return type(name, (PolicyExecutor,), {

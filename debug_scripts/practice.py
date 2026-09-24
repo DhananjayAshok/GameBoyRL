@@ -38,7 +38,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from utils import log_info, log_warn, parse_action_line
+from utils import log_info, parse_action_line
 from debug_scripts import markdown as md
 from debug_scripts.frames import strip
 from python_scripts.paths import Paths
@@ -51,10 +51,11 @@ BENCHMARK_SUPERVISOR = "subgoal"
 
 
 def _practice_dir(paths, leg: str) -> str:
-    """The practice output directory for one collection leg.
-
-    Mirrors practice_tasks.py's own derivation rather than re-deriving it differently:
+    """The practice output directory for one collection leg, mirroring practice_tasks.py:
     `<trajectory_stem>_guidance.json` -> `dirname(...)/practice_<executor>`.
+
+    :return: The practice directory.
+    :rtype: str
     """
     guidance_path = paths.info_source_stem(leg) + "_guidance.json"
     return os.path.join(os.path.dirname(guidance_path), f"practice_{paths.executor}")
@@ -155,7 +156,7 @@ def debug_practice(obj, model_name, leg, n_audit, n_frames, seed):
     )
     legs = ["curiosity", "zeroshot"] if leg == "both" else [leg]
     for name in legs:
-        print(_practice_report(paths, obj, name, n_audit, n_frames, seed))
+        log_info(_practice_report(paths, obj, name, n_audit, n_frames, seed), obj["parameters"])
 
 
 def _practice_report(paths, obj, leg, n_audit, n_frames, seed):

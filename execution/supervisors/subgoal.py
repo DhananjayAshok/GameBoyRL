@@ -2,24 +2,19 @@
 Decompose the task into a plan, then drive the plan one step at a time.
 
 :class:`SubgoalSupervisor` is :class:`~execution.supervisors.revising.RevisingSupervisor`
-with a different answer to one question: what are the targets? Instead of the benchmark
-task alone, it writes a plan and hands the engine its steps.
+with a different answer to one question: what are the targets? It writes a plan and hands
+the engine its steps.
 
-Everything else it adds exists because there is now more than one target:
+What the extra targets bring with them:
 
-- the judge fires at all — an intermediate step has no environment signal, so
-  ``RevisingSupervisor.judge_step`` decides whether it landed. The last step still reverts
-  to the task and is still the environment's to clear, so it is never judged.
+- the judge fires at all — an intermediate step has no environment signal. The last step
+  reverts to the task and is never judged.
 - ``_check_regression`` — a step can undo one already cleared, which the per-step judge
-  cannot see because it is only ever asked about the *current* step.
-- ``_diagnose_failure`` — repeated failure may mean the plan is wrong rather than the
-  attempt, in which case the remainder is replanned.
+  never sees.
+- ``_diagnose_failure`` — repeated failure may mean the plan is wrong, in which case the
+  remainder is replanned.
 
-Repair is at plan level, not step level. An earlier design rewrote the failing step in
-place; that can only fix wording, which assumes the route is right and only the phrasing is
-wrong. Most failures worth catching are not like that — the route does not exist, the
-object named is not on this screen, the game does not work as assumed — and a better-worded
-version of the same wrong step cannot fix any of them.
+Repair is at plan level, not step level.
 """
 
 from __future__ import annotations
@@ -35,21 +30,12 @@ from utils import log_warn, parse_key_value, parse_plan, parse_yes_no
 class SubgoalSupervisor(RevisingSupervisor):
     """Plan first, then supervise the executor through the plan step by step.
 
-    :param max_replans: How many times the plan may be rewritten in one episode. Bounds
-        both cost and the risk of thrashing between two readings of the same screen.
+    :param max_replans: How many times the plan may be rewritten in one episode.
 
     :ivar plan: The current plan. Mutated in place when the remainder is replaced.
-    :ivar original_plan: The plan as first written, before any replan. Kept separately
-        because :attr:`plan` is the *current* one, so after a replan ``len(plan)`` and the
-        number of slots actually attempted are counts of different things — which is how an
-        episode came to report "1/0 steps cleared". A reader wanting to know what changed
-        needs both.
-    :ivar planned: Whether an opening plan was produced at all. An episode that failed to
-        plan runs unplanned, and this is the honest record of that — ``len(plan) > 0`` is
-        not, because the replanner could once refill an empty plan mid-episode and make a
-        degraded run look planned from the outside.
-    :ivar completed_steps: Steps already cleared, each with the frame that proved it, so a
-        later step can be checked for having undone one of them.
+    :ivar original_plan: The plan as first written, before any replan.
+    :ivar planned: Whether an opening plan was produced at all.
+    :ivar completed_steps: Steps already cleared, each with the frame that proved it.
     """
 
     def __init__(self, *args, max_replans: int = 2, **kwargs) -> None:
@@ -67,19 +53,11 @@ class SubgoalSupervisor(RevisingSupervisor):
     # -- Planning -------------------------------------------------------------
 
     def write_plan(self) -> List[str]:
-        """Turn the task and the opening screen into an ordered plan.
+        """Turn the task and the opening screen into an ordered plan, using
+        :data:`PLAN_PROMPT` with whatever :meth:`_knowledge` returns.
 
-        Uses :data:`PLAN_PROMPT` with whatever :meth:`_knowledge` returns — nothing at this
-        level, a distilled insights block at the info level. The prompt constrains the
-        planner to visible artefacts and forbids naming buttons, because a button sequence
-        recorded in one playthrough is wrong from any other screen, and requires every step
-        to end in a visually checkable condition — without one there is nothing for
-        :meth:`~execution.supervisors.revising.RevisingSupervisor.judge_step` to judge
-        against. That discipline is worth having with or without knowledge, which is why
-        there is no separate knowledge-free planner.
-
-        Returns ``[]`` when nothing could be planned, which the engine degrades to running
-        the task unplanned rather than inventing a plan.
+        :return: The plan's steps, or ``[]`` when nothing could be planned.
+        :rtype: List[str]
         """
         screen = self._current_frame()
         prompt = (
@@ -93,17 +71,11 @@ class SubgoalSupervisor(RevisingSupervisor):
         return self.plan
 
     def _resolve_targets(self) -> List[Optional[str]]:
-        """Write the plan, then hand its steps to the engine as targets.
+        """Write the plan, then hand its steps to the engine as targets. Returns a copy, not
+        :attr:`plan` itself.
 
-        ``[None]`` when planning produced nothing: the arm degrades to the unplanned
-        baseline rather than to a fabricated plan, and :attr:`planned` stays ``False`` so
-        the row says which of the two it was. A copy, not ``self.plan`` itself — the replan
-        path splices into the working list in place, and aliasing would make the two names
-        refer to the same object before the first replan and different objects after.
-
-        The per-episode reset and the target list are decided together here, which is why
-        this is one hook rather than two: the list depends on a plan that does not exist
-        until this method has written it.
+        :return: The plan's steps, or ``[None]`` when planning produced nothing.
+        :rtype: List[Optional[str]]
         """
         self.completed_steps = []
         self.n_replans = 0
@@ -119,28 +91,15 @@ class SubgoalSupervisor(RevisingSupervisor):
     # -- Judging and repair ---------------------------------------------------
 
     def _on_target_cleared(self, target: str) -> None:
-        # Remembered with the frame that proved it, so a later step undoing it can be
-        # spotted by comparing that frame against the screen then.
         self.completed_steps.append({"step": target, "frame": self._current_frame()})
 
     def _check_regression(self, summaries: List[str]) -> Optional[str]:
-        """Ask whether the failed attempt undid a step that had already been completed.
-
-        The judge cannot see this. It is asked only whether *this* step's termination
-        condition is met, so a run that quits the menu it had opened, or puts back the item
-        it had taken, reads as a plain failure of the current step — and the hint that
-        follows tells the player to keep pushing forward from a state that has silently
-        moved backwards.
-
-        The comparison is between two frames: the screen when the earlier step was judged
-        complete, and the screen now. Two images rather than a description, because the
-        thing being asked about is exactly a difference between two screens, and the segment
-        summaries were written without any knowledge of the earlier state.
-
-        Runs only when a step has actually been completed, so an episode whose first step
-        never lands never pays for it.
+        """Ask whether the failed attempt undid a step that had already been completed, by
+        comparing the frame that proved the earlier step against the screen now. Runs only
+        when a step has actually been completed.
 
         :return: A sentence naming what was lost, or ``None`` if nothing was.
+        :rtype: Optional[str]
         """
         if not self.completed_steps:
             return None
@@ -178,33 +137,18 @@ class SubgoalSupervisor(RevisingSupervisor):
                           regression: Optional[str]) -> Optional[List[str]]:
         """Ask whether the failure is the plan's fault, and replan the remainder if so.
 
-        Only the **remaining** steps are replanned. Steps already cleared are shown as DONE
-        and explicitly excluded, because replanning finished work spends budget redoing what
-        the screen already shows is done — and, worse, invites the executor to undo it.
-
-        :data:`PLAN_FLAW_PROMPT` is written to answer *no* by default. Repeated failure is
-        not evidence of a bad plan — a fumbled step fails repeatedly too — so it demands
-        something visible that the plan is incompatible with, and a replan that fired on
-        ordinary fumbling would throw away a sound route on the first hard step.
-
-        That default is why *history* must be the current step's own attempts and no more.
-        It is rendered as ``attempt 1…n`` of the step being judged, so attempts inherited
-        from a replaced step would show a fresh step failing repeatedly on its first try —
-        evidence for the one answer the prompt is written to resist.
+        Only the remaining steps are replanned; cleared steps are shown as DONE and excluded.
+        :data:`PLAN_FLAW_PROMPT` answers *no* by default, so *history* must be the current
+        step's own attempts and no more.
 
         :return: The replacement steps for ``index`` onwards, or ``None`` to carry on
             hinting the current target.
+        :rtype: Optional[List[str]]
         """
         if self.n_replans >= self.max_replans:
             return None
 
-        # An episode that never produced a plan has no plan to find flawed. Without this it
-        # would replan one into existence mid-episode: the target list is ``[None]``, the
-        # rendered plan block is empty, and a "yes" here would splice real steps in and
-        # refill :attr:`plan` — so a run that degraded to the unplanned baseline came out
-        # looking planned, with a non-empty plan column and n_plan_steps > 0. The info arm
-        # worked around this by refusing to degrade; the fix belongs here, where the
-        # replanner is.
+        # An episode that never produced a plan has no plan to find flawed.
         if all(text is None for text in targets):
             return None
 
@@ -237,8 +181,6 @@ class SubgoalSupervisor(RevisingSupervisor):
 
         replacement = parse_plan(output)
         if not replacement:
-            # Said flawed and produced nothing to replace it with — including the "NONE"
-            # This shouldn't be happening, but avoid a crash. 
             log_warn("[subgoal] plan judged flawed but no replacement was produced; "
                      "continuing with the current step.", self._parameters)
             return None
@@ -251,13 +193,7 @@ class SubgoalSupervisor(RevisingSupervisor):
         return replacement
 
     def _on_targets_replaced(self, targets: List[Optional[str]]) -> None:
-        """Track the spliced list, not the replacement.
-
-        The engine does ``targets[index:] = replacement``, so the replacement is only the
-        *tail*. Assigning it to :attr:`plan` directly drops every step already cleared —
-        which showed up as an episode reporting ``0/1 steps cleared`` after two replans of a
-        four-step plan.
-        """
+        """Track the spliced list, not the replacement tail."""
         self.plan = [t for t in targets if t is not None]
 
     def _extras(self) -> dict:

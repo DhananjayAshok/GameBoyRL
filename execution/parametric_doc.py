@@ -6,29 +6,17 @@ first is ``vlm_scripts/build_info.py``, which distils one out of real trajectori
 module asks the model to write one from its own weights, given nothing but the game's name —
 no frames, no playthroughs, no retrieval of any kind.
 
-**Why it exists.** The plan arm's result has always been "planning from a distilled document
-beats the no-knowledge baseline". That comparison cannot separate two very different claims:
-that *distilling trajectories* worked, or that *any* game-specific text in the prompt worked.
-A document written from the model's priors is the control that separates them — same
-document schema, same relevance pass, same planner, same budgets, differing only in where the
-entries came from. Where the parametric document scores like the built one, the pipeline that
-produced the built one has not earned its cost.
+It is the control for the plan arm: same document schema, same relevance pass, same planner,
+same budgets, differing only in where the entries came from.
 
-**What it is not.** Nothing here is verified against the game. On a well-known title the model
-has genuine knowledge; on an obscure one it will confabulate fluently and the document will
-look exactly as confident either way. That is the finding rather than a bug, and it is the
-reason the document is written to disk and kept: a run whose plans came from invented level
-geometry has to remain auditable after the fact.
+**Nothing here is verified against the game.** The model will confabulate as confidently as
+it recalls, which is why the document is written to disk and kept — a run whose plans came
+from invented level geometry has to remain auditable.
 
-**Task entries only.** The schema's image section describes kinds of screen, identified from
-frames the builder actually saw. A model that has seen no screens has nothing well-founded to
-put there, and an invented image category is worse than an absent one — it would be matched
-against a real screen by the relevance pass. So the image section is left empty, and
-``InfoSubgoalSupervisor._candidates`` yields nothing for it without needing a special case.
-
-Frames are likewise absent: every entry has ``frame=None``, which
-:func:`~execution.info_doc.resolve_frame` maps to ``None`` and the relevance call handles by
-switching to its no-frame prompt wording.
+**Task entries only.** The image section is left empty, so
+``InfoSubgoalSupervisor._candidates`` yields nothing for it. Every entry has ``frame=None``,
+which :func:`~execution.info_doc.resolve_frame` maps to ``None`` and the relevance call
+handles with its no-frame prompt wording.
 """
 
 from __future__ import annotations
@@ -166,16 +154,12 @@ def generate_parametric_document(
     document.set_entries(TASK_SECTION, entries)
     document.provenance = Provenance(
         source=PARAMETRIC_SOURCE,
-        # No executor and no trajectory_stem: neither exists for a document that was not
-        # distilled from a run. Left None rather than filled with a plausible value, so the
-        # provenance block cannot be mistaken for a built document's.
+        # Neither exists for a document that was not distilled from a run.
         executor=None,
         model=getattr(vlm, "_model_name", None),
         trajectory_stem=None,
         built_at=datetime.now(timezone.utc).isoformat(),
-        # What writing this document cost. On the provenance rather than returned,
-        # because load_or_generate_parametric_document hands back a reloaded copy — see
-        # its docstring — so anything not serialised is lost on the generating run too.
+        # What writing this document cost. Must be serialised: callers get a reloaded copy.
         input_tokens=meta["input_tokens"],
         output_tokens=meta["output_tokens"],
     )

@@ -16,28 +16,22 @@ VLM judge — this is the only ground-truth success signal in the pipeline.
     report of every executor leg, and each call record carries the images it saw, its
     prompt, the raw response and the steps it produced.
 
-This used to parse the CSV's rendered `report` column with a regex over box-drawing
-characters, because that string was the only durable per-episode record. It cost three
-things: no frames at all, only the *last* step per call (so a `sequence` executor lost every
-action but one), and no way to see the supervisor's own reasoning. Reading the archive
-instead fixes all three. The `report` column is still written and is still useful for
-grepping; nothing here parses it.
+The CSV's rendered `report` column is still written and useful for grepping; nothing here
+parses it.
 
 Episode identity
 ----------------
 **A task string is not an episode key.** The benchmark anchors the same task to more than
-one init_state — `bomberman_quest`'s "Talk to the Guide" is one episode per guide, and
-`legend_of_zelda_links_awakening`'s "finish dialogue" one per room — so several rows of one
-CSV can carry the same `task`. Episodes are therefore keyed on **row position** (see
-:func:`_paired_index`) and their artifacts located through the row's own `session_dirs`.
+one init_state, so several rows of one CSV can carry the same `task`. Episodes are keyed on
+**row position** (see :func:`_paired_index`) and their artifacts located through the row's
+own `session_dirs`.
 
 Output
 ------
 <results_dir>/debug/<game>/benchmark/<arm>/episodes_<model>.md   (one per model)
 <results_dir>/debug/<game>/benchmark/<arm>/comparison.md
 where <arm> is the --supervisor, suffixed with --extra_name when the run used one.
-Frames go to <storage_dir>/tmp/debug_frames/<game>/benchmark/<model>/<task>/ — on storage,
-not beside the markdown, because there are thousands of them per report.
+Frames go to <storage_dir>/tmp/debug_frames/<game>/benchmark/<model>/<task>/.
 """
 
 import ast
@@ -53,10 +47,9 @@ from execution.report import (ACTION_TAGS, EnvironmentStepRecord,
                               SupervisorVLMCallRecord, _step_summary,
                               summarize_world_model)
 from utils import log_error, log_info, log_warn, parse_action_line
-from benchmark_scripts.common import REPORT_FILENAME
 from debug_scripts import markdown as md
 from debug_scripts.frames import to_pil
-from python_scripts.paths import BENCHMARK_SUPERVISORS, Paths
+from python_scripts.paths import BENCHMARK_SUPERVISORS, REPORT_FILENAME, Paths
 
 
 def _as_list(value):
@@ -90,22 +83,12 @@ def _paired_index(a: pd.DataFrame, label_a: str, b: pd.DataFrame, label_b: str,
                   parameters: dict) -> list[int]:
     """Row positions pairing each episode in *a* with the same episode in *b*.
 
-    Paired on **position, not task string**. A task string is not unique within one CSV (the
-    benchmark anchors some tasks to two init_states), so ``set_index("task")`` builds a
-    non-unique index: ``.loc[task]`` then returns a *Series* per lookup rather than a scalar,
-    which either raises on ``bool()`` or silently double-counts in a ``.sum()``.
+    Paired on position, not task string: CSV row *i* is benchmark row *i*, and a short CSV is
+    a prefix of a long one. The task strings are checked at every shared position and a
+    mismatch is fatal.
 
-    Position is a key, and the pipeline already runs on it. ``select_tasks`` takes a *prefix*
-    of the benchmark table, ``run_sweep`` appends rows in that order, and ``load_checkpoint``
-    resumes by counting rows — so CSV row *i* is benchmark row *i*, and a short CSV is a
-    prefix of a long one. That is what makes ``--n_tasks 5`` comparable to a full sweep.
-
-    The task strings are checked at every shared position and a mismatch is fatal rather than
-    dropped. It means the two CSVs are not prefixes of one benchmark table — an edited table
-    or two different games — and pairing them anyway would put two different episodes side by
-    side and call the difference a result. (It also used to catch ``--override_index`` runs,
-    which appended their single row at the resume position rather than at their own; that
-    flag has been removed, and with it the only in-tree way to write a row out of order.)
+    :return: The shared row positions.
+    :rtype: list
     """
     n = min(len(a), len(b))
     if n == 0:
@@ -156,13 +139,11 @@ def _load_report(row):
 
 
 def _require_archives(frame: pd.DataFrame, csv_path: str, parameters: dict) -> dict:
-    """Load every episode's report, refusing a CSV that predates the archive.
+    """Load every episode's report, refusing a CSV that predates the archive. A few missing
+    archives are tolerated with a warning.
 
-    Refused rather than degraded: a report that silently renders without frames looks like a
-    run that made no calls, and comparing one of those against a complete one is worse than
-    getting an error. A *few* missing archives are tolerated with a warning, since
-    ``save_report`` deliberately swallows its own failures so an unwritable archive cannot
-    cost an already-paid-for episode.
+    :return: Reports keyed by row position.
+    :rtype: dict
     """
     if "session_dirs" not in frame.columns:
         log_error(
@@ -232,13 +213,11 @@ def _via_link(path: str, target_root: str, link_root: str) -> str:
 
 
 def _video_path(row) -> str | None:
-    """The video recorded for one episode, or None.
+    """The video recorded for one episode, read from the row's own ``session_dirs``, which is
+    also where ``save_report`` writes the archive.
 
-    Read from the row's own ``session_dirs`` rather than rebuilt from the task name, because
-    the session dir is the only per-episode identity the CSV carries: two rows sharing a task
-    string share a task-named sessions directory too, and picking its most recent run would
-    hand both episodes the same video. ``save_report`` writes the archive into this same
-    directory, so one path derivation now locates both artifacts.
+    :return: Path to the video, or ``None``.
+    :rtype: str | None
     """
     session = _session_dir(row)
     if session is None:
@@ -614,6 +593,3 @@ def debug_benchmark(obj, model_name, compare_model, bench_game, max_episodes, su
         path = md.write_report(os.path.join(report_dir, "comparison.md"), blocks)
         log_info(f"[benchmark] wrote {path}")
         written.append(path)
-
-    for path in written:
-        print(path)

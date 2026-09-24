@@ -11,14 +11,13 @@ Each decision is recorded as a :class:`~execution.report.WorldModelDecision` on 
 made it: which predicted image showed which action, what was picked, and — once the action
 has run — how close the prediction came to the frame that actually followed.
 
-**State that outlives one executor.** A supervised arm builds a new executor for every leg
-of an episode, so two things live at module level rather than on the instance: the loaded
-checkpoint (:data:`_LOADED_MODELS`), so a leg does not reload it from disk, and the frame
-stack (:data:`_FRAME_STACKS`), so a leg does not forget the frames before it.
+**State that outlives one executor.** A supervised arm builds a new executor per leg, so the
+loaded checkpoint (:data:`_LOADED_MODELS`) and the frame stack (:data:`_FRAME_STACKS`) live
+at module level.
 
 **Transfer.** A checkpoint is looked up under the benchmark game unless the arm names a
-source game, which is how a title with no world model of its own (``pokemon_crystal``) plays
-with a sibling's (``pokemon_red``). The source game is then part of the arm's name.
+source game, which is how ``pokemon_crystal`` plays with ``pokemon_red``'s. The source game
+is then part of the arm's name.
 """
 
 from __future__ import annotations
@@ -51,10 +50,9 @@ from utils import depathify, log_error, parse_int
 WORLD_MODEL_EXECUTOR = "world_model"
 
 #: Loaded checkpoints, shared by every executor in the process, as
-#: ``(world_model, action_space_spec)``. Keyed on both files' paths and modification times
-#: and the device: a checkpoint retrained mid-sweep has a new mtime, so it is loaded afresh
-#: rather than served stale, and the older load for the same files is dropped. Sharing is
-#: safe because the model is only ever used in eval mode under ``no_grad``.
+#: ``(world_model, action_space_spec)``. Keyed on both files' paths, their modification times
+#: and the device, so a checkpoint retrained mid-sweep is loaded afresh. Only ever used in
+#: eval mode under ``no_grad``.
 _LOADED_MODELS: Dict[tuple, Tuple[WorldModel, dict]] = {}
 
 #: One frame stack per live environment. The legs of one episode share an environment, so
@@ -178,15 +176,12 @@ Choice: <the image number you pick>
     def _candidate_actions(self) -> List[Tuple[int, type, Dict[str, Any], str]]:
         """``(index, action_class, kwargs, label)`` for every action the model can score.
 
-        The saved spec stores the sub-space coordinates rather than the kwargs themselves,
-        because kwargs hold live enum members that do not survive a round trip through JSON.
-        The controller turns those coordinates back into the exact ``(class, kwargs)`` pair
-        that :meth:`_take_action` needs.
+        The saved spec stores sub-space coordinates, which the controller turns back into the
+        ``(class, kwargs)`` pair :meth:`_take_action` needs. Each coordinate is checked
+        against the action class the checkpoint recorded for it.
 
-        Each coordinate is checked against the action class the checkpoint recorded for it.
-        A controller whose sub-spaces are laid out differently — another controller variant,
-        or a game whose controller differs from the source game's — would otherwise map the
-        model's action indices onto different actions without any error.
+        :return: One tuple per scorable action.
+        :rtype: list
         """
         candidates = []
         for entry in self._action_space_spec["actions"]:
@@ -429,22 +424,15 @@ def world_model_executor_name(run_name: str, source_game: Optional[str] = None) 
 
 
 def make_world_model_executor_class(run_name: str, source_game: Optional[str] = None) -> type:
-    """A named subclass of :class:`WorldModelExecutor` for one checkpoint.
-
-    A real subclass rather than a constructor argument, for the reason
-    :func:`~execution.executors.executor.make_executor_class` gives: the name has to survive
-    into the identity of what ran. :meth:`Executor._make_report` stamps ``__class__.__name__``
-    as ``executor_name``, and the benchmark names its CSV and session directory from the
-    same string. With the run name as a mere kwarg, the class was ``WorldModelExecutor``
-    while the files said ``world_model`` — and two checkpoints wrote into one CSV, where
-    resuming would treat the second's tasks as already done.
+    """A named subclass of :class:`WorldModelExecutor` for one checkpoint. The class name
+    reaches the report as ``executor_name`` and names the CSV and session directory.
 
     :param run_name: The RL run_name the checkpoint was trained under.
     :param source_game: The game the checkpoint was trained on, when it is not the game being
-        benchmarked. ``None`` uses the benchmark game's own checkpoint. The caller passes
-        ``None`` rather than the benchmark game itself, so a game's own checkpoint has one
-        name however it was asked for.
-    """
+        benchmarked. Pass ``None``, never the benchmark game itself, to use its own checkpoint.
+    :return: The arm's executor class.
+    :rtype: type
+"""
     source = f" trained on {source_game}" if source_game else ""
     return type(world_model_executor_name(run_name, source_game), (WorldModelExecutor,), {
         "WORLD_MODEL_RUN_NAME": run_name,

@@ -1,9 +1,5 @@
-# This file contains all the fundamental utilities that do not rely on any other file.
-#
-# Nothing here may import from anywhere else in the project, and nothing here may import a
-# third-party package beyond the standard library. This module is the one part of utils/ that
-# is cheap enough to import from a short-lived CLI process — see python_funcs.py, which shells
-# out once per path lookup and cannot afford the VLM stack.
+# Fundamental utilities. Nothing here may import from elsewhere in the project or from a
+# third-party package.
 import os
 import logging
 import re
@@ -46,27 +42,8 @@ def get_logger(
 
 def depathify(string: str) -> str:
     """
-    Collapse a free-text string into one path segment.
-
-    Every non-word character becomes ``_``, not just ``/``, ``\\`` and space. The three
-    separators are what splice a segment into extra directory levels, but they are not the
-    only input that stops the result being a *segment*: ``"."`` and ``".."`` survive a
-    separators-only replace unchanged and then resolve to the parent path, which is fatal
-    for any caller that deletes what it derives.
-
-    Case is left alone — that is the caller's policy, not this function's.
-
-    Returns ``""`` for a string with no word characters at all (``"???"``). Callers joining
-    the result onto a base path must handle that: an empty segment resolves to the base
-    directory itself.
-
-    Lives here rather than in ``utils/parsing.py`` because that module imports
-    ``utils.lm_inference`` at module scope, which pulls in the whole LM stack — so a short-lived
-    process that only needs to name a directory cannot import it. ``utils.parsing`` re-exports
-    this name, so existing importers are unaffected.
-
-    Not to be confused with ``python_scripts.strings.depathify_legacy``, which folds only the
-    three separators and is deliberately kept for RL experiment names — see report.md.
+    Collapse a free-text string into one path segment, folding every non-word character to
+    ``_``. Case is left alone. Returns ``""`` for a string with no word characters.
 
     :param string: The string to depathify.
     :type string: str

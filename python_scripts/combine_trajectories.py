@@ -1,32 +1,24 @@
 """
 Writes a manifest that references several grouped-trajectory pickle files.
 
-Each input pickle is a list[group], where each group is a list[trajectory], as
-written by cleanrl/cleanrl_utils/group_trajectories.py. Rather than loading and
-concatenating all of them (tens of GB of frames) into one giant file, this writes
-a small manifest: a pickled list[str] of absolute paths to the input pkls. Group
-order is positional — first all groups of the first path, then the second, etc. —
-so downstream infer_tasks sees the same flattened sequence a real concatenation
-would have produced. infer_tasks.load_grouped_trajectories understands both a
-manifest (list[str]) and a plain list[group], so a per-state file still works.
+Each input pickle is a list[group], where each group is a list[trajectory], as written by
+cleanrl/cleanrl_utils/group_trajectories.py. Instead of concatenating them (tens of GB of
+frames), this writes a small manifest: a pickled list[str] of absolute paths to the input
+pkls. Group order is positional, so downstream infer_tasks sees the same flattened sequence a
+real concatenation would have produced. infer_tasks.load_grouped_trajectories understands
+both a manifest (list[str]) and a plain list[group].
 
-Used by scripts/pipeline/curiosity_all_tasks.sh to merge the per-init_state grouped
-trajectories of a game into a single file, so one infer_tasks call annotates all
-states. (infer_tasks keys its output only on run_name, with no init_state in the
-path, so a per-init_state loop would let only the first state's annotation survive —
-combining first is what makes every state contribute.)
+Used by scripts/pipeline/curiosity_all_tasks.sh to merge a game's per-init_state grouped
+trajectories into a single file, so one infer_tasks call annotates all states.
 
-The manifest points at the input pkls instead of copying them, so it breaks if
-those inputs are later moved or deleted. The pipeline keeps them around, so this
-is fine in practice.
+The manifest points at the input pkls instead of copying them, so it breaks if those inputs
+are later moved or deleted.
 
 Output: <save_path>/grouped_<z_kind>_high_reward_trajectories.pkl — same naming as
 group_trajectories.py so the combined file is interchangeable with a per-state one.
 
 NOTE: curiosity_all_tasks.sh writes the combined file under an "all" init_state_group
-directory. If a game ever has a real init_state literally named "all", its grouped
-trajectories directory collides with this combined directory — rename the combined
-dir in curiosity_all_tasks.sh if that ever happens.
+directory, which would collide with a real init_state literally named "all".
 """
 import os
 import pickle

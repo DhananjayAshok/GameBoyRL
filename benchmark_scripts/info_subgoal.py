@@ -13,7 +13,7 @@ from gameboy_worlds import get_benchmark_tasks
 
 from execution.parametric_doc import load_or_generate_parametric_document
 from execution.registry import AVAILABLE_SUPERVISORS
-from execution.supervisors import PLAN_SEPARATOR, InfoSubgoalSupervisor
+from execution.supervisors import PLAN_SEPARATOR
 from utils import VLM, log_info
 from python_scripts import paths
 from python_scripts.paths import Paths
@@ -123,19 +123,14 @@ def _run(obj, *, mode, info_docs, parametric_categories,
     log_info(f"Executor token budget: {previous} -> {executor_max_new_tokens} "
              f"(this run only). Supervisor calls: {obj['supervisor_max_new_tokens']}.")
 
-    # Resolved on the group (falling back to the executor's), because both the parametric
-    # document's cache path and the supervisor's own VLM are keyed on it and must not
-    # disagree.
+    # Keys both the parametric document's cache path and the supervisor's own VLM.
     knowledge_model = obj["supervisor_vlm_model"]
     knowledge_kind = obj["supervisor_vlm_kind"]
 
     if mode == "retrieval":
         documents = common.load_documents(info_docs, parameters)
     else:
-        # Generated once and cached, so a rerun of the same command plans from the same
-        # document. Keyed on the supervisor's model rather than the executor's: a different
-        # model has different priors, and reusing one's document under another's name would
-        # attribute knowledge to a model that never wrote it. Delete the file to rebuild it.
+        # Generated once and cached, keyed on the supervisor's model. Delete to rebuild.
         doc_path = Paths(parameters=parameters, game=game,
                          model_name=knowledge_model).parametric_doc()
         documents = [load_or_generate_parametric_document(
@@ -147,10 +142,8 @@ def _run(obj, *, mode, info_docs, parametric_categories,
             parameters=parameters,
         )]
 
-    # The knowledge mode is part of the supervisor's identity, not a parameter beside it:
-    # AVAILABLE_SUPERVISORS has a real subclass per mode, because two modes are different
-    # experiments and must not share a CSV or a session tree. It is the subcommand word too,
-    # so this name is the one the caller typed.
+    # The knowledge mode is part of the supervisor's identity: one real subclass per mode in
+    # AVAILABLE_SUPERVISORS, and the subcommand word too.
     supervisor_name = f"info_subgoal_{mode}"
     supervisor_class = AVAILABLE_SUPERVISORS[supervisor_name]
 
@@ -207,8 +200,7 @@ def _run(obj, *, mode, info_docs, parametric_categories,
             result = supervisor.evaluate()
             report = result["report"]
             if obj["verbose"]:
-                print("\n----- trajectory " + "-" * 44)
-                print(str(report))
+                log_info("\n----- trajectory " + "-" * 44 + "\n" + str(report), parameters)
             return common.PlayResult(
                 report=report,
                 extras={
@@ -232,9 +224,7 @@ def _run(obj, *, mode, info_docs, parametric_categories,
             executor_name=executor_class.__name__,
             model=model_save_name,
             extra_name=extra_name,
-            # The one arm that reads documents, so the one arm with a knowledge identity to
-            # archive. Provenance labels rather than paths: a path says where the file sat on
-            # the machine that ran this, the label says what it was distilled from.
+            # Provenance labels, never paths: a path is machine-specific.
             info_docs=[d.provenance.label or "(no provenance recorded)" for d in documents],
             **emulator_kwargs,
         )
@@ -248,8 +238,7 @@ def _run(obj, *, mode, info_docs, parametric_categories,
             *[summary[key] for key in SUMMARY_COLUMNS],
             json.dumps(extras.get("selected_ids", [])),
             extras.get("insights_block"),
-            # default=str so a report object or anything else non-serialisable that finds
-            # its way into step_log degrades to text instead of losing the whole row.
+            # default=str so anything non-serialisable degrades to text.
             json.dumps(extras.get("step_log", []), default=str),
             json.dumps(outcome.session_dirs),
         ]
@@ -263,14 +252,14 @@ def _run(obj, *, mode, info_docs, parametric_categories,
         if outcome.extras.get("plan"):
             n_planned += 1
         n_run += 1
-        print(f"  -> success={outcome.success}  steps={outcome.n_steps}  "
-              f"plan={summary['n_steps_cleared']}/{summary['n_slots_attempted']} steps "
-              f"cleared over {summary['n_attempts']} attempt(s), "
-              f"{summary['n_replans']} replan(s)"
-              f"{'' if summary['planned'] else '  [UNPLANNED]'}  "
-              f"insights={summary['n_insights_kept']}/{summary['n_insights_candidate']}"
-              f"->{summary['n_insights_distilled']}  "
-              f"{summary['n_supervisor_calls']} supervisor calls")
+        log_info(f"  -> success={outcome.success}  steps={outcome.n_steps}  "
+                 f"plan={summary['n_steps_cleared']}/{summary['n_slots_attempted']} steps "
+                 f"cleared over {summary['n_attempts']} attempt(s), "
+                 f"{summary['n_replans']} replan(s)"
+                 f"{'' if summary['planned'] else '  [UNPLANNED]'}  "
+                 f"insights={summary['n_insights_kept']}/{summary['n_insights_candidate']}"
+                 f"->{summary['n_insights_distilled']}  "
+                 f"{summary['n_supervisor_calls']} supervisor calls", parameters)
 
     common.run_sweep(
         tasks,

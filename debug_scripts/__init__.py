@@ -6,12 +6,9 @@ Every command is read-only over artifacts the pipeline is guaranteed to have wri
 raises (naming the producing script) when a required artifact is absent. Nothing here
 reads logs/, wandb or slurm.
 
-Two commands need more than saved artifacts, and both are deliberate exceptions:
-`zeroshot` opens an emulator because it needs each init_state's first frame, which exists
-nowhere on disk. `compare` opens an emulator and *does* take steps: it replays each
-episode's recorded action sequence to reconstruct frames, because the executor's own
-per-call PNGs are keyed on the executor class rather than the model and are only written
-under --verbose. It still constructs no VLM.
+Two commands need more than saved artifacts: `zeroshot` opens an emulator for each
+init_state's first frame, and `compare` opens one and *does* take steps, replaying each
+episode's recorded action sequence to reconstruct frames. Neither constructs a VLM.
 """
 
 from debug_scripts.check_paths import check_paths

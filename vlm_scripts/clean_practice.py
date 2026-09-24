@@ -104,9 +104,8 @@ Decision: <ACCEPT or REJECT>
 [STOP]"""
 
 
-# Used when the call produced an env step, so its resulting frame is available. The
-# resulting frame is appended as the LAST image. Keep the Reason/Decision footer
-# byte-identical to CLEAN_PROMPT so parse_key_value stays valid.
+# Used when the call produced an env step, whose resulting frame is appended as the LAST
+# image. Keep the Reason/Decision footer byte-identical to CLEAN_PROMPT.
 CLEAN_PROMPT_TRANSITION = """You are reviewing a single decision an agent made while playing [GAME].
 
 The agent was working toward this task:
@@ -165,13 +164,9 @@ def _filter_record(
 
     When the call produced an env step and the agent was shown at least one frame, that
     step's resulting frame is appended as the LAST image and the transition-aware prompt
-    is used, so the judge sees the action's effect and not just its intent.
-
-    The after-frame is read off the record's own steps rather than a field backfilled
-    after the fact: the executor records which steps a call produced as it takes them, so
-    the pairing is stored, not reconstructed by matching frames. A call that took several
-    steps ends at the last one, which is the state the agent actually left behind.
-    """
+    is used. The after-frame is read off the record's own steps; a call that took several
+    steps ends at the last one.
+"""
     images = list(record.images) if record.images else []
     env_steps = [s for s in record.steps if isinstance(s, EnvironmentStepRecord)]
     next_frame = env_steps[-1].frame_after if env_steps else None
@@ -239,9 +234,7 @@ def _run_paraphrase_pass(
             try:
                 paraphrases = future.result()
             except Exception:
-                # Abort rather than skip: silently continuing here is what wrote an
-                # empty paraphrases.json during the server outage. Tasks done so far
-                # are checkpointed, so re-running resumes.
+                # Abort, never skip: tasks done so far are checkpointed.
                 log_error(
                     f"clean paraphrase aborting on task {task!r}: VLM inference failed "
                     f"(is the server up?). Tasks done so far are checkpointed; re-run to "
@@ -321,12 +314,8 @@ def _run_filter_pass(
             try:
                 accept, reason = future.result()
             except Exception:
-                # An infer exception is an outage, not a judgment: parse failures
-                # never raise (they default to accept inside _filter_record), and
-                # the infer layer already retried transient errors. So abort loudly
-                # instead of checkpointing a fake accept. Records judged so far are
-                # already in the checkpoint, so fixing the server and re-running
-                # resumes cleanly.
+                # An infer exception is an outage, not a judgment — parse failures never
+                # raise. Abort loudly; records judged so far are checkpointed.
                 log_error(
                     f"clean filter aborting at [{group_idx}_{attempt}] call {call_idx}: VLM "
                     f"inference failed (is the server up?). Records judged so far are "
@@ -334,8 +323,8 @@ def _run_filter_pass(
                     parameters,
                 )
             if verbose:
-                print(f"[{group_idx}_{attempt}] call {call_idx}: "
-                      f"{'accept' if accept else 'reject'} ({reason})")
+                log_info(f"[{group_idx}_{attempt}] call {call_idx}: "
+                         f"{'accept' if accept else 'reject'} ({reason})", parameters)
             rows.append({
                 "group_idx": group_idx,
                 "attempt": attempt,

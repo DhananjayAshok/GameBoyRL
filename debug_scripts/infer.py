@@ -191,4 +191,3 @@ def debug_infer(obj, model_name, n_frames, max_tasks, max_traj_per_task):
 
     report_path = md.write_report(os.path.join(report_dir, "report.md"), blocks)
     log_info(f"[infer] wrote {report_path}")
-    print(report_path)

@@ -18,7 +18,8 @@ from debug_scripts.frames import _FONT, to_pil
 from execution.perception.pokemon.tiles import TileRecognizer
 from execution.strategist.pokemon.goals import PokemonGoalTree
 from execution.strategist.pokemon.knowledge import PokemonKnowledgeTree
-from execution.strategist.pokemon.location import LocationStore, explore, majors_on, place_text
+from execution.strategist.pokemon.location import (MAX_IDENTITY_IMAGES, LocationStore, explore,
+                                                   majors_on, place_text)
 from execution.strategist.pokemon.notepad import ThoughtNotepad
 from python_scripts.paths import debug_dir, debug_frames_dir, strategist_dir
 from utils import log_error, log_info
@@ -36,7 +37,6 @@ TITLES = {"goals": "Goals", "locations": "Locations", "knowledge": "Knowledge", 
 
 TILE_SCALE = 6
 IMAGE_SCALE = 2
-MAX_IDENTITY_IMAGES = 4
 NODE_COLOURS = {"major": "#8cb6d9", "bridge": "#b5d99c", "room": "#f2d492", "unknown": "#cccccc"}
 HIGHLIGHT = "#e4572e"
 

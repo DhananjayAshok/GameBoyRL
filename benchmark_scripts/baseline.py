@@ -12,7 +12,6 @@ import click
 from gameboy_worlds import get_benchmark_tasks
 
 from execution.registry import AVAILABLE_SUPERVISORS
-from execution.supervisors import DummySupervisor
 
 from benchmark_scripts import common
 from python_scripts import paths
@@ -51,19 +50,15 @@ def baseline_cmd(obj):
 
     def run_one(row):
         def play(environment):
-            # Through DummySupervisor rather than straight to the executor: every arm
-            # produces a SupervisorReport, so the archive and every reader have one shape.
-            # This supervisor adds no reasoning, which is what makes it the control.
+            # Through DummySupervisor, which adds no reasoning, so every arm still produces
+            # a SupervisorReport.
             supervisor = supervisor_class(
                 task=row["task"],
                 executor_class=executor_class,
                 env=environment,
                 game=row["game"],
                 max_steps=obj["max_steps"],
-                # Passed like every other arm. It happens to match `load_parameters()`
-                # today, which is why omitting it was harmless, but an arm that overrides a
-                # parameter in-process (info_subgoal does, for the executor token budget)
-                # would otherwise be running against a different dict from this one.
+                # Passed like every other arm; info_subgoal overrides parameters in-process.
                 parameters=parameters,
                 vlm_model=obj["executor_vlm_model"],
                 vlm_kind=obj["executor_vlm_kind"],

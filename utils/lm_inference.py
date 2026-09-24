@@ -125,8 +125,7 @@ _RATE_LIMITS: dict[str, int] = {
     "claude-sonnet-4-6": 60,
     "claude-haiku-4-5-20251001": 60,
     "google/gemini-3.1-pro-preview": 60,
-    # Twice the default: Flash is the cheap, high-throughput arm, and at the 60 the
-    # fallback gives it the rate limiter rather than the model is what paces a run.
+    # Raised above the default: Flash is the cheap, high-throughput arm.
     "google/gemini-3.6-flash": 200,
     "qwen/qwen3-vl-235b-a22b-instruct": 60,
     "google/gemma-4-31b-it": 1000,
@@ -182,11 +181,8 @@ def get_max_queries_per_minute(model: str, parameters: dict[str, Any]) -> int:
 
 def sum_optional(values: list[Optional[int]]) -> Optional[int]:
     """
-    Sum token counts, propagating unknowns.
-
-    ``None`` means "the backend did not report this count". A single ``None`` makes the
-    whole sum ``None`` rather than a silently partial total. ``0`` is used elsewhere to
-    mean "already counted on a sibling entry" and sums harmlessly.
+    Sum token counts, propagating unknowns. ``None`` means "not reported by the backend" and
+    makes the whole sum ``None``.
 
     :param values: Token counts, any of which may be None.
     :type values: list[Optional[int]]
@@ -415,18 +411,16 @@ class InferenceModel(ABC):
         Aggregate per-sequence token counts into the per-record ``meta`` dict.
 
         ``meta`` is always per *record*: it never gains a ``num_return_sequences``
-        dimension. A record's counts are the sum over its sequences, which means the
-        accounting for ``num_return_sequences > 1`` differs by backend, deliberately —
-        each reflects what that backend actually consumed:
+        dimension. A record's counts are the sum over its sequences, so accounting for
+        ``num_return_sequences > 1`` differs by backend:
 
-        - ``AnthropicModel``/``OpenRouterModel`` issue one call per sequence, so the
-          prompt genuinely is consumed ``num_return_sequences`` times and is summed.
-        - ``OpenAIAPIModel``/``vLLMModel`` use the API's native ``n``, so the prompt is
-          consumed once; the extra sequences carry ``0`` input tokens.
+        - ``AnthropicModel``/``OpenRouterModel`` issue one call per sequence, so the prompt
+          is consumed ``num_return_sequences`` times and is summed.
+        - ``OpenAIAPIModel``/``vLLMModel`` use the API's native ``n``; the extra sequences
+          carry ``0`` input tokens.
         - ``HuggingFaceModel`` encodes the prompt once per record, likewise.
 
-        ``None`` means "not reported by the backend" and propagates: if any sequence of a
-        record has an unknown count, the record's count is None rather than a partial sum.
+        ``None`` means "not reported by the backend" and propagates.
 
         :param usages: Per-sequence ``(input_tokens, output_tokens)`` tuples shaped
             ``[batch, num_return_sequences]``.
@@ -664,14 +658,9 @@ class InferenceModel(ABC):
         i.e. deterministic) with the truncated output plus ``switch_phrase`` appended
         to the prompt, to obtain a deterministic final answer.
 
-        .. note:: **``meta`` here is a scalar total, not per-record.** Every other entry
-            point reports one entry per record; this one reports the summed cost of both
-            passes for the whole call. The reason is that ``first_outputs_list`` below is
-            nested per *record* when ``num_return_sequences > 1`` but per *call* when it is
-            1, so ``next_batch_mapping``'s first key is not a record index in both cases
-            and per-record attribution would be wrong in one of them. This function has no
-            callers in this repo; the nesting should be made consistent before anything
-            starts relying on it, at which point this can report per-record like the rest.
+        .. note:: **``meta`` here is a scalar total, not per-record**, covering both passes
+            for the whole call. This function has no callers in this repo; make the nesting
+            of ``first_outputs_list`` consistent before relying on it.
 
         :param texts: A single text prompt or a list of text prompts.
         :type texts: str or list[str]
@@ -803,8 +792,8 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
 
     SUPPORTS_NATIVE_N: bool = False
 
-    #: Whether the endpoint is one we run ourselves (vLLM), where a timeout means the
-    #: server is hung or dead rather than a provider being briefly unreachable.
+    #: Whether the endpoint is one we run ourselves (vLLM), where a timeout means a hung or
+    #: dead server, not a briefly unreachable provider.
     LOCAL_ENDPOINT: bool = False
 
     def __init__(
@@ -830,11 +819,8 @@ class APIModel(RateLimitedAPIBase, InferenceModel, ABC):
         )
 
     def get_encoded_images(self, images: list[Image.Image]) -> list[str]:
-        """Encodes images to base64 strings for OpenAI API input.
-
-        Uses a fresh per-call cache directory (rather than one shared per
-        model instance) so concurrent calls from different threads on the
-        same model instance don't race on each other's cached files.
+        """Encodes images to base64 strings for OpenAI API input, staging them in a fresh
+        per-call cache directory.
 
         :param images: List of images in Pillow Image format.
         :type images: list[Image.Image]
@@ -1347,10 +1333,9 @@ class OpenAIAPIModel(OpenAICompatibleAPIBase, APIModel):
         """
         Extract output text strings and token usage from an OpenAI API response.
 
-        The API reports a single ``usage`` for the whole call, covering the shared prompt
-        once and the completions of all choices together. It is therefore emitted on the
-        first choice, with ``0`` on the remaining choices (``None`` if the count was not
-        reported at all), so that summing a record's choices gives the correct total.
+        The API reports one ``usage`` for the whole call, so it is emitted on the first
+        choice with ``0`` on the rest (``None`` where the count was not reported), and
+        summing a record's choices gives the correct total.
 
         :param response: The raw response object from the OpenAI client.
         :type response: Any

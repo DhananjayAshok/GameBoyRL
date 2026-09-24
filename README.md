@@ -20,8 +20,11 @@ VLMs can also propose candidate tasks for a game state directly, with optional a
 **Task Attempt:**
 Agents attempt the proposed tasks under a two-stage VLM judge that describes what happened and then rules on completion, retrying failures with a derived hint. Successful trajectories are saved as a `<stem>.json` + `<stem>.pkl` pair.
 
+**Info Documents:**
+Successful (task, trajectory) pairs are distilled into per-game info documents that benchmark agents can retrieve from at test time (the context-engineering arm).
+
 **VLM Fine-Tuning:**
-LoRA fine-tuning of VLMs on a collected trajectory dataset, producing specialised game-playing agents. `scripts/vlm/train_vlm.sh` takes the train/validation CSVs directly — the repo no longer builds them.
+Trajectories are annotated with step-by-step guidance, replayed as practice sessions, filtered and paraphrased into train/validation CSVs, and used for LoRA fine-tuning of VLMs.
 
 **Benchmarking:**
 A unified benchmark suite evaluates any VLM agent across games, recording video and logging per-task results.
@@ -45,7 +48,7 @@ git clone --recursive https://github.com/DhananjayAshok/GameBoyRL
 cd GameBoyRL
 ```
 
-The `--recursive` flag is required to pull the [GameBoyWorlds](GameBoyWorlds/README.md) submodule.
+The `--recursive` flag is required to pull the `GameBoyWorlds`, `cleanrl` and `llm-utils` submodules.
 
 ## 2. Create Environments
 
@@ -117,32 +120,34 @@ See [GameBoyWorlds/README.md](GameBoyWorlds/README.md) for the full list of supp
 Pull the project data from the HuggingFace Hub:
 
 ```bash
-python sync_data.py main setup_sync
+python sync_data.py pull               # dry run: reports what would be written
+python sync_data.py pull --no_dry_run  # actually download
 ```
+
+Use `--set <name>` to pull a single file set instead of all of them.
 
 ---
 
 # Running Code
 
-All workflows are driven by shell scripts in `scripts/`. The three main categories are:
+All workflows are driven by shell scripts in `scripts/`:
 
-**RL** (`scripts/rl/`) — collect and cluster trajectories via curiosity-driven RL.
+**RL** (`scripts/rl/`, `scripts/core_rl/`) — curiosity-driven RL training, trajectory collection and clustering.
 
-**VLM** (`scripts/vlm/`) — infer tasks, propose tasks, run attempt sessions, build info documents, fine-tune.
+**VLM** (`scripts/vlm/`) — infer/propose/attempt tasks, build info documents, guidance/practice, dataset creation, fine-tuning.
 
-**Pipeline** (`scripts/pipeline/`) — end-to-end compositions of the above (e.g. curiosity exploration → task inference → attempt in a single call).
+**Pipeline** (`scripts/pipeline/`) — end-to-end compositions of the above.
+
+**Benchmark** (`scripts/benchmark/`) and **Debug** (`scripts/debug/`) — evaluation and read-only diagnostics.
 
 A typical end-to-end run looks like:
 
 ```bash
-# 1. Collect and cluster trajectories for a game state
-bash scripts/pipeline/curiosity_tasks.sh --game pokemon_red --run_name my_run ...
+# 1. Curiosity + zero-shot data collection, then info documents
+bash scripts/pipeline/collect_and_info_all.sh --game pokemon_red --model_name gpt-4o ...
 
-# 2. Propose and attempt tasks zero-shot
-bash scripts/pipeline/propose_and_attempt_all.sh --game pokemon_red --model_name gpt-4o ...
-
-# 3. Benchmark the resulting agent
-bash scripts/benchmark.sh --game pokemon_red ...
+# 2. Benchmark an agent
+bash scripts/benchmark/run_benchmark.sh --game pokemon_red --executor_vlm_model gpt-4o ...
 ```
 
 For a full breakdown of every script and what it does, see [README_dev.md](README_dev.md).

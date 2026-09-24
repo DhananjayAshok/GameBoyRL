@@ -303,4 +303,3 @@ def debug_attempt(obj, model_name, n_frames, max_trajectories):
 
     report_path = md.write_report(os.path.join(report_dir, "report.md"), blocks)
     log_info(f"[attempt] wrote {report_path}")
-    print(report_path)

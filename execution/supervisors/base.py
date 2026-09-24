@@ -26,22 +26,15 @@ class Supervisor(ABC):
     A supervisor owns an executor class and an environment, and can dispatch
     task requests to a fresh executor instance on demand. 
 
-    :param task: The task this supervisor is responsible for. Held here rather than on each
-        subclass because every supervisor has one and :attr:`report` records it.
+    :param task: The task this supervisor is responsible for.
     :param executor_class: The :class:`~execution.executors.Executor` subclass to use.
     :param env: The game environment passed to each executor call.
     :param game: Game name string, forwarded to the executor.
     :param max_steps: Step budget forwarded to each executor.
     :param supervisor_vlm_model: The one model this supervisor reasons with. ``None`` for a
-        supervisor that never calls one (the baseline); constructing the VLM is deferred, so
-        a supervisor that does not reason does not need a model to exist.
+        supervisor that never calls one; construction is deferred.
     :param supervisor_vlm_kind: VLM kind for that model.
-    :param max_new_tokens: Token budget for every supervisor call. One number rather than one
-        per stage: the stages used to differ (1000 / 2400 / 4800), and the only thing that
-        difference ever bought was a silent truncation when a reply outgrew its stage's
-        allowance — the completion check in particular puts its verdict on the last line, so
-        losing the tail reads as "not complete" and every step fails. Set to the largest of
-        the old stage budgets, so no call is tighter than it was.
+    :param max_new_tokens: Token budget for every supervisor call, one number for all stages.
     :param parameters: Optional parameter overrides.
     :param executor_kwargs: Additional keyword arguments forwarded verbatim to
         the executor constructor (e.g. ``vlm_model``, ``allow_self_termination``).
@@ -84,9 +77,11 @@ class Supervisor(ABC):
 
     def _run_config(self) -> dict:
         """The knobs this supervisor is running with, for :attr:`report.init_kwargs`.
+        Subclasses extend it, and set their own attributes before calling
+        ``super().__init__()`` so this is safe to call from there.
 
-        Subclasses extend it. Safe to call from ``__init__`` because every subclass sets its
-        own attributes *before* calling ``super().__init__()``.
+        :return: The config.
+        :rtype: dict
         """
         return {
             "supervisor_vlm_model": self._supervisor_vlm_model,
@@ -102,11 +97,11 @@ class Supervisor(ABC):
 
     @property
     def _vlm(self) -> VLM:
-        """This supervisor's one model, built on first use.
+        """This supervisor's one model, built on first use, so a supervisor that makes no
+        calls needs no model configured.
 
-        Deferred rather than constructed in ``__init__`` because
-        :class:`~execution.supervisors.dummy.DummySupervisor` makes no calls at all and must
-        keep working with no model configured
+        :return: The VLM.
+        :rtype: VLM
         """
         if self._vlm_instance is None:
             if not self._supervisor_vlm_model:
@@ -132,17 +127,9 @@ class Supervisor(ABC):
     def _vlm_infer(self, stage: str, **kwargs: Any) -> tuple:
         """Make the call and *return* its records instead of filing them.
 
-        The half of :meth:`_vlm_call` that can run off the main thread. A worker in a
-        :class:`~concurrent.futures.ThreadPoolExecutor` calls this and hands the records
-        back; the caller appends them once the pool has joined, in whatever order it
-        chooses. :meth:`_vlm_call` is then just this plus the append.
-
-        Split out because the parallel relevance pass in
-        :class:`~execution.supervisors.info_subgoal.InfoSubgoalSupervisor` appended to
-        :attr:`report.event_log` straight from its workers, so the records landed in
-        *completion* order — which made the event log non-reproducible across reruns of the
-        same episode, and undermined the property that the log's ordering is the only
-        per-leg labelling there is.
+        The half of :meth:`_vlm_call` that can run off the main thread: a pool worker calls
+        this and hands the records back, and the caller appends them once the pool has joined
+        so the event log stays in a deterministic order.
 
         :return: ``(result, records)`` — the VLM's output unchanged, and the
             :class:`~execution.report.SupervisorVLMCallRecord` list it should be filed under.

@@ -50,15 +50,11 @@ def coords_to_string(coords: List[Tuple[int, int]]) -> str:
 
 class ExecutorAction(ABC):
     """
-    Passive (non-interactive) actions that can be called on by an Executor to understand the game state.
-    Will often include VLM inference to understand the game screen in some manner.
-
-    Development Note: Unlike HighLevelAction, ExecutorAction does NOT call emulator.step.
-    If you want to implement an action that does that, you probably want to be doing that in an Executor class instead.
+    Passive (non-interactive) actions an Executor calls to understand the game state. Unlike
+    HighLevelAction, ExecutorAction does NOT call ``emulator.step``.
 
     :param vlm_call: The owning executor's recording VLM entry point
-        (:meth:`~execution.executors.Executor._vlm_call`). Tools must infer through this
-        so their calls land in the executor's ``vlm_call_log``.
+        (:meth:`~execution.executors.Executor._vlm_call`).
     :param parameters: The owning executor's resolved parameters.
     """
 
@@ -100,32 +96,11 @@ class ExecutorAction(ABC):
     @abstractmethod
     def verbalize(cls) -> str:
         """
-        Return a human-readable string that fully describes this tool call for
-        inclusion in a VLM prompt.
+        Prompt-ready description of this tool call, in the exact format the VLM is expected
+        to reproduce. Must stay in sync with :meth:`string_to_kwargs`.
 
-        .. warning:: **Format contract**
-
-            The string returned here is the **exact format** the VLM is expected
-            to reproduce when it decides to invoke this tool.  :meth:`string_to_kwargs`
-            must be able to parse every string that ``verbalize`` declares as valid.
-            If the two are out of sync the executor will silently drop tool calls.
-
-        .. warning:: **No colons in the call syntax**
-
-            The invocation string a tool declares — the ``Example:`` line, and any
-            signature the model might copy verbatim — must not contain ``:``.
-            :class:`~execution.executors.policies.action.ScoredActionPolicy` delimits its
-            reply as ``<action>: <reasoning>: <score>`` and reads the action as everything
-            before the *first* colon, so a colon inside the call syntax truncates the tool
-            name and the call is recorded as an unrecognised action.  Use ``=`` for
-            arguments (``locate(target=door)``) and keep type annotations and prose out of
-            the part the model is asked to reproduce.
-
-        A good verbalization includes:
-
-        - The tool name (use a stable, unambiguous identifier).
-        - Every parameter name, its type, and a brief description.
-        - One concrete example in the exact output format.
+        Include the tool name, every parameter with its type, and one concrete example. The
+        invocation syntax must not contain ``:`` — use ``=`` for arguments.
 
         Example return value::
 
@@ -143,14 +118,8 @@ class ExecutorAction(ABC):
     def string_to_kwargs(cls, action_str: str) -> Dict[str, Any]:
         """
         Parse a tool-call string (in the format declared by :meth:`verbalize`)
-        into a ``kwargs`` dictionary suitable for passing to :meth:`execute`.
-
-        .. warning:: **Must mirror** :meth:`verbalize`
-
-            This method is the inverse of the call syntax shown in
-            :meth:`verbalize`.  Any format change in ``verbalize`` must be
-            reflected here, and vice versa.  The executor relies on this
-            round-trip to dispatch tool calls produced by the VLM.
+        into a ``kwargs`` dictionary suitable for passing to :meth:`execute`. Must stay in
+        sync with :meth:`verbalize`.
 
         :param action_str: Raw action string as output by the VLM, matching the
             format advertised in :meth:`verbalize`.

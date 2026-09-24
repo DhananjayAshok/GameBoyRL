@@ -93,8 +93,7 @@ def revision_cmd(obj, max_leg_steps, max_frames_per_slice, executor_max_new_toke
             result = supervisor.evaluate()
             report = result["report"]
             if obj["verbose"]:
-                print("\n----- trajectory " + "-" * 44)
-                print(str(report))
+                log_info("\n----- trajectory " + "-" * 44 + "\n" + str(report), parameters)
             return common.PlayResult(
                 report=report,
                 extras={"summary": _summary(result, report),
@@ -122,9 +121,9 @@ def revision_cmd(obj, max_leg_steps, max_frames_per_slice, executor_max_new_toke
 
     def on_episode(row, outcome):
         summary = outcome.extras.get("summary", _EMPTY_SUMMARY)
-        print(f"  -> success={outcome.success}  steps={outcome.n_steps}  "
-              f"{summary['n_attempts']} leg(s), "
-              f"{summary['n_supervisor_calls']} supervisor calls")
+        log_info(f"  -> success={outcome.success}  steps={outcome.n_steps}  "
+                 f"{summary['n_attempts']} leg(s), "
+                 f"{summary['n_supervisor_calls']} supervisor calls", parameters)
 
     common.run_sweep(
         tasks,

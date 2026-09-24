@@ -11,9 +11,9 @@ from gameboy_worlds.interface import Environment, HighLevelAction
 
 from execution.report import (ACTION_TAGS, EnvironmentStepRecord, ExecutorReport,
                               InvalidStepRecord, ExecutorVLMCallRecord, LogRecord,
-                              ScriptedActionRecord, parse_completion,
+                              ScriptedActionRecord, action_name, parse_completion,
                               per_prompt_token_counts)
-from utils import load_parameters, log_error, log_info, log_warn, ExecutorVLM, parse_key_value
+from utils import load_parameters, log_error, log_warn, ExecutorVLM, parse_key_value
 
 #: Consecutive unparseable/unrecognised action replies before the executor gives up
 MAX_CONSECUTIVE_INVALID = 4
@@ -381,11 +381,11 @@ Reasoning: <why, referring to what is visible in image 2>
             return ""
         lines = ["Recent actions (oldest first, the last one is the action judged above):"]
         for step in env_steps[-k:]:
-            lines.append(f"  {step.action_class.get_action_name(**step.kwargs)}")
+            lines.append(f"  {action_name(step)}")
         return "\n".join(lines) + "\n\n"
 
     def _build_done_check_prompt(self, record: EnvironmentStepRecord) -> str:
-        last_action = record.action_class.get_action_name(**record.kwargs)
+        last_action = action_name(record)
         reasoning = self._last_reasoning or "(no reasoning was recorded for this action)"
         return (
             self.DONE_CHECK_PROMPT

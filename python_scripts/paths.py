@@ -2,28 +2,18 @@
 The pipeline's path scheme: one implementation, used by producers, consumers and Bash alike.
 
 Every artifact path is a pure function of a small identity — ``(storage_dir, game,
-model_name, run_name, executor)`` plus a source vertical. This module owns that function, in
-both directions: the accessors build a path from an identity, and :func:`source_label`
-recovers the vertical from a path that was built.
+model_name, run_name, executor)`` plus a source vertical. The accessors build a path from an
+identity; :func:`source_label` recovers the vertical from a path that was built.
 
-Mirroring by hand was the failure mode this replaces: producers built their paths with
-f-strings, the debug commands rebuilt them, and Bash built them a third way, so a change to
-one silently desynchronised the rest. Bash now asks this module through ``python_funcs.py``
-rather than deriving anything itself.
+Stages handed an input stem on the command line write beside it, so each such tree exposes a
+``*_from_stem`` function plus an identity wrapper that calls it on the stem built here.
 
-**Two shapes per output tree.** Stages like ``build_info.py`` and ``attempt_tasks.py`` are
-handed an input stem on the command line and write beside it; the debug tools and Bash have
-only the identity. So each such tree exposes a ``*_from_stem`` function (what the stage has)
-and an identity wrapper that calls it on top of the stem this module builds (what everyone
-else has). One rule, two entry points, no third derivation.
-
-**Why this lives outside ``utils/``.** ``python_funcs.py`` shells out once per lookup, so this
-module has to be importable in milliseconds. It may import ``utils.fundamental``,
-``utils.log_handling`` and ``utils.parameter_handling`` — never ``from utils import ...``.
+This module must stay importable in milliseconds for ``python_funcs.py``. It may import
+``utils.fundamental``, ``utils.log_handling`` and ``utils.parameter_handling`` — never
+``from utils import ...``.
 
 Every accessor that reads a pipeline artifact goes through :func:`require`, which raises (via
-``log_error``) naming both the missing path and the script that produces it. Nothing here
-reads ``logs/``, wandb, or slurm — only artifacts the pipeline guarantees.
+``log_error``) naming both the missing path and the script that produces it.
 """
 
 from __future__ import annotations
@@ -64,13 +54,8 @@ OBSERVATION_ENCODER_FILENAME = "observation_encoder.pt"
 #: Pickled per-episode executor report, written into an emulator session dir beside videos/0.mp4.
 REPORT_FILENAME = "report.pkl.gz"
 
-#: Every supervisor key, as it appears in a CSV stem and a session directory.
-#:
-#: Mirrors ``execution.registry.AVAILABLE_SUPERVISORS``. Duplicated rather than imported
-#: because that module constructs the supervisor classes, which pull in the VLM stack, and
-#: this module has to stay importable in milliseconds — see the module docstring.
-#: ``tests`` for the two staying in step is the assertion in ``python_funcs.py --help``'s
-#: choices; if you add a supervisor, add it here too.
+#: Every supervisor key, as it appears in a CSV stem and a session directory. Must stay in
+#: step with ``execution.registry.AVAILABLE_SUPERVISORS``.
 BENCHMARK_SUPERVISORS = (
     "dummy",
     "revision",
@@ -95,15 +80,9 @@ SOURCES = ("attempt", "curiosity")
 def model_save_name(model_name: str) -> str:
     """The basename the pipeline keys paths on: ``google/Gemma-4-31B-it`` -> ``gemma-4-31b-it``.
 
-    Lowercased, because a served model's basename is not case-stable — the same weights are
-    published as ``Qwen/Qwen3-VL-8B-Instruct`` and referred to in lowercase elsewhere, and a
-    path scheme that preserves case makes those two spellings different artifacts. Case is
-    folded here and nowhere else, so this is the only definition of the rule on the Python
-    side; ``model_save_name`` in ``scripts/core/utils.sh`` is its Bash twin and must fold the
-    same way.
-
-    Never apply this to a value that is sent to a backend as a model identifier — those are
-    case-sensitive upstream. It names directories and files only.
+    Lowercased. ``model_save_name`` in ``scripts/core/utils.sh`` is its Bash twin and must
+    fold the same way. Never apply this to a value sent to a backend as a model identifier —
+    it names directories and files only.
 
     :param model_name: Full VLM name, e.g. ``"google/gemma-4-31b-it"``.
     :type model_name: str
@@ -135,18 +114,16 @@ def source_label(artifact_dir: str) -> str:
     """
     Short provenance label for an artifact dir, recovered from its path.
 
-    The **inverse** of the scheme this module builds, which is why it lives beside it. The two
-    verticals lay their directories out differently::
+    The inverse of the scheme this module builds::
 
         curiosity  .../curiosity/<run_name>/info_docs                  -> "curiosity"
         zeroshot   .../zeroshot/zeroshot_tasks_<executor>_attempts/... -> "zeroshot"
 
-    Prefer a *recorded* label where one exists — an info document carries its own provenance
-    (see :class:`~execution.info_doc.Provenance`) and should be read, not re-derived. This
-    function is the fallback for artifacts that record nothing.
+    Prefer a recorded label where one exists (:class:`~execution.info_doc.Provenance`). Falls
+    back to the parent directory name for anything unrecognised.
 
-    Falls back to the parent directory name for anything unrecognised, so an unusual layout
-    still produces a distinguishable label rather than crashing.
+    :return: The provenance label.
+    :rtype: str
     """
     parts = os.path.normpath(artifact_dir).split(os.sep)
     if len(parts) >= 3 and parts[-3] == 'curiosity':
@@ -317,9 +294,8 @@ def info_source_stem(parameters=None, *, game: str, model_name: str, run_name: s
                      executor: str, controller_variant: str, source: str) -> str:
     """The trajectory stem ``build_info.py`` consumes for one source: ``<stem>.json`` + ``<stem>.pkl``.
 
-    Replaces the Bash function of the same name that used to live in ``scripts/core/utils.sh``.
-    ``model_name`` is in the path because a document is built from one model's own output; two
-    models sharing a game must not share an info dir.
+    :return: The stem, without extension.
+    :rtype: str
     """
     parameters, _, _ = _roots(parameters)
     if normalise_source(source, parameters) == "curiosity":
@@ -372,13 +348,11 @@ def insights_jsonl(parameters=None, *, game: str, model_name: str, run_name: str
 
 
 def parametric_doc(parameters=None, *, game: str, model_name: str) -> str:
-    """The parametric document for this game and model.
+    """The parametric document for this game and model. Keyed on game + model only, never on
+    run_name or executor.
 
-    Keyed on game + model only, and deliberately not on run_name or executor: nothing about
-    this document depends on a trajectory run or on which executor plays, because it is written
-    from the model's priors before any of that exists. Putting it under the trajectory tree
-    would imply a dependency it does not have, and would make the same document be regenerated
-    once per run name.
+    :return: Path to the parametric document.
+    :rtype: str
     """
     _, storage, _ = _roots(parameters)
     return os.path.join(storage, "parametric_docs", game, model_save_name(model_name),
@@ -404,11 +378,11 @@ def tile_recognizer_file(parameters=None, *, game: str, name: str) -> str:
 
 
 def strategist_dir(parameters=None, *, game: str, name: str) -> str:
-    """Where one strategist's persistent state lives.
+    """Where one strategist's persistent state lives, beside :func:`tile_recognizer_file`
+    under the same ``playthrough_artifacts/<game>`` root.
 
-    Beside :func:`tile_recognizer_file` under the same ``playthrough_artifacts/<game>``
-    root, because the tile database and the strategist's knowledge, goals and locations are
-    the state of one continuing playthrough and are keyed on the same name.
+    :return: Path to the strategist's state directory.
+    :rtype: str
     """
     parameters, storage, _ = _roots(parameters)
     segment = depathify(name)
@@ -437,18 +411,12 @@ def _extra_part(extra_name: Optional[str]) -> str:
 def benchmark_stem(*, supervisor: str, executor: str, controller_variant: str, model: str,
                    extra_name: Optional[str] = None,
                    n_tasks: Optional[int] = None) -> str:
-    """The CSV basename, without extension.
+    """The CSV basename, without extension. A subset run (``n_tasks``) gets its own file.
 
-    ``supervisor`` is what the old consumer omitted, and ``n_tasks`` the other half: a subset
-    run gets its own file, because resuming a full sweep from a 5-task CSV would read the
-    first five as done and silently skip them.
-
-    ``extra_name`` is a free-text discriminator for runs this identity cannot otherwise tell
-    apart — the retrieval arm's ``--docs_mode`` being the case it was added for, since which
-    documents were read is part of that experiment but reaches neither the supervisor name nor
-    any other component here. It sits before ``_firstN`` so the subset marker stays last.
-
-    Omitting it reproduces the old name exactly, so runs that do not need it are unaffected.
+    :param extra_name: Free-text discriminator for runs this identity cannot otherwise tell
+        apart. Sits before ``_firstN`` so the subset marker stays last.
+    :return: The CSV basename.
+    :rtype: str
     """
     extra = _extra_part(extra_name)
     base = f"{supervisor}_{executor}_{controller_variant}_{model}{extra}"
@@ -457,15 +425,11 @@ def benchmark_stem(*, supervisor: str, executor: str, controller_variant: str, m
 
 def benchmark_session_name(*, supervisor: str, executor: str, controller_variant: str,
                            model: str, extra_name: Optional[str] = None) -> str:
-    """The emulator session directory name for one benchmark run.
+    """The emulator session directory name for one benchmark run. Shares its components with
+    :func:`benchmark_stem`, and carries no ``n_tasks``.
 
-    Shares ``supervisor``/``executor``/``controller_variant``/``model``/``extra_name`` with
-    :func:`benchmark_stem` on purpose: an episode's CSV row and the session holding its video
-    and archived report have to be findable from each other, and they were previously two
-    f-strings per arm that happened to agree.
-
-    Carries no ``n_tasks``: a subset run records into the same session tree as the full sweep,
-    keyed per task below this level, so there is nothing to collide.
+    :return: The session directory name.
+    :rtype: str
     """
     return (f"benchmark_{supervisor}_{executor}_{controller_variant}_{model}"
             f"{_extra_part(extra_name)}")
@@ -508,19 +472,10 @@ TRAIN_FLAG_COLUMN = "can_train_from_init_state"
 
 
 def train_games(parameters=None, *, game: str) -> list[str]:
-    """Every game in *game*'s series that source data can be collected from, sorted.
+    """Every game in *game*'s series with ``can_train_from_init_state`` set, sorted.
 
-    A series has one benchmark table but not every title in it is a training title: the
-    curiosity and zeroshot verticals run only where ``can_train_from_init_state`` is set, and
-    the other titles borrow the documents built from those. Which title that is is **not**
-    guessable from the name — bomberman's is ``bomberman_quest``, not the lower-numbered
-    ``bomberman_pocket`` — so this reads the flag rather than pattern-matching.
-
-    Returns a list because a series may declare more than one, and an empty list for a game
-    whose series marks none.
-
-    Reads the series CSV directly (pandas only, no ``gameboy_worlds`` import), so it costs a
-    file read rather than an emulator-package import.
+    :return: The training titles, empty if the series marks none.
+    :rtype: list[str]
     """
     import pandas as pd
     parameters, _, _ = _roots(parameters)
@@ -530,18 +485,17 @@ def train_games(parameters=None, *, game: str) -> list[str]:
             f"Series CSV for '{game}' has no {TRAIN_FLAG_COLUMN!r} column, so its training "
             "titles cannot be determined.", parameters)
     flag = frame[TRAIN_FLAG_COLUMN]
-    # The column is written as True/False, so pandas may hand back bool or str depending on
-    # whether any cell is blank. Normalise rather than trusting the dtype.
+    # pandas hands back bool or str depending on whether any cell is blank.
     truthy = flag.astype(str).str.strip().str.lower().isin(("true", "1", "yes"))
     return sorted(frame.loc[truthy, "game"].unique())
 
 
 def gameboy_worlds_storage() -> str:
     """GameBoyWorlds' own ``storage_dir`` — where sessions, videos and archived reports live.
+    A different tree from this project's ``storage_dir``.
 
-    A different tree from this project's ``storage_dir``, read from the submodule's own config
-    rather than assumed equal to ours. Imported inside the function because ``gameboy_worlds``
-    is expensive and almost no caller needs it.
+    :return: The submodule's storage directory.
+    :rtype: str
     """
     from gameboy_worlds.utils import load_parameters as gbw_load_parameters
     return gbw_load_parameters()["storage_dir"]
@@ -576,14 +530,11 @@ def debug_dir(parameters=None, *, game: str, stage: str, sub: tuple = (),
 
 
 def debug_frames_dir(parameters=None, *, game: str, stage: str, sub: tuple = ()) -> str:
-    """``<storage_dir>/tmp/debug_frames/<game>/<stage>[/sub...]``, created on demand.
+    """``<storage_dir>/tmp/debug_frames/<game>/<stage>[/sub...]``, created on demand. On
+    storage, not ``results_dir``, which is on the home filesystem's inode quota.
 
-    On storage rather than beside the markdown in :func:`debug_dir`, because a frame-by-frame
-    report is thousands of PNGs and ``results_dir`` is on the home filesystem, where the inode
-    quota bites long before the disk quota does.
-
-    Keyed on game and stage, with callers appending model and task below that, so two runs
-    cannot overwrite each other's frames.
+    :return: The frames directory.
+    :rtype: str
     """
     _, storage, _ = _roots(parameters)
     path = os.path.join(storage, "tmp", "debug_frames", game, stage, *sub)
@@ -593,23 +544,12 @@ def debug_frames_dir(parameters=None, *, game: str, stage: str, sub: tuple = ())
 
 def executor_frames_dir(parameters=None, *, game: str, executor: str,
                         model: Optional[str], task: str) -> str:
-    """Where ``ExecutorReport._save_images`` writes its ``--verbose`` PNGs.
+    """Where ``ExecutorReport._save_images`` writes its ``--verbose`` PNGs. Keyed on game,
+    executor, model and task; two runs at the same identity overwrite. Carries no supervisor.
 
-    Keyed on the model as well as the executor, unlike the scheme this replaces. The old path
-    was ``<results>/benchmark/<game>/<executor>/<task>/`` and the writer ``rmtree``s it first,
-    so two runs of the same executor and task on different models destroyed each other's
-    output — the exact failure :func:`debug_frames_dir` was written to avoid. Two runs at the
-    same identity still overwrite, which is intended: that is the same experiment re-run.
-
-    The supervisor is deliberately absent: an ``ExecutorReport`` does not know which
-    supervisor is driving it, and threading that through purely to name a debug directory
-    would put a benchmark concept into the executor. ``model`` comes from ``init_kwargs["vlm_model"]``, which the
-    report already records; ``None`` (no model resolved) collapses to ``unknown_model``
-    rather than silently dropping a path segment.
-
-    On storage for the same inode reason :func:`debug_frames_dir` cites — a verbose run is
-    thousands of PNGs, and ``results_dir`` is on the home filesystem where the inode quota
-    bites first.
+    :param model: From ``init_kwargs["vlm_model"]``. ``None`` collapses to ``unknown_model``.
+    :return: The frames directory.
+    :rtype: str
     """
     from utils.fundamental import depathify
     _, storage, _ = _roots(parameters)
@@ -617,8 +557,7 @@ def executor_frames_dir(parameters=None, *, game: str, executor: str,
     if not task_str:
         log_error(
             f"Cannot derive an image directory from task {task!r}: it contains no word "
-            "characters, so the path would resolve to the parent directory and deleting it "
-            "would destroy every other task's images.", parameters)
+            "characters.", parameters)
     stem = f"{executor}_{model_save_name(model) if model else 'unknown_model'}"
     return os.path.join(storage, "tmp", "executor_frames", game, stem, task_str)
 
@@ -641,10 +580,8 @@ def trajectory_render_dir(parameters=None, *, name: str, group: Optional[int] = 
     return path if group is None else os.path.join(path, f"group_{group}")
 
 
-# There is deliberately no video_path() accessor. A video is found through the episode row's own
-# ``session_dirs``, beside that episode's report.pkl.gz — see ``debug_scripts/benchmark.py``.
-# Rebuilding the path from the task name instead cannot address an episode: several benchmark
-# rows share a task string, so they share the task-named sessions directory too.
+# No video_path() accessor: a video is found through the episode row's own ``session_dirs``,
+# beside that episode's report.pkl.gz — see ``debug_scripts/benchmark.py``.
 
 
 # ---------------------------------------------------------------------------

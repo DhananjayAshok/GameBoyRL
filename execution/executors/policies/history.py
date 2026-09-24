@@ -4,11 +4,11 @@ What the executor remembers between decisions, and how it reads in the prompt.
 
 from __future__ import annotations
 
-from typing import Callable, List, Optional, Protocol
+from typing import Callable, List, Protocol
 
 from gameboy_worlds.interface.action import LowLevelAction
 
-from execution.report import EnvironmentStepRecord, StepRecord
+from execution.report import EnvironmentStepRecord, StepRecord, action_name
 
 #: Recent steps rendered into the prompt. Applies to every policy that keeps a list: a
 #: visual description is much longer per entry than an action name, so an untruncated
@@ -56,7 +56,7 @@ class NoHistoryPolicy:
 def _action_line(record: StepRecord) -> str:
     """One past action, tagged with whether it did anything.
     """
-    action_str = record.action_class.get_action_name(**record.kwargs)
+    action_str = action_name(record)
     changed = record.frame_changed
     if issubclass(record.action_class, LowLevelAction):
         # LowLevelActions report success=0 by convention rather than as a failure signal,
@@ -141,7 +141,7 @@ In one short sentence, say what changed between the two screens as a result of t
             if (self._call is None or record.frame_before is None
                     or record.frame_after is None):
                 continue
-            action_str = record.action_class.get_action_name(**record.kwargs)
+            action_str = action_name(record)
             pending.append([action_str, None])
             prompts.append(self.DIFF_PROMPT
                            .replace("[GAME]", self._game)

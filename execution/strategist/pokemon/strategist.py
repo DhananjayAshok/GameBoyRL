@@ -35,8 +35,7 @@ from utils import VLM, load_parameters, log_error, log_info, log_warn
 from utils.lm_inference import clean_value, parse_key_value
 from utils.parsing import parse_list
 
-#: One file per process, stamped like the run it records: a resumed run writes its own
-#: rather than overwriting the settings the earlier episodes were played under.
+#: One file per process, stamped like the run it records, so a resumed run writes its own.
 PROVENANCE_PREFIX = "provenance"
 
 
@@ -81,9 +80,8 @@ class PokemonStrategist:
         self._strategist_vlm_model = strategist_vlm_model
         self._strategist_vlm_kind = strategist_vlm_kind
         self._max_new_tokens = max_new_tokens
-        #: Named rather than left to ``supervisor_kwargs``: the supervisor's budget is also
-        #: called ``max_new_tokens``, which would collide with this class's own parameter
-        #: of that name and bind to the strategist instead of being forwarded.
+        #: Named, not left to ``supervisor_kwargs``, where it would collide with this class's
+        #: own ``max_new_tokens``.
         self._supervisor_max_new_tokens = supervisor_max_new_tokens
         self._subgoal_every = subgoal_every
         self._report_detail = report_detail
@@ -121,8 +119,7 @@ class PokemonStrategist:
                           f"but {self._dir} already exists.", self._parameters)
             self._resume_dir = strategist_dir(self._parameters, game=game, name=resume_run)
 
-        #: --fresh starts every artifact over too, rather than reading one built by a
-        #: previous playthrough.
+        #: --fresh starts every artifact over too.
         load_episode = None if self._resume_episode == "latest" else self._resume_episode
         self.tiles = self._load_or_default(
             TileRecognizer, lambda: TileRecognizer(name=name, game=game, parameters=self._parameters),

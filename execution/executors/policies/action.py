@@ -117,10 +117,8 @@ class SingleActionPolicy:
 
 
 class ScoredActionPolicy:
-    """Justify and score every available action, then take the highest.
-
-    Forces systematic evaluation of all options rather than anchoring on the first
-    plausible action. Ties go to the first in the list.
+    """Justify and score every available action, then take the highest. Ties go to the first
+    in the list.
     """
 
     tag = "score"
@@ -191,9 +189,8 @@ class SequenceActionPolicy:
     tag = "action"
     name = "sequence"
     max_new_tokens = None
-    # This policy reasons once per *plan* and then executes several actions from it, so the
-    # reasoning the completion check sees is the plan's rather than the step's. Say so
-    # rather than presenting it as step-level reasoning.
+    # This policy reasons once per plan, so the completion check sees the plan's reasoning,
+    # not the step's.
     done_check_reasoning_label = ("The reasoning given for the planned sequence this "
                                   "action came from was:")
 

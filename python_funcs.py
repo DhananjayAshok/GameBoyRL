@@ -5,21 +5,17 @@ The single entry point Bash uses to ask Python for anything it used to derive it
 
 Most commands print exactly one line to stdout — the answer — and nothing else. Bash captures
 that with ``$(...)``, so **stdout is a data channel**: every diagnostic in every command
-reached from here must go to stderr (``python_scripts.common.log``, or ``utils.log_handling``,
-which logs to stderr). A stray ``print`` here corrupts a path at the call site, silently.
+reached from here must go to stderr (``python_scripts.common.log``, or ``utils.log_handling``).
+A stray ``print`` here silently corrupts a path at the call site.
 
-Use ``path_of`` in ``scripts/core/utils.sh`` rather than calling this directly — ``$(...)``
-swallows a non-zero exit, so an unchecked capture turns a failed lookup into an empty string
-and roots every derived path at ``/``.
+Use ``path_of`` in ``scripts/core/utils.sh`` rather than calling this directly: ``$(...)``
+swallows a non-zero exit, so an unchecked capture turns a failed lookup into an empty string.
 
-Kept deliberately cheap to import. This process is started once per lookup, so nothing on the
-import path may pull in the VLM stack: ~0.1s, against ~15s if anything touches torch. The
-commands that genuinely need heavy imports (``task_dictionary`` needs gameboy_worlds) do them
-inside the function body, not at module scope.
+Kept cheap to import — ~0.1s, against ~15s if anything touches torch. Nothing on the import
+path may pull in the VLM stack; the commands that need heavy imports do them inside the
+function body.
 
-Project parameters are loaded LAZILY, through ``ctx.obj["parameters"]()``. ``load_parameters``
-creates six directories and attaches a log-file handler; ``strings`` needs none of that and is
-called in RL script hot paths.
+Project parameters are loaded LAZILY, through ``ctx.obj["parameters"]()``.
 """
 
 import functools

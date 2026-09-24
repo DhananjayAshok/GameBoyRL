@@ -122,8 +122,7 @@ def subgoal_cmd(obj, max_leg_steps, max_attempts_per_step, max_replans,
             result = supervisor.evaluate()
             report = result["report"]
             if obj["verbose"]:
-                print("\n----- trajectory " + "-" * 44)
-                print(str(report))
+                log_info("\n----- trajectory " + "-" * 44 + "\n" + str(report), parameters)
             return common.PlayResult(
                 report=report,
                 extras={
@@ -158,12 +157,12 @@ def subgoal_cmd(obj, max_leg_steps, max_attempts_per_step, max_replans,
 
     def on_episode(row, outcome):
         summary = outcome.extras.get("summary", _EMPTY_SUMMARY)
-        print(f"  -> success={outcome.success}  steps={outcome.n_steps}  "
-              f"plan={summary['n_steps_cleared']}/{summary['n_slots_attempted']} steps "
-              f"cleared over {summary['n_attempts']} attempt(s), "
-              f"{summary['n_replans']} replan(s)"
-              f"{'' if summary['planned'] else '  [UNPLANNED]'}  "
-              f"{summary['n_supervisor_calls']} supervisor calls")
+        log_info(f"  -> success={outcome.success}  steps={outcome.n_steps}  "
+                 f"plan={summary['n_steps_cleared']}/{summary['n_slots_attempted']} steps "
+                 f"cleared over {summary['n_attempts']} attempt(s), "
+                 f"{summary['n_replans']} replan(s)"
+                 f"{'' if summary['planned'] else '  [UNPLANNED]'}  "
+                 f"{summary['n_supervisor_calls']} supervisor calls", parameters)
 
     common.run_sweep(
         tasks,

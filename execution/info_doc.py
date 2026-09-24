@@ -23,18 +23,15 @@ class Provenance:
 
     :param source: The vertical — ``"curiosity"`` or ``"zeroshot"`` for a document distilled
         from trajectories, or ``"parametric"`` for one written from the model's own priors
-    :param executor: Executor whose trajectories were distilled for insights. ``None`` for a parametric
-        document, which distilled nothing.
-    :param controller_variant: Controller variant those trajectories were driven under. Paired
-        with ``executor``, because the attempts directory is keyed on both — two documents
-        distilled from the same executor under different variants are different documents, and
-        recording only the executor would make them indistinguishable here. ``None`` for a
-        parametric document, and for any document written before this field existed.
+    :param executor: Executor whose trajectories were distilled for insights. ``None`` for a
+        parametric document.
+    :param controller_variant: Controller variant those trajectories were driven under, paired
+        with ``executor``. ``None`` for a parametric document, and for any document written
+        before this field existed.
     :param model: Model that did the distilling, or the writing (the save name, not the
         full path).
-    :param trajectory_stem: The input stem, relative to ``storage_dir``. The curiosity
-        run name is a component of this, so it is not recorded a second time. ``None`` for
-        a parametric document, which has no input.
+    :param trajectory_stem: The input stem, relative to ``storage_dir``, with the curiosity
+        run name as a component. ``None`` for a parametric document.
     :param built_at: ISO-8601 UTC timestamp.
     :param input_tokens: Prompt tokens spent building this document. ``None`` for cases where the backend did not report
         them — distinct from ``0``.
@@ -98,8 +95,7 @@ class Entry:
     source: Optional[str] = None
 
     #: Absolute path to :attr:`frame`, resolved by :func:`load_document`. Not persisted.
-    #: ``None`` when the entry has no frame, or when the document was built in memory
-    #: rather than loaded.
+    #: ``None`` when the entry has no frame, or the document was built in memory.
     resolved_frame: Optional[str] = None
 
     def evidence_block(self, include_frame_note: bool = False) -> str:
@@ -272,9 +268,8 @@ def resolve_frame(doc: InfoDocument, frame: Optional[str],
     """Turn one of ``doc``'s frame paths into an absolute path that can be opened.
 
     Entry frame paths are relative to ``doc.frames_root``, which is relative to
-    ``storage_dir``. Most readers do not need this — :func:`load_document` has already
-    filled in :attr:`Entry.resolved_frame` — but a document built in memory has not been
-    through that, so the resolution lives here rather than only inside the loader.
+    ``storage_dir``. :func:`load_document` has already filled in
+    :attr:`Entry.resolved_frame`; a document built in memory has not.
 
     :param doc: The document the path belongs to.
     :param frame: A stored frame path, or ``None``.
@@ -290,11 +285,8 @@ def resolve_frame(doc: InfoDocument, frame: Optional[str],
 
 
 def dump_document(doc: InfoDocument, path: str) -> None:
-    """Write a document to ``path`` as JSON, atomically.
-
-    Atomic because the merge tree writes a node per round and a partial file read back on
-    resume would be indistinguishable from a completed one.
-    """
+    """Write a document to ``path`` as JSON, atomically, so a resume never reads a partial
+    file as a complete one."""
     file_makedir(path)
     tmp = f"{path}.tmp"
     with open(tmp, "w") as handle:

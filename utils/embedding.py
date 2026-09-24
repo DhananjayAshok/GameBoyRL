@@ -195,8 +195,7 @@ class HuggingFaceTextEmbeddingEngine(HuggingFaceEmbeddingEngine):
             processor = AutoTokenizer.from_pretrained(model_name, padding_side="left")
             return model, processor
         elif model_kind == "jina":
-            # jina's remote code does its own device placement, so pin it to GPU directly
-            # rather than through device_map.
+            # jina's remote code does its own device placement; pin to GPU, not device_map.
             model = AutoModel.from_pretrained(
                 model_name,
                 trust_remote_code=True,

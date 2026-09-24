@@ -9,7 +9,7 @@ from typing import Any, Callable, List, Optional, Tuple, Type
 from gameboy_worlds.interface import Environment
 
 from execution.executors import Executor
-from execution.report import EnvironmentStepRecord, ExecutorReport
+from execution.report import EnvironmentStepRecord, ExecutorReport, action_name
 from execution.supervisors.base import Supervisor
 from execution.supervisors.prompts import (
     CRITIQUE_CONSOLIDATE_PROMPT,
@@ -65,13 +65,9 @@ class AttemptCheckerSupervisor(Supervisor):
     ) -> None:
         self._evaluation_lookback = evaluation_lookback
         self._hint = hint
-        # Judge-side only. Deliberately not forwarded to the executor: the goal condition is
-        # the success criterion, and handing the actor the exact thing it is graded against
-        # is a different experiment from the one this supervisor runs.
+        # Judge-side only; never forwarded to the executor.
         self._goal_condition = goal_condition
         self._allow_self_termination = allow_self_termination
-        # Keyword arguments, not positional: this used to pass ten in a row, so reordering
-        # the base signature would have rebound them silently rather than raising.
         super().__init__(
             task=task,
             executor_class=executor_class,
@@ -88,9 +84,8 @@ class AttemptCheckerSupervisor(Supervisor):
     def _evaluate(self) -> dict:
         """Run the executor on the stored task and return the checker's verdict.
 
-        The hint and the self-termination flag are passed per call rather than stashed in
-        ``executor_kwargs``, which is how every other supervisor now runs a leg — and what
-        lets the executor record what it actually ran under.
+        :return: The verdict, with the run's report under ``"report"``.
+        :rtype: dict
         """
         return self.call_executor(self._task, hint=self._hint,
                                   allow_self_termination=self._allow_self_termination)
@@ -217,26 +212,6 @@ def _frame_to_call_cutoff(
     return len(vlm_call_log)
 
 
-def _action_name(step) -> str:
-    """One env step's action name, falling back to the class name if it cannot be derived.
-
-    ``get_action_name`` is not one signature: some actions declare it with no parameters,
-    some with ``**kwargs``, some with named ones (``get_action_name(x_steps, y_steps)``).
-    So ``get_action_name(**step.kwargs)`` raises ``TypeError`` whenever a record's stored
-    kwargs do not match the signature of the action that produced it.
-
-    That has to be caught **here**, not left to the caller: this runs inside
-    ``RevisingSupervisor._segment_summaries``, so an exception does not degrade one line of
-    one prompt — it propagates out of ``_evaluate``, loses the whole episode, and then
-    ``run_sweep``'s ``log_error`` ends the entire sweep. ``_format.action_trace`` already
-    guards the identical call for exactly this reason; this was the one path that did not.
-    """
-    try:
-        return step.action_class.get_action_name(**step.kwargs)
-    except Exception:
-        return step.action_class.__name__
-
-
 def window_trajectory(
     env_steps: list,
     slice_prompt: str,
@@ -263,7 +238,7 @@ def window_trajectory(
 
     total = len(env_steps)
     wants_actions = "[ACTION_SEQUENCE]" in slice_prompt
-    action_lines_all = [f"  {i + 1}. {_action_name(step)}"
+    action_lines_all = [f"  {i + 1}. {action_name(step)}"
                         for i, step in enumerate(env_steps)] if wants_actions else []
 
     segment_ranges = []
@@ -336,25 +311,14 @@ def derive_critique_hint(
     """Slice the failed trajectory into fixed-size windows, critique each with images,
     then consolidate into a single hint with a text-only call.
 
-    Lives here rather than in vlm_scripts so every pipeline that derives a hint
-    (currently vlm_scripts/attempt_tasks.py) uses the identical prompts — a difference in
-    wording between two callers would make their numbers incomparable.
-
-    Not a supervisor method, so its calls go to the VLM unrecorded: the caller is a plain
-    script, not something holding a
-    :class:`~execution.report.SupervisorReport`. It takes a ``vlm`` and adapts it to the
-    ``call`` the windowing helper wants — which means unwrapping ``VLM.infer``'s
-    ``{"output": ..., "meta": ...}``, since the helper zips its return against the window
-    list and a dict there iterates as its *keys*.
-
-    Because nothing records these calls, the token counts are returned rather than filed:
-    they are otherwise the one part of a run's cost that nothing on disk accounts for.
+    Not a supervisor method, so its calls go to the VLM unrecorded and the token counts are
+    returned instead of filed.
 
     :return: ``(hint, input_tokens, output_tokens)``. The counts cover every call made
         here, and are ``None`` where the backend did not report usage — distinct from the
         ``0`` returned on the paths that make no calls at all. The hint falls back to
         *previous_hint* when there was nothing to critique.
-    """
+"""
     if not env_steps:
         empty = zero_meta()
         return previous_hint, empty["input_tokens"], empty["output_tokens"]

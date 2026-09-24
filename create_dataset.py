@@ -80,10 +80,8 @@ def _strip_blocks(text: str) -> str:
     return STEP_INFO_RE.sub('', HINT_RE.sub('', text))
 
 
-# The low_level controller's legal buttons. A training target whose Action: line names
-# anything else (or has no parseable Action: line) could never be executed, so such calls
-# are dropped when building rows. This is the source of truth: the debug dataset report no
-# longer audits action validity because create_dataset now guarantees it.
+# The low_level controller's legal buttons. Calls whose Action: line names anything else, or
+# has no parseable Action: line, are dropped when building rows.
 VALID_ACTIONS = {"A", "B", "UP", "DOWN", "LEFT", "RIGHT", "START", "SELECT"}
 
 
@@ -245,12 +243,8 @@ def create_dataset(practice_path, overwrite, safety_margin, val_frac, seed):
                 n_rejected += 1
                 continue
 
-            # Not an action call at all — a completion check under allow_self_termination,
-            # or any other auxiliary call an executor logs. Skipped on the tag rather than
-            # left to fail the Action: parse below: it would be dropped either way, but as
-            # "unparseable", which is a counter that exists to detect the acting model
-            # producing malformed output and must not be inflated by calls that were never
-            # asked for an action.
+            # Not an action call at all. Skipped on the tag so it is not counted as
+            # unparseable below.
             if record.tag not in ACTION_TAGS:
                 continue
 
@@ -342,20 +336,13 @@ def _source_label(practice_path: str) -> str:
       zeroshot   .../zeroshot/zeroshot_tasks_<executor>_<controller>_attempts/practice_<executor>
                      -> "zeroshot_<executor>"
 
-    The curiosity leg is executor-independent, so its label carries no executor. The zeroshot
-    leg's does, because a game can have several zeroshot dirs differing only by executor
-    (harvest_moon_1 has both single_actions and single_visual) and merging them under one
-    label would make their rows indistinguishable in the ``source`` column.
+    The curiosity leg's label carries no executor; the zeroshot leg's does. The executor is
+    identified by longest match against :data:`AVAILABLE_EXECUTORS`. Falls back to the parent
+    directory name for anything unrecognised.
 
-    The executor is identified by matching against :data:`AVAILABLE_EXECUTORS` rather than by
-    counting underscores. Both the executor and the controller variant are multi-token
-    (``single_actions``, ``low_level``), so there is no fixed number of trailing segments to
-    strip, and a positional guess silently mislabels the moment either vocabulary changes.
-    Longest match wins, so an executor name that prefixes another cannot shadow it.
-
-    Falls back to the parent directory name for anything unrecognised, so an unusual layout
-    still produces a distinguishable label rather than crashing.
-    """
+    :return: The provenance label.
+    :rtype: str
+"""
     parts = os.path.normpath(practice_path).split(os.sep)
     if len(parts) >= 3 and parts[-3] == 'curiosity':
         return 'curiosity'
@@ -368,8 +355,7 @@ def _source_label(practice_path: str) -> str:
         ]
         if matches:
             return f'zeroshot_{max(matches, key=len)}'
-        # A zeroshot dir naming an executor this build does not have. Still the zeroshot
-        # vertical, so label it as such rather than falling through to the raw stem.
+        # A zeroshot dir naming an executor this build does not have.
         return 'zeroshot'
     return stem or 'unknown'
 

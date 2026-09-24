@@ -2,13 +2,10 @@
 One click command per path accessor, for Bash.
 
 Every command here is a two-line forward to :mod:`python_scripts.paths` and prints the result
-with ``click.echo`` — the printing lives at this layer, never in the path functions themselves,
-so a library caller can never accidentally write to a stdout that Bash is capturing.
+with ``click.echo``. The printing lives at this layer, never in the path functions themselves.
 
-Identity flags are declared per command rather than on the group, because the commands need
-different subsets of the identity and a shared group would force callers to supply values that
-are then ignored — which is how a wrong `--run_name` ends up silently accepted by a command
-whose path does not depend on it.
+Identity flags are declared per command, not on the group, so a command cannot silently accept
+a flag its path does not depend on.
 """
 
 import click

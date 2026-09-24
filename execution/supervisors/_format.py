@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from execution.report import (ACTION_TAGS, DONE_CHECK_TAG, EnvironmentStepRecord,
-                              says_complete)
+                              action_name, says_complete)
 from utils import parse_key_value
 
 
@@ -32,10 +32,7 @@ def action_trace(report) -> str:
         # is shown once, on the first — it was given once, for the whole sequence.
         for i, step in enumerate(entry.steps or [None]):
             if isinstance(step, EnvironmentStepRecord):
-                try:
-                    name = step.action_class.get_action_name(**step.kwargs)
-                except Exception:
-                    name = step.action_class.__name__
+                name = action_name(step)
             elif step is None:
                 name = "(no action)"
             else:

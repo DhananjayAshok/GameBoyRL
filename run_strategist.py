@@ -28,14 +28,10 @@ from execution.strategist.pokemon.strategist import PokemonStrategist
 from python_scripts import paths
 from utils import load_parameters, log_info
 
-#: As high as the emulator allows: its own budget must never be what ends a playthrough.
-#: The strategist stops on its episode count or the wall clock, and an
-#: emulator that truncated underneath it would look exactly like the agent giving up.
-#:
-#: This IS the ceiling -- ``gameboy_hard_max_steps`` in GameBoyWorlds' config is 1,000,000
-#: and anything larger is silently clamped to it with a warning. Set to the cap rather than
-#: to a bigger number so the value here is the value that runs. For scale, an episode
-#: spends a few hundred emulator steps, so this is ~10x what 10 hours can consume.
+#: As high as the emulator allows, so the playthrough ends on its episode count or the wall
+#: clock, never on the emulator truncating underneath it. This IS the ceiling:
+#: ``gameboy_hard_max_steps`` in GameBoyWorlds' config is 1,000,000 and anything larger is
+#: silently clamped to it.
 DEFAULT_ENV_MAX_STEPS = 1_000_000
 
 
@@ -138,9 +134,7 @@ def main(game, init_state, name, model, vlm_kind, strategist_vlm_model, strategi
         # crashed run that keeps them is a run whose partial video cannot be read.
         environment.close()
 
-    print()
-    print(str(report))
-    print()
+    log_info("\n" + str(report) + "\n", parameters)
 
 
 if __name__ == "__main__":

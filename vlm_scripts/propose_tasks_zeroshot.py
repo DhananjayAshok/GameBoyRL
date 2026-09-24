@@ -2,9 +2,7 @@
 Called by scripts/vlm/propose_zeroshot.sh and scripts/vlm/propose_all_zeroshot.sh (via vlm.py propose_tasks_zeroshot).
 Use --help for CLI options.
 
-Every path below comes from :mod:`python_scripts.paths`, which owns the directory scheme; this
-module names accessors rather than spelling layouts out, so there is nothing here to drift
-out of step with the readers.
+Every path below comes from :mod:`python_scripts.paths`, which owns the directory scheme.
 
 Input: one or more init_state names (--init_states, comma-separated) and the game environment
     - The first frame and action space are loaded live from the environment via get_first_frame_and_actions.
@@ -90,14 +88,14 @@ def _propose_for_init_state(
     )
 
     if verbose:
-        print(f"PROPOSE prompt for '{init_state}':\n{prompt}\n---")
+        log_info(f"PROPOSE prompt for '{init_state}':\n{prompt}\n---")
 
     output = vlm.infer(
         texts=prompt, images=[first_frame], max_new_tokens=max_new_tokens
     )["output"].lower()
 
     if verbose:
-        print(f"PROPOSE output for '{init_state}':\n{output}\n---")
+        log_info(f"PROPOSE output for '{init_state}':\n{output}\n---")
 
     # Lowercased here, not in the parser: these strings go on to name directories on disk
     # (proposed_tasks/<game>/.../<task>_attempts), and every artifact already written was
@@ -129,8 +127,6 @@ def propose_tasks_zeroshot(obj, init_states, max_concurrency):
     max_new_tokens = obj["max_new_tokens"]
     verbose = obj["verbose"]
     overwrite = obj["overwrite"]
-    # The scheme lives in python_scripts.paths, so this script no longer spells out the directory
-    # layout; it used to be duplicated here and re-derived by every reader.
     paths = Paths(parameters=parameters, game=game, model_name=model_name)
     out_path = paths.tasks_file()
     os.makedirs(paths.zeroshot_dir(), exist_ok=True)

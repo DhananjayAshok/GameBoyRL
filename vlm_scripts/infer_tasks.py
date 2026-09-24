@@ -12,8 +12,7 @@ Input: grouped_high_reward_trajectories.pkl
             - rewards: list[float] of length (num_frames - 1)
 
 Output: trajectory_annotation.json  +  trajectory_annotation.pkl
-    Path: Paths.curiosity_annotation() and its .pkl sibling. The directory scheme lives in
-    :mod:`python_scripts.paths`, so this module names the accessor rather than the layout.
+    Path: Paths.curiosity_annotation() and its .pkl sibling.
     trajectory_annotation.json — dict[int, str]
         - keys are group indices
         - values are distilled imperative task strings (e.g. "Walk into the building")
@@ -225,7 +224,7 @@ def describe_pairwise(
                     f"describe_pair_{i}",
                     high_level_actions=[action_window[i]],
                 )
-                print(f"DESCRIBE output (pair {i}→{i+1}):\n{describe_output}\n---")
+                log_info(f"DESCRIBE output (pair {i}→{i+1}):\n{describe_output}\n---")
             frame_descs[i] = parse_key_value(describe_output, "Initial Frame Description") or ""
             diffs[i] = parse_key_value(describe_output, "Differences") or ""
 
@@ -281,18 +280,18 @@ def infer_task(
     )
     if verbose:
         save_frames(list(window), "infer_window", high_level_actions=action_window)
-        print(f"INFER prompt:\n{infer_prompt}\n---")
+        log_info(f"INFER prompt:\n{infer_prompt}\n---")
     infer_output = vlm.infer(
         texts=infer_prompt,
         images=list(window),
         max_new_tokens=max_new_tokens,
     )["output"].lower()
     if verbose:
-        print(f"INFER output:\n{infer_output}\n---")
+        log_info(f"INFER output:\n{infer_output}\n---")
 
     if "no task" in infer_output:
         if verbose:
-            print("INFER returned NO TASK.")
+            log_info("INFER returned NO TASK.")
         return None
 
     parsed_block = _parse_infer_block(infer_output, window_offset=n - k, n_obs=n)
@@ -310,7 +309,7 @@ def infer_task(
         max_new_tokens=max_new_tokens,
     )["output"].lower()
     if verbose:
-        print(f"REFINE output:\n{refine_output}\n---")
+        log_info(f"REFINE output:\n{refine_output}\n---")
 
     # Reject INVALID (too generic to complete exactly) AND any malformed output that does
     # not clearly say VALID — both are treated exactly like NO TASK (return None). Output is
@@ -319,21 +318,21 @@ def infer_task(
     verdict = parse_key_value(refine_output, "Verdict") or ""
     if "invalid" in verdict or "valid" not in verdict:
         if verbose:
-            print(f"REFINE rejected task (verdict={verdict!r}) — treating as NO TASK.")
+            log_info(f"REFINE rejected task (verdict={verdict!r}) — treating as NO TASK.")
         return None
 
     refined_task = parse_key_value(refine_output, "Task")
     if refined_task is None or refined_task.strip() in ("", "none"):
-        # Malformed: VALID verdict but no usable Task string. Reject rather than salvage.
+        # Malformed: VALID verdict but no usable Task string.
         if verbose:
-            print("REFINE gave no usable Task despite VALID verdict — treating as NO TASK.")
+            log_info("REFINE gave no usable Task despite VALID verdict — treating as NO TASK.")
         return None
     task = parsed_block["task"]
     if got_bigger(task, refined_task):
         refined_task = task
 
     if verbose:
-        print(
+        log_info(
             f"Final inferred task: {refined_task}, start: {parsed_block['start']}, end: {parsed_block['end']}"
         )
         # save_frames of both start and end
@@ -341,7 +340,7 @@ def infer_task(
         end_idx = parsed_block["end"] if parsed_block["end"] is not None else None
         if start_idx is not None and end_idx is not None:
             save_frames([observations[start_idx], observations[end_idx]], "task_frames")
-        print(
+        log_info(
             "Exiting after one inference for verbose demonstration. Set VERBOSE = False to run full inference."
         )
         breakpoint()
@@ -511,8 +510,6 @@ def infer_task_cmd(
     parameters = obj["parameters"]
     model_name = obj["model_name"]
     vlm = VLM(model_name, vlm_kind)
-    # The directory layout lives in python_scripts.paths, not here — this script used to spell it
-    # out and every reader re-derived the same string independently.
     paths = Paths(parameters=parameters, game=game, model_name=model_name,
                   run_name=run_name)
     traj_path = paths.curiosity_annotation()
@@ -634,11 +631,8 @@ def infer_task_cmd(
                 )
         log_info(f"Dedup: {before} groups → {len(trajectory_output)} unique tasks.")
 
-    # Fail here rather than let an empty annotation propagate. Everything downstream
-    # (build_info) keys off this file, and an empty one yields an empty info document with
-    # no error. Checked BEFORE writing: traj_path existing is this command's
-    # skip-if-exists marker, so writing an empty one would make every later run skip it.
-    # The checkpoint is left in place so a rerun resumes instead of re-annotating.
+    # Checked BEFORE writing: traj_path existing is this command's skip-if-exists marker.
+    # The checkpoint is left in place so a rerun resumes.
     if not trajectory_output:
         log_error(
             f"infer_tasks produced 0 task annotations from {trajectory_path}. "

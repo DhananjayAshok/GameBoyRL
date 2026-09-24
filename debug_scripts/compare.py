@@ -15,15 +15,10 @@ both fail, A only, B only); ``--n_examples`` episodes from each are rendered.
 
 Frames
 ------
-This command renders **no frames**. It used to reconstruct them by re-executing each
-episode's recorded action sequence on the emulator, because nothing on disk carried the
-frames a call actually saw. That is no longer true: every arm archives a
+This command renders **no frames**. Every arm archives a
 :class:`~execution.report.SupervisorReport` to ``<session_dir>/report.pkl.gz``, whose call
-records hold their own images. Frame rendering therefore belongs to a reader of that
-artifact, not to a parser of this CSV's rendered ``report`` text — and a replay was only ever
-an illustration of the action sequence anyway, never the model's literal visual input.
-
-What is left here is the part that needs no frames: the pairing and the quadrants.
+records hold their own images, so frame rendering belongs to a reader of that artifact —
+``debug.py benchmark``. What is left here is the pairing and the quadrants.
 
 Output
 ------
@@ -182,4 +177,3 @@ def debug_compare(obj, csv_a, csv_b, label_a, label_b, n_examples):
     stem_b = re.sub(r"[^\w.-]", "_", label_b)
     path = md.write_report(os.path.join(report_dir, f"{stem_a}__vs__{stem_b}.md"), blocks)
     log_info(f"[compare] wrote {path}")
-    print(path)

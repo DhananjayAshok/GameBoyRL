@@ -142,7 +142,8 @@ def _attempt_task(
             env.reset()
 
             if verbose:
-                print(f"  Attempt {attempt + 1}/{max_attempts}" + (f" | hint: {hint}" if hint else ""))
+                log_info(f"  Attempt {attempt + 1}/{max_attempts}"
+                         + (f" | hint: {hint}" if hint else ""), parameters)
 
             supervisor = AttemptCheckerSupervisor(
                 task=task_str,
@@ -161,9 +162,6 @@ def _attempt_task(
                 hint=hint or None,
             )
             result = supervisor.evaluate()
-            # evaluate() returns {"report": SupervisorReport, ...the checker's verdict}. The
-            # steps live on the report's single executor leg rather than being copied into
-            # the verdict dict.
             executor_reports = result["report"].executor_reports
             env_steps = [
                 s for report in executor_reports for s in report.steps
@@ -172,7 +170,8 @@ def _attempt_task(
             trajectory = _reconstruct_trajectory(env_steps, init_state)
 
             if verbose:
-                print(f"  Result: {'success' if result['success'] else 'failure'} | {result.get('description', '')}")
+                log_info(f"  Result: {'success' if result['success'] else 'failure'} "
+                         f"| {result.get('description', '')}", parameters)
 
             if result["success"]:
                 break
@@ -181,14 +180,13 @@ def _attempt_task(
                 hint, input_tokens, output_tokens = derive_critique_hint(
                     env_steps, task_str, game, critique_vlm, max_new_tokens, hint
                 )
-                # sum_optional, not +=: a backend that does not report usage yields None,
-                # and None must propagate rather than being counted as zero.
+                # sum_optional, not +=: None must propagate, not count as zero.
                 critique_input_tokens = sum_optional(
                     [critique_input_tokens, input_tokens])
                 critique_output_tokens = sum_optional(
                     [critique_output_tokens, output_tokens])
                 if verbose:
-                    print(f"  Derived hint: {hint}")
+                    log_info(f"  Derived hint: {hint}", parameters)
     finally:
         env.close()
 
@@ -398,12 +396,8 @@ def attempt_tasks_cmd(
             with open(checkpoint_pkl, "wb") as f:
                 pickle.dump(trajectories, f)
 
-    # Write final outputs. all_trajectories.csv goes first and unconditionally: it is the
-    # record of what was attempted and why it failed, and the debug tooling reads it.
-    # description/reasoning/final_hint are carried through to the CSV because the only other
-    # copy lives in checkpoint.json, which is deleted a few lines below on a successful run.
-    # They are the judge's stated rationale and the hint the final attempt ran under — the
-    # evidence for why a task failed, or why a "success" should be believed.
+    # all_trajectories.csv goes first and unconditionally: checkpoint.json, the only other
+    # copy of description/reasoning/final_hint, is deleted below on a successful run.
     pd.DataFrame([
         {
             "group_idx": group_idx,
@@ -433,10 +427,8 @@ def attempt_tasks_cmd(
     success_trajectories = {gid: traj for gid, traj in trajectories.items() if results.get(gid, {}).get("success")}
     success_json = {gid: res["task_string"] for gid, res in results.items() if res.get("success")}
 
-    # Fail here rather than let an empty success set propagate. build_info keys off this
-    # stem, and an empty one yields an empty info document with no error. The success files
-    # are NOT written, so build_info fails loudly on a missing input rather than silently
-    # distilling nothing; the checkpoints are left for inspection.
+    # The success files are NOT written, so build_info fails loudly on a missing input. The
+    # checkpoints are left for inspection.
     if not success_json:
         log_error(
             f"attempt_tasks: 0 of {len(results)} attempted tasks succeeded, so there are no "

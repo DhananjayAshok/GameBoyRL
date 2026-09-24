@@ -11,10 +11,9 @@ import re
 from typing import Any, Dict, Optional, Tuple
 
 from execution.executor_action import ExecutorAction, LocateAction, coords_to_string
-from execution.perception.pokemon.grid import split_grid
-from execution.perception.pokemon.tiles import PLAYER_NEIGHBOURS, verbalize_neighbourhood
+from execution.perception.pokemon.tiles import verbalize_neighbourhood
 from gameboy_worlds.emulation.pokemon import AgentState
-from utils import parse_key_value, parse_yes_no
+from utils import parse_key_value
 
 
 class PokemonLocateAction(LocateAction):

@@ -19,10 +19,7 @@ of it. This command is the instrument.
       - the match audit, replayed from every matches.json
       - the final document itself
 
-There used to be a companion `debug.py info_hint` that ran the retired hint pipeline on
-sampled benchmark screens and reported each hint beside the relevance verdicts behind it.
-It went with `InfoHintSupervisor`. The equivalent instrument for the plan arm is
-`debug.py compare` over the plan CSVs.
+The equivalent instrument for the plan arm is `debug.py compare` over the plan CSVs.
 
 Input (all produced by scripts/vlm/build_info.sh)
 ------------------------------------------------
@@ -51,7 +48,7 @@ from debug_scripts import markdown as md
 from python_scripts.paths import Paths
 from execution.info_doc import TASK_SECTION, InfoDocument
 from python_scripts.paths import INFO_DOC_FILENAME
-from utils import log_info, log_warn
+from utils import log_info
 
 # Phrases that signal an insight has drifted into unfalsifiable advice, and the concrete
 # anchors that signal it has not. The ratio between them per merge round is the cheap
@@ -254,14 +251,9 @@ def debug_info(obj, model_name, source, max_entries):
     funnel.append(f"leaf insights: **{leaf_stats['n_insights']}**")
 
     # --- Benchmark init_state coverage ------------------------------------
-    # Reading the benchmark task file here is fine: this is a read-only diagnostic and no
-    # benchmark text ever enters the document.
-    #
-    # This used to be presented as the gate on the retired `--mode init_state`, which keyed
-    # entries off the episode's init state directly. It is kept because it still measures
-    # something real for `--mode retrieval`: an init state the data collection never visited
-    # contributes no entries, so every episode starting there retrieves whatever generic
-    # entries happen to fire and plans from knowledge of somewhere else.
+    # Read-only diagnostic; no benchmark text ever enters the document. An init state the
+    # data collection never visited contributes no entries, so every episode starting there
+    # plans from knowledge of somewhere else.
     coverage_block = []
     try:
         from gameboy_worlds import get_benchmark_tasks

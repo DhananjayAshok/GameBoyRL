@@ -18,7 +18,8 @@ from gameboy_worlds import get_test_environment
 
 from execution.info_doc import load_document
 from python_scripts import paths
-from utils import depathify, log_error, log_info
+from python_scripts.paths import REPORT_FILENAME
+from utils import depathify, log_error, log_info, log_warn
 
 
 # Columns every arm writes, in this order. Arm-specific columns are appended after these,
@@ -29,11 +30,8 @@ COMMON_COLUMNS = [
     "success",
     "n_steps",
     "n_invalid",
-    # Supervisor and executor cost are kept apart rather than summed: the comparison the
-    # arms exist to make is what the supervision itself costs, and an arm that plans well
-    # but spends more on planning than it saves on execution is not a win. A single total
-    # cannot show that, and a reader who wants one can add two columns. Empty where the
-    # backend did not report usage, which is a different fact from zero.
+    # Supervisor and executor cost stay separate, never summed. Empty where the backend did
+    # not report usage, which is not the same as zero.
     "supervisor_input_tokens",
     "supervisor_output_tokens",
     "executor_input_tokens",
@@ -43,12 +41,7 @@ COMMON_COLUMNS = [
     "report",
 ]
 
-# Points at the emulator session directory for this episode, which is where both the
-# recorded video and the archived executor report live. Always the last column.
 SESSION_COLUMN = "session_dirs"
-
-#: Pickled per-episode executor report(s), written into the session dir beside videos/0.mp4.
-REPORT_FILENAME = "report.pkl.gz"
 
 
 # ---------------------------------------------------------------------------
@@ -57,12 +50,11 @@ REPORT_FILENAME = "report.pkl.gz"
 
 
 def select_tasks(tasks: pd.DataFrame, n_tasks: Optional[int]) -> pd.DataFrame:
-    """The first ``n_tasks`` benchmark tasks, or all of them when ``n_tasks`` is None.
+    """The first ``n_tasks`` benchmark tasks, or all of them when ``n_tasks`` is None. A
+    prefix, never a sample, so partial runs nest.
 
-    A prefix rather than a sample, so a quick look extends into a bigger run: the tasks in
-    ``--n_tasks 5`` are the first five of ``--n_tasks 10``, and both are a prefix of the
-    full sweep. That nesting is what makes partial runs comparable to each other and to the
-    whole; a random subsample of 5 and of 10 share no such relationship.
+    :return: The selected tasks.
+    :rtype: pd.DataFrame
     """
     if n_tasks is None:
         return tasks
@@ -74,16 +66,10 @@ def select_tasks(tasks: pd.DataFrame, n_tasks: Optional[int]) -> pd.DataFrame:
 def results_path(parameters: dict, game: str, *, supervisor: str, executor: str,
                  controller_variant: str, model: str, extra_name: Optional[str],
                  n_tasks: Optional[int]) -> str:
-    """Where this run's CSV goes, creating the directory.
+    """Where this run's CSV goes, creating the directory. A subset run gets its own file.
 
-    A subset run gets its own file: resuming a full sweep from a 5-task CSV would read the
-    first five as done and silently skip them.
-
-    Delegates to :func:`python_scripts.paths.benchmark_csv` rather than building the name
-    here. This used to be an f-string, and ``Paths.benchmark_csv`` rebuilt it without the
-    supervisor prefix or the ``_firstN`` suffix — so ``debug.py benchmark`` could not open
-    any CSV this function had ever written. The supervisor and n_tasks are passed through
-    instead of being pre-baked into a ``stem`` string so only one place knows the order.
+    :return: Path to the CSV.
+    :rtype: str
     """
     return paths.benchmark_csv(parameters, game=game, supervisor=supervisor,
                                executor=executor, controller_variant=controller_variant,
@@ -151,11 +137,6 @@ class PlayResult:
         supervisor call and every executor leg, interleaved. The archived artifact, and the
         only place the frames exist.
     :param extras: Arm-specific values, keyed by name, for that arm's extra columns.
-
-    ``report_str``, ``n_invalid`` and ``legs`` used to be separate fields here. All three are
-    now properties of the report (``str(report)``, ``report.n_invalid``,
-    ``report.executor_reports``), and carrying them alongside meant the same fact could be
-    recorded twice and disagree.
     """
 
     report: Any
@@ -200,13 +181,11 @@ def session_path_of(environment) -> Optional[str]:
     """The emulator instance directory this environment records into.
 
     ``<storage>/sessions/<game>/<session_name>/<task>/<n>_<hash>/``, holding ``videos/0.mp4``
-    and — once :func:`save_report` has run — the archived report. Read from the emulator
-    rather than reconstructed from the naming convention, because the trailing ``<n>_<hash>``
-    is chosen at construction time and a convention-based guess has to fall back to "the most
-    recently modified directory", which is wrong as soon as a task has been run twice.
+    and — once :func:`save_report` has run — the archived report. Read from the emulator, not
+    reconstructed from the naming convention.
 
-    Reaches through ``Environment._emulator``. Returns None rather than raising if that
-    attribute ever moves, since losing the archive should not fail a benchmark run.
+    :return: The session directory, or ``None`` if ``Environment._emulator`` has moved.
+    :rtype: Optional[str]
     """
     emulator = getattr(environment, "_emulator", None)
     return getattr(emulator, "session_path", None) if emulator is not None else None
@@ -217,29 +196,14 @@ def save_report(session_path: str, *, supervisor: str, row, executor_name: str,
                 info_docs: Optional[list] = None, report=None) -> Optional[str]:
     """Archive this episode's :class:`~execution.report.SupervisorReport` beside its video.
 
-    The report is what makes an episode reconstructable after the fact. Its ``event_log``
-    interleaves the supervisor's own calls with the full report of every executor leg, and
-    each call record — either kind — carries the images it saw, its prompt and the raw
-    response. Nothing else on disk has the frames: the CSV's ``report`` column is a rendered
-    string, and the executor's own PNGs are written only under ``--verbose`` into a directory
-    keyed on the executor class, which one run overwrites for the next.
+    The report's ``event_log`` interleaves the supervisor's own calls with the full report of
+    every executor leg, each carrying the images it saw, its prompt and the raw response.
+    Nothing else on disk has the frames. Written gzipped and self-describing. Failure here is
+    logged and swallowed.
 
-    Written gzipped, since always-on archiving across a full sweep is otherwise gigabytes.
-    Compression is worth far more on the prompt text than on the frames, so the ratio
-    depends on how image-heavy the run is.
-
-    Self-describing rather than a bare report, so a reader does not need to know which arm or
-    which run wrote it — the benchmark CSV and this file are otherwise linked only by a
-    directory path.
-
-    Failure here is logged and swallowed: an unwritable archive must not cost an episode
-    that has already been paid for in VLM calls.
+    :return: Path to the archive, or ``None`` if it could not be written.
+    :rtype: Optional[str]
     """
-    # controller_variant, extra_name and info_docs are recorded because nothing else on disk
-    # carries them: the CSV has no column for any of the three, and the run name they appear
-    # in is a string a caller typed rather than a fact. Without them an archived report cannot
-    # say which knowledge produced it — two runs of the same arm over different documents are
-    # otherwise byte-comparable in every field here.
     payload = {
         "supervisor": supervisor,
         "game": row["game"],
@@ -260,7 +224,7 @@ def save_report(session_path: str, *, supervisor: str, row, executor_name: str,
             pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
         return path
     except Exception as error:  # noqa: BLE001 - archiving must never fail a run
-        print(f"WARNING: could not write report to {path}: {error}")
+        log_warn(f"Could not write report to {path}: {error}")
         return None
 
 
@@ -272,24 +236,18 @@ def run_episode(row, play: Callable[[Any], PlayResult], *, supervisor: str,
 
     Owns everything that is the same for every arm: subgoal accumulation, step totals,
     archiving, environment teardown and error trapping. ``play(environment)`` is the only
-    part an arm supplies — it drives the episode and reports what happened, including its
-    own verbose output, since what is worth printing differs by arm.
+    part an arm supplies.
 
-    One attempt per task, deliberately. A whole-task retry built a second emulator session
-    — hence a second video and a second report — under one CSV row, so the row described a
-    single attempt while the session directory held several and nothing said which was
-    which. Arms that retry *internally* (the plan arm's --max_attempts_per_step and
-    --max_replans) are unaffected: those stay inside one session.
+    One attempt per task. Arms that retry internally stay inside one session. An exception
+    anywhere leaves ``error=True`` and whatever was accumulated up to that point.
 
-    An exception anywhere leaves ``error=True`` and whatever was accumulated up to that
-    point: the sweep stops on first error. 
+    :return: The episode's outcome.
+    :rtype: EpisodeOutcome
     """
     outcome = EpisodeOutcome()
     mission = row["task"]
-    # depathify, not a bare space-replace: a task carrying a "/" ("Reach the BUY/SELL
-    # choice menu…", "…first stats page (HP/MP)") would otherwise be spliced into the
-    # session path as a directory separator, burying that episode one level deeper than
-    # every other task's.
+    # depathify, not a bare space-replace: a task carrying a "/" must not splice a directory
+    # separator into the session path.
     task_str = depathify(mission).lower()
     emulator_kwargs = dict(emulator_kwargs)
     emulator_kwargs["session_name"] += f"/{task_str}/"
@@ -335,8 +293,8 @@ def run_episode(row, play: Callable[[Any], PlayResult], *, supervisor: str,
 
     except Exception as error:  # noqa: BLE001 - one bad task must not end the sweep
         outcome.error = True
-        print(f"Error during execution of task '{mission}': {error}")
-        traceback.print_exc()
+        log_warn(f"Error during execution of task '{mission}': {error}\n"
+                 f"{traceback.format_exc()}")
 
     return outcome
 
@@ -369,10 +327,11 @@ def run_sweep(tasks: pd.DataFrame, *, columns: list, save_path: str, results: li
               run_one: Callable[[Any], EpisodeOutcome],
               build_row: Callable[[Any, EpisodeOutcome], list],
               on_episode: Optional[Callable[[Any, EpisodeOutcome], None]] = None) -> list:
-    """Run every task and write the CSV after each one.
+    """Run every task and write the CSV after each one, so a pre-empted run leaves a partial
+    CSV for resume to read.
 
-    Flushing per episode rather than at the end is deliberate: these runs are long enough
-    that they get pre-empted, and a partial CSV is what resume reads.
+    :return: The rows written.
+    :rtype: list
     """
     for i, row in tqdm(tasks.iterrows(), total=len(tasks)):
         if i < n_completed:

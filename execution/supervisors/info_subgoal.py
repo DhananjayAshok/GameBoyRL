@@ -40,9 +40,8 @@ class InfoSubgoalSupervisor(SubgoalSupervisor):
         self.n_insights_kept = 0
         self.n_insights_distilled = 0
         super().__init__(*args, **kwargs)
-        # Built here rather than on first use. The relevance pass fans out across threads,
-        # and the base class's lazy property is a check-then-set with no lock, so several
-        # workers could pass the `is None` test at once and construct several VLMs.
+        # Built eagerly: the base class's lazy property is an unlocked check-then-set, and
+        # the relevance pass fans out across threads.
         _ = self._vlm
 
     def _run_config(self) -> dict:
@@ -51,12 +50,11 @@ class InfoSubgoalSupervisor(SubgoalSupervisor):
                 "n_documents": len(self._documents)}
 
     def _knowledge(self) -> str:
-        """The distilled insights, or nothing if selection found none.
+        """The distilled insights, or nothing if selection found none. Filtered once in
+        :meth:`_resolve_targets` and reused verbatim by the planner, reviser and hint writer.
 
-        Filtered once in :meth:`_resolve_targets` and reused verbatim by the planner, the
-        reviser and the hint writer — deliberately, because re-filtering per call site
-        would multiply the arm's VLM cost for a judgement that rarely changes within one
-        task.
+        :return: The insights block, or ``""``.
+        :rtype: str
         """
         return self.insights_block
 
@@ -131,9 +129,8 @@ class InfoSubgoalSupervisor(SubgoalSupervisor):
         if entry_frame is not None:
             images.append(entry_frame)
 
-        # The prompt must describe the images it actually receives. A parametric entry has
-        # no frame, so both slots drop the second-image language rather than referring to a
-        # picture that was never attached.
+        # The prompt must describe the images it actually receives; a parametric entry has no
+        # frame.
         if entry_frame is not None:
             frame_note = ("The images are: first the CURRENT screen the player is looking "
                           "at, then the representative frame recorded with this entry.")
@@ -241,9 +238,7 @@ class InfoSubgoalSupervisor(SubgoalSupervisor):
             wanted = {int(n) for n in re.findall(r"\d+", answer)}
             kept = [pair for i, pair in enumerate(pairs) if i + 1 in wanted]
             if not kept:
-                # Either the model dropped everything or the reply did not parse. Both are
-                # more likely to be a filter failure than a document with nothing useful in
-                # it, so fail open rather than plan from an empty page.
+                # Fail open: the model dropped everything, or the reply did not parse.
                 log_warn(f"[plan] insight filter kept nothing from {len(pairs)} candidates "
                          f"(reply: {answer[:80]!r}); keeping all.", self._parameters)
                 kept = pairs
@@ -291,6 +286,6 @@ class InfoSubgoalSupervisor(SubgoalSupervisor):
 
         self.n_insights_distilled = len(lines)
         self._say(f"  insight distillation: {len(kept)} -> {len(lines)} statements")
-        # parse_list returns bare items; the bullet is re-added here because this block goes
-        # straight into a prompt and the "- " is part of how that prompt reads.
+        # parse_list returns bare items; this block goes straight into a prompt that expects
+        # the bullets.
         return "\n".join(f"- {line}" for line in lines)

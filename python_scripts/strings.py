@@ -5,8 +5,8 @@ Called by bash through ``python_funcs.py strings ...`` (via utils.sh get_string_
 Extensible: add a new StringFunction subclass and register it in STRING_FUNCTIONS to expose a
 new string kind. Prints exactly one line to stdout; all diagnostics go to stderr.
 
-Deliberately does NOT load project parameters — an experiment name is a pure function of its
-arguments, and these are called in RL script hot paths.
+Does NOT load project parameters: an experiment name is a pure function of its arguments, and
+these are called in RL script hot paths.
 """
 
 from abc import ABC, abstractmethod
@@ -19,21 +19,10 @@ from python_scripts.common import log  # noqa: F401  (kept on the module's surfa
 def depathify_legacy(string) -> str:
     """The WEAK depathify: folds only ``/``, ``\\`` and space. Used by :class:`ExperimentName` only.
 
-    ``utils.fundamental.depathify`` is the one everything else uses, and it folds *every*
-    non-word character — including ``-`` and ``.``. The two are kept separate on purpose.
-
-    Switching :class:`ExperimentName` onto the strong one would change every ``exp_name`` built
-    with a non-``none`` ``--embedder_load_path`` / ``--buffer_load_path`` (reachable from
-    ``iterative_training.sh``), and so rename the directories those runs live in:
-    ``<storage>/models/<game>[/<model_dir>]/<exp_name>/`` and
-    ``<storage>/logs/<log_folder>/<exp_name>.out``.
-
-    Verified blast radius: ``exp_name`` reaches those two trees and cleanrl's
-    ``--exp_name``/``--save-name``, and **nothing at or downstream of grouped_trajectories** —
-    that tree is keyed on ``(game, run_name, init_state_group)``, and replay_buffers on
-    ``(game, replay_buffer_save_folder)``. So unifying would be safe for this repo. It is held
-    back only because ``cleanrl/`` is an unaudited submodule that receives ``--exp_name`` and
-    may key checkpoints or wandb runs off it. Check that, then collapse the two. See report.md.
+    Everything else uses ``utils.fundamental.depathify``, which folds every non-word
+    character. Switching :class:`ExperimentName` onto the strong one would rename the run
+    directories under ``<storage>/models/`` and ``<storage>/logs/``, and reaches cleanrl's
+    ``--exp_name``.
 
     :param string: the string to depathify
     :type string: str

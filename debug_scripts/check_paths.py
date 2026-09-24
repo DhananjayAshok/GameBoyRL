@@ -9,6 +9,7 @@ import os
 import click
 
 from python_scripts.paths import BENCHMARK_SUPERVISORS, Paths
+from utils import log_info
 
 
 def _mark(path: str) -> str:
@@ -32,43 +33,49 @@ def check_paths(obj, model_name):
         output_dir=obj["output_dir"], mode=obj["mode"],
     )
 
-    print(f"game       : {paths.game}")
-    print(f"run_name   : {paths.run_name}")
-    print(f"executor   : {paths.executor}")
-    print(f"model_name : {model_name or '(not given)'}")
-    print(f"storage_dir: {paths.storage_dir}")
-    print(f"results_dir: {paths.results_dir}")
-    print()
-
-    print("-- curiosity --")
+    lines = [
+        f"game       : {paths.game}",
+        f"run_name   : {paths.run_name}",
+        f"executor   : {paths.executor}",
+        f"model_name : {model_name or '(not given)'}",
+        f"storage_dir: {paths.storage_dir}",
+        f"results_dir: {paths.results_dir}",
+        "",
+        "-- curiosity --",
+    ]
     grouped = paths.grouped_dir()
-    print(f"  [{_mark(grouped)}] {grouped}")
+    lines.append(f"  [{_mark(grouped)}] {grouped}")
     if os.path.exists(grouped):
         states = sorted(d for d in os.listdir(grouped) if os.path.exists(paths.grouped_file(d)))
-        print(f"         {len(states)} init_state(s) with grouped trajectories")
+        lines.append(f"         {len(states)} init_state(s) with grouped trajectories")
 
     if model_name is None:
-        print("\n(model_name not given — skipping model-keyed stages)")
+        lines.append("\n(model_name not given — skipping model-keyed stages)")
+        log_info("\n".join(lines), obj["parameters"])
         return
 
-    print("\n-- proposal / attempt --")
-    print(f"  [{_mark(paths.curiosity_annotation())}] {paths.curiosity_annotation()}")
+    lines += [
+        "",
+        "-- proposal / attempt --",
+        f"  [{_mark(paths.curiosity_annotation())}] {paths.curiosity_annotation()}",
+    ]
     tasks = paths.tasks_file()
-    print(f"  [{_mark(tasks)}] {tasks}")
+    lines.append(f"  [{_mark(tasks)}] {tasks}")
     for label, path in [
         ("attempts", paths.all_trajectories_csv()),
         ("successes", paths.success_trajectories_json()),
     ]:
-        print(f"     [{_mark(path)}] {label}: {path}")
+        lines.append(f"     [{_mark(path)}] {label}: {path}")
 
-    print("\n-- benchmark --")
+    lines += ["", "-- benchmark --"]
     # Every supervisor writes its own file for one (game, executor, model), so a single
     # path here would report 'missing' for a game that has four of the five on disk.
     for model in [paths.model_save_name, paths.finetuned_model_name]:
         for supervisor in BENCHMARK_SUPERVISORS:
             path = paths.benchmark_csv(paths.game, model, supervisor=supervisor)
-            print(f"  [{_mark(path)}] {path}")
+            lines.append(f"  [{_mark(path)}] {path}")
     gbw = paths.gameboy_worlds_storage()
-    print(f"  GameBoyWorlds storage: {gbw or '(unreadable)'}")
+    lines.append(f"  GameBoyWorlds storage: {gbw or '(unreadable)'}")
 
-    print(f"\n-- output --\n  {paths.debug_dir('check_paths')}")
+    lines += ["", "-- output --", f"  {paths.debug_dir('check_paths')}"]
+    log_info("\n".join(lines), obj["parameters"])

@@ -13,9 +13,8 @@ from utils.fundamental import depathify  # noqa: F401  (re-export; see below)
 from utils.lm_inference import parse_key_value
 
 
-# depathify moved to utils.fundamental so it can be imported without the LM stack that the
-# parse_key_value import above drags in. Re-exported here because it was part of this module's
-# public surface and `from utils.parsing import depathify` appears in the wild.
+# depathify lives in utils.fundamental, importable without the LM stack. Re-exported here to
+# keep `from utils.parsing import depathify` working.
 
 
 # A list item: "- foo", "* foo", "• foo", "1. foo", "1) foo", "1 foo".
@@ -27,9 +26,10 @@ _ABSENT = {"NONE", "N/A", "NA"}
 
 def _is_absent(value: str) -> bool:
     """Whether an extracted item is a "no answer" token or punctuation rather than content.
+    The alphanumeric test catches markdown residue such as a trailing ``**``.
 
-    The alphanumeric test catches markdown residue: a heading written ``**Insights:**``
-    leaves ``**`` trailing the colon, which is formatting, not the model's first item.
+    :return: Whether the item is absent.
+    :rtype: bool
     """
     stripped = value.strip()
     return (not stripped

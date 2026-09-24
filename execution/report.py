@@ -15,7 +15,7 @@ import numpy as np
 from gameboy_worlds.interface import HighLevelAction
 
 from python_scripts import paths
-from utils import load_parameters, log_error, log_info, parse_yes_no, sum_optional
+from utils import load_parameters, log_info, parse_yes_no, sum_optional
 
 
 @dataclass
@@ -109,7 +109,7 @@ class WorldModelDecision:
 
     The call's ``images`` are ``[current screen, *predictions]`` and :attr:`candidates` names
     the predictions in that order, so ``images[1 + i]`` is the prediction for
-    ``candidates[i]``. Without this record that mapping exists only in the prompt text.
+    ``candidates[i]``.
 
     *Similarity* is the cosine between unit-norm observation-encoder embeddings (the space
     the world model predicts in). *Pixel error* is mean absolute error in grey levels, 0-255.
@@ -121,16 +121,15 @@ class WorldModelDecision:
     :param choice: The image number picked, as the prompt numbers them, or ``None`` if the
         reply had no valid ``Choice:``.
     :param predicted_similarity: Per candidate, similarity of its prediction to the screen
-        the chosen action produced. Only the chosen entry is a prediction *of that outcome*;
-        the rest say whether the model told the actions apart.
+        the chosen action produced. Only the chosen entry is a prediction *of that outcome*.
     :param copy_similarity: Similarity of the pre-action screen to the screen that followed —
-        the "nothing changes" baseline a useful prediction has to beat.
+        the "nothing changes" baseline.
     :param predicted_pixel_error: Pixel error of the decoded prediction for the chosen action.
     :param copy_pixel_error: Pixel error of the pre-action screen — the same baseline.
     :param reconstruction_pixel_error: Pixel error of the real next screen after an
         encode→decode round trip: the floor no prediction can beat through this decoder.
-    :param frame_changed: Whether the chosen action changed the screen. On unchanged steps
-        the baseline is perfect by construction, so read the scores split on this.
+    :param frame_changed: Whether the chosen action changed the screen. Read the scores split
+        on this.
     """
 
     candidates: List[str]
@@ -163,8 +162,7 @@ class WorldModelDecision:
     @property
     def chosen_was_best_match(self) -> Optional[bool]:
         """Whether the chosen action's prediction was strictly closer to what happened than
-        every other action's. Strict, so a model predicting the same frame for every action
-        scores ``False`` rather than a free ``True``."""
+        every other action's."""
         if not self.scored:
             return None
         chosen = self.chosen_similarity
@@ -208,9 +206,8 @@ class WorldModelDecision:
 def summarize_world_model(decisions: List[WorldModelDecision]) -> Optional[str]:
     """
     How well the world model predicted, over a run's decisions, or ``None`` if none were
-    scored. Split on whether the screen changed, because an unchanged screen hands the
-    nothing-changes baseline a perfect score and would otherwise swamp the average.
-    """
+    scored. Split on whether the screen changed.
+"""
     scored = [d for d in decisions if d.scored]
     if not scored:
         return None
@@ -244,11 +241,8 @@ class ExecutorVLMCallRecord:
 
     :param tag: Short label identifying the role of this call within the executor's
         logic. The full set in use: ``"action"`` and ``"score"`` (both in
-        :data:`ACTION_TAGS`), plus ``"done_check"`` (:data:`DONE_CHECK_TAG`). No executor
-        emits an auxiliary tag today. The tag says what
-        the call was *for*; :attr:`steps` says what it *did*. Only action-tagged calls
-        are expected to own steps, but the tag is a label, not the mechanism — nothing
-        infers step ownership from it.
+        :data:`ACTION_TAGS`), plus ``"done_check"`` (:data:`DONE_CHECK_TAG`). A label only;
+        nothing infers step ownership from it.
     :type tag: str
     :param images: A list of numpy arrays showing the images given for this inference call
     :type images: List[np.ndarray]
@@ -258,9 +252,7 @@ class ExecutorVLMCallRecord:
     :type response: str
     :param steps: What this call produced, in order — usually empty (auxiliary call) or
         one entry, but several for an executor that commits to a sequence of actions per
-        call. Recorded by the executor as each step is taken, so the association is
-        stored rather than reconstructed, and it survives pickling of the call log on
-        its own.
+        call. Recorded by the executor as each step is taken.
     :type steps: List[StepRecord]
     :param input_tokens: Prompt tokens this call consumed, as reported by the backend.
         ``None`` means the backend did not report it — a different fact from zero.
@@ -268,9 +260,8 @@ class ExecutorVLMCallRecord:
     :param output_tokens: Generated tokens this call produced. ``None`` as above.
     :type output_tokens: Optional[int]
     :param world_model: Set only by the world-model arm: which of :attr:`images` shows which
-        action, what was picked, and how the prediction compared with the outcome.
-        ``None`` on every other call — and on archives written before the field existed,
-        which is why it is a plain default rather than a factory.
+        action, what was picked, and how the prediction compared with the outcome. ``None``
+        on every other call.
     :type world_model: Optional[WorldModelDecision]
     """
 
@@ -315,13 +306,10 @@ class ExecutorReport:
 
     Produced and sealed entirely by :class:`~execution.executors.Executor.__init__`.
 
-    :param task: Natural-language task description given to the executor. Never blank —
-        :meth:`~execution.executors.Executor.__init__` rejects an empty task, partly
-        because :meth:`_save_images` derives a directory name from it.
+    :param task: Natural-language task description given to the executor. Never blank.
     :type task: str
     :param executor_name: ``__class__.__name__`` of the executor that produced this
-        report. Used to key benchmark output directories, so runs of different executors
-        on the same task do not overwrite each other.
+        report. Keys benchmark output directories.
     :type executor_name: str
     :param game: Name of the game the run took place in.
     :type game: str
@@ -330,12 +318,6 @@ class ExecutorReport:
         of policies — built by
         :meth:`~execution.executors.Executor._run_config`. Excludes ``env``, ``task``,
         and ``max_steps``, which are fields of their own.
-
-        It used to be whatever was left in ``**kwargs`` after ``__init__`` bound its named
-        parameters, which was **structurally always empty**: everything a caller passes is
-        named. So this recorded nothing, and every reader of it — notably
-        :meth:`SupervisorReport.__str__`, which prints each leg's hint — silently found
-        nothing to print.
     :type init_kwargs: dict
     :param max_steps: Maximum number of environment steps the executor was
         permitted to take.
@@ -495,14 +477,9 @@ class ExecutorReport:
 
     def _save_images(self) -> None:
         """
-        Write every VLM-call frame to :func:`~python_scripts.paths.executor_frames_dir`.
-
-        Keyed on the model as well as the executor, which the previous path was not: it was
-        ``<results>/benchmark/<game>/<executor>/<task>/`` and this method ``rmtree``s the
-        directory first, so a verbose run would delete the frames of a run of the same
-        executor and task under a different model. The empty-slug guard now lives in the
-        accessor, since it is a property of the path rule rather than of this caller.
-        """
+        Write every VLM-call frame to :func:`~python_scripts.paths.executor_frames_dir`,
+        which is ``rmtree``d first.
+"""
         parameters = load_parameters()
         img_save_path = paths.executor_frames_dir(
             parameters,
@@ -539,6 +516,21 @@ class ExecutorReport:
 
 def _indent(text: str, prefix: str = "      ") -> str:
     return "\n".join(prefix + line for line in text.splitlines())
+
+
+def action_name(record) -> str:
+    """
+    One recorded action's name, falling back to the class name when it cannot be derived.
+
+    :param record: Anything carrying ``action_class`` and ``kwargs``, i.e. an
+        :class:`EnvironmentStepRecord` or an executor action record.
+    :return: The action's display name.
+    :rtype: str
+    """
+    try:
+        return record.action_class.get_action_name(**record.kwargs)
+    except Exception:
+        return record.action_class.__name__
 
 
 def _step_summary(step: StepRecord) -> str:
@@ -621,10 +613,8 @@ class SupervisorReport:
     :param supervisor_name: ``__class__.__name__`` of the supervisor.
     :param game: Name of the game the run took place in.
     :param init_kwargs: The supervisor's own knobs — leg size, attempt caps, replan budget,
-        models — from :meth:`~execution.supervisors.base.Supervisor._run_config`, for
-        reproducing the run. It used to hold the *executor's* kwargs under this name, which
-        meant nothing that defines an arm's behaviour was recorded anywhere in the archive;
-        those are still here, nested under ``executor_kwargs``.
+        models — from :meth:`~execution.supervisors.base.Supervisor._run_config`. The
+        executor's are nested under ``executor_kwargs``.
     :param event_log: Supervisor calls and executor runs, interleaved, in order.
     :param narrative: One short written summary per executor run, in order — what the
         supervisor understood to have happened, from the frames and any text on screen.
@@ -653,8 +643,8 @@ class SupervisorReport:
     def n_invalid(self) -> int:
         """Unparseable executor responses across every leg.
 
-        Summed here rather than at each call site: the plan arm has many legs and every
-        consumer that wanted this total was reimplementing the same sum.
+        :return: The total.
+        :rtype: int
         """
         return sum(len(report.invalid_steps) for report in self.executor_reports)
 

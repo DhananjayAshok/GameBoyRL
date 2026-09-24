@@ -21,8 +21,7 @@ Called by scripts/vlm/build_info.sh (via vlm.py build_info). Use --help for CLI 
 #     merge/round_<r>/<i>.{json,matches.json,meta.json} every merge node, kept as the debug trail
 #     info.json                                     the final document
 #
-# The merge tree is deliberately NOT cleaned up on success: the round-by-round documents are
-# the primary diagnostic for insight drift and match quality (see debug.py info).
+# The merge tree is NOT cleaned up on success — see debug.py info.
 
 import json
 import os
@@ -212,11 +211,11 @@ def extract_insights(trajectory, task, vlm, game, max_new_tokens, n_frames=8, ve
         .replace("[ACTIONS]", _action_summary(high_level_actions))
     )
     if verbose:
-        print(f"EXTRACT prompt:\n{prompt}\n---")
+        log_info(f"EXTRACT prompt:\n{prompt}\n---")
 
     output = vlm.infer(texts=prompt, images=frames, max_new_tokens=max_new_tokens)["output"]
     if verbose:
-        print(f"EXTRACT output:\n{output}\n---")
+        log_info(f"EXTRACT output:\n{output}\n---")
 
     return _parse_extraction(output)
 
@@ -260,9 +259,7 @@ def run_stage_a(task_map, traj_map, out_dir, vlm, game, max_new_tokens, n_frames
     done = {}
     if os.path.exists(insights_path):
         if overwrite:
-            # Rows are appended below, so a stale file would be duplicated rather than
-            # replaced. Truncate here so the function is correct on its own terms, not
-            # only because the CLI happens to have cleared the file first.
+            # Rows are appended below, so a stale file has to be truncated here.
             os.remove(insights_path)
         else:
             n_unusable = 0
@@ -334,9 +331,7 @@ def run_stage_a(task_map, traj_map, out_dir, vlm, game, max_new_tokens, n_frames
                     "init_state": init_state,
                     "task": task,
                     "insights": parsed["insights"],
-                    # A nested object, not rendered text: the row is already JSON, and the
-                    # readers (stage B, debug.py info, InfoSubgoalSupervisor) all want the
-                    # document back rather than a string to re-parse.
+                    # A nested object, not rendered text.
                     "document": doc.to_dict(),
                 }
                 sink.write(json.dumps(row) + "\n")
@@ -367,21 +362,19 @@ def _frame_image(root: str, entry: Entry):
 def fold_section(doc1: InfoDocument, doc2: InfoDocument, section: str, root: str,
                  vlm: VLM, game: str, max_new_tokens: int, verbose: bool) -> list[dict]:
     """
-    Fold doc2's entries of one section into doc1's, in place. Returns the match log.
+    Fold doc2's entries of one section into doc1's, in place. doc1 is the accumulator and is
+    never rewritten wholesale: an unmatched entry is appended verbatim, and the only text a
+    model regenerates is the Insights block of an entry that matched.
 
-    doc1 is the accumulator and is never rewritten wholesale: an unmatched entry is appended
-    verbatim, and the only text a model regenerates is the Insights block of an entry that
-    actually matched. That is what bounds information loss — the fold cannot drop an entry,
-    because no model is ever asked whether to keep one.
-    """
+    :return: The match log.
+    :rtype: list
+"""
     kind = "task" if section == TASK_SECTION else "kind of screen"
     accumulator = doc1.entries(section)
     log = []
 
     def match_block(item: Entry) -> str:
-        # evidence_block() is deliberately insight-free — it is also used by retrieval, where
-        # identity must not be judged on advice. The match call wants both, so it is composed
-        # here rather than by widening evidence_block.
+        # evidence_block() is insight-free; the match call wants both.
         block = item.evidence_block()
         if item.insights:
             block += "\nInsights:\n" + item.insights_block()
@@ -408,10 +401,10 @@ def fold_section(doc1: InfoDocument, doc2: InfoDocument, section: str, root: str
                    if img is not None]
 
         if verbose:
-            print(f"MATCH prompt ({section}):\n{prompt}\n---")
+            log_info(f"MATCH prompt ({section}):\n{prompt}\n---")
         output = vlm.infer(texts=prompt, images=images or None, max_new_tokens=max_new_tokens)["output"]
         if verbose:
-            print(f"MATCH output:\n{output}\n---")
+            log_info(f"MATCH output:\n{output}\n---")
 
         index, reason = _parse_match(output, len(accumulator))
         if index is None:
@@ -430,10 +423,10 @@ def fold_section(doc1: InfoDocument, doc2: InfoDocument, section: str, root: str
             .replace("[INSIGHTS_B]", entry.insights_block())
         )
         if verbose:
-            print(f"COMBINE prompt:\n{combine_prompt}\n---")
+            log_info(f"COMBINE prompt:\n{combine_prompt}\n---")
         combined_out = vlm.infer(texts=combine_prompt, max_new_tokens=max_new_tokens)["output"]
         if verbose:
-            print(f"COMBINE output:\n{combined_out}\n---")
+            log_info(f"COMBINE output:\n{combined_out}\n---")
 
         combined = parse_list(combined_out, "Insights")
         if not combined:
@@ -639,10 +632,8 @@ def build_info_cmd(obj, trajectory_path, n_frames, max_concurrency, stage, overw
     with open(annotation_pkl, "rb") as handle:
         traj_map = {str(k): v for k, v in pickle.load(handle).items()}
 
-    # Provenance and frames_root are stamped onto every leaf here, at the one point that
-    # knows them, rather than reconstructed later from the directory layout. frames_root is
-    # out_dir relative to storage_dir, so a written document carries no machine-specific
-    # path and stays readable from anywhere storage_dir is configured.
+    # frames_root is out_dir relative to storage_dir, so a written document carries no
+    # machine-specific path.
     storage_dir = parameters["storage_dir"]
     frames_root = os.path.relpath(os.path.abspath(out_dir), os.path.abspath(storage_dir))
     provenance = Provenance(

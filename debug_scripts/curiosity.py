@@ -8,19 +8,16 @@ produced by scripts/rl/create_all_traj.sh. Each file is a list of groups; each g
 list of trajectories; each trajectory is the 5-tuple
     (observations[N,144,160,1], actions[N-1], high_level_actions[N-1], rewards[N-1], init_state)
 
-Z-scores are deliberately not reported: they live in <storage>/replay_buffers/..., which
-create_traj.sh deletes once grouping succeeds, so they are absent for any completed run.
-The per-trajectory reward arrays inside the grouped pickles are always present and are
-used instead as the durable curiosity signal.
+Z-scores are not reported: they live in <storage>/replay_buffers/..., which create_traj.sh
+deletes once grouping succeeds. The per-trajectory reward arrays inside the grouped pickles
+are used instead.
 
 Memory
 ------
-These pickles are enormous (deja_vu_1/my_run is ~50 GB across 29 init_states, with a
-single 23 GB file) and pickle has no partial-read mode, so each file is loaded whole, one
-at a time, and freed before the next. Files above --max_gb are skipped and reported as
-such rather than OOMing the machine. Per-init_state statistics are cached to
-summary.json, keyed on (size, mtime), so re-runs are instant and only render what is
-missing.
+These pickles are enormous (~50 GB across 29 init_states for deja_vu_1/my_run, with a single
+23 GB file) and pickle has no partial-read mode, so each file is loaded whole, one at a time,
+and freed before the next. Files above --max_gb are skipped and reported as such. Per-init_state
+statistics are cached to summary.json, keyed on (size, mtime).
 
 Output
 ------
@@ -80,12 +77,12 @@ def _histogram(values, bins=60):
 def _is_trajectory(obj) -> bool:
     """
     True for the ``(observations, actions, high_level_actions, rewards, init_state)`` 5-tuple.
+    Discriminated on the trailing ``init_state`` string, since a group of five trajectories is
+    also length 5.
 
-    Length alone is not enough to identify one: a *group* holding exactly five trajectories
-    is also a length-5 list, and deja_vu_1's ``hit_bottle`` has one. The trailing
-    ``init_state`` string is the reliable discriminator, since a group's fifth element is
-    another trajectory rather than a str.
-    """
+    :return: Whether *value* is a trajectory.
+    :rtype: bool
+"""
     return (
         isinstance(obj, (tuple, list))
         and len(obj) == 5
@@ -97,11 +94,8 @@ def _is_trajectory(obj) -> bool:
 
 def classify(payload):
     """
-    Work out what a ``grouped_*_high_reward_trajectories.pkl`` actually contains.
-
-    Not every such file holds trajectories. In deja_vu_1/my_run the ``all`` init_state's
-    file is a 4 KB list of 28 *paths* to the other init_states' pickles — an index, not
-    data — so shape must be checked rather than assumed.
+    Work out what a ``grouped_*_high_reward_trajectories.pkl`` actually contains. Not every
+    such file holds trajectories; some are an index of paths to others.
 
     :return: ``("groups", list[list[traj]])``, ``("trajectories", list[traj])``
         (a flat file, treated as one group), ``("manifest", list[str])``, or
@@ -128,7 +122,7 @@ def _summarise(groups) -> dict:
     malformed = 0
     for group in groups:
         for trajectory in group:
-            # Skip rather than crash: one odd entry must not lose a whole init_state.
+            # One odd entry must not lose a whole init_state.
             if not _is_trajectory(trajectory):
                 malformed += 1
                 continue
@@ -499,4 +493,3 @@ def debug_curiosity(obj, init_state, n_frames, max_groups, max_traj_per_group, m
 
     report_path = md.write_report(os.path.join(report_dir, "report.md"), blocks)
     log_info(f"[curiosity] wrote {report_path}")
-    print(report_path)

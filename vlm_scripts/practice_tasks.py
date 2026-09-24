@@ -19,10 +19,8 @@ between attempts), so all of them are flattened into one job pool:
   5. On failure, derive a hint, replay the perturbation, and retry once.
   6. Save the executor's vlm_call_log to a per-episode pickle.
 
-Guidance and goal_condition go to different consumers on purpose: guidance is advice
-to the actor and rides the executor's hint channel, while goal_condition is the
-success criterion and reaches only the judge. Handing the actor the exact thing it is
-graded against would be a different experiment.
+Guidance and goal_condition go to different consumers: guidance rides the executor's hint
+channel, goal_condition reaches only the judge.
 
 Jobs run on a thread pool (--max_concurrency). Forced to 1 worker when
 --verbose (so prints/breakpoints stay sequential) or when the VLM backend is
@@ -50,15 +48,12 @@ Directory: same directory as guidance_path, under a "practice/" subfolder.
     Columns: group_idx, attempt, task_string, success, safe_success_point, seed, the
     provenance fields (used_retry, derived_hint, guidance, goal_condition,
     judge_description, judge_reasoning), and the run diagnostics the checker
-    reports (termination_reason, n_env_steps) — which separate a failure the
-    judge ruled against from one that merely exhausted its step budget.
-    Rows are sorted by (group_idx, attempt) order from guidance_path,
-    regardless of completion order.
+    reports (termination_reason, n_env_steps). Rows are sorted by (group_idx, attempt)
+    order from guidance_path, regardless of completion order.
 
   practice/config.json
-    The settings this practice dir was produced under, so it is self-describing
-    after the fact. Includes n_attempts_requested vs n_attempts_effective, which
-    differ when max_total_practice_runs truncated the run.
+    The settings this practice dir was produced under. Includes n_attempts_requested vs
+    n_attempts_effective, which differ when max_total_practice_runs truncated the run.
 
 Checkpointing
 -------------
@@ -104,16 +99,11 @@ def _format_guidance(guidance_dict: dict) -> str:
 def _episode_seed(base_seed: int, group_idx: str, attempt: int) -> int:
     """Deterministic per-episode seed, laid out as decimal place values.
 
-    Two id shapes reach practice: the curiosity leg's plain integer (from enumerate
-    over trajectory groups) and the zeroshot leg's "{line_number}_{task_index}".
-    Both occupy the same place values, so each leg is injective on its own given
-    task_index < 100 and attempt < 100 — bounds that hold for every run the proposal
-    and cap logic can currently produce. The legs are NOT disjoint from each other
-    ("7" and "7_0" both map to base_seed + 70000), which costs nothing because a
-    practice run reads one guidance file and so sees only one id shape.
+    Injective per leg given task_index < 100 and attempt < 100. Never ``hash()``, which is
+    salted per process.
 
-    Not hash(): string hashing is salted per process, so that made the same episode
-    draw a different perturbation on every invocation, including a checkpoint resume.
+    :return: The seed.
+    :rtype: int
     """
     group_idx = str(group_idx)
     if "_" in group_idx:
@@ -192,9 +182,9 @@ def _practice_episode(
 
     try:
         if verbose:
-            print(f"Group [{group_idx}] attempt {attempt} task: {task_str}")
+            log_info(f"Group [{group_idx}] attempt {attempt} task: {task_str}", parameters)
             if guidance_str:
-                print(f"  Guidance: {guidance_str}")
+                log_info(f"  Guidance: {guidance_str}", parameters)
 
         seed = _episode_seed(base_seed, group_idx, attempt)
         env.reset(seed=seed)
@@ -204,9 +194,6 @@ def _practice_episode(
             env.step(action)
 
         def _make_supervisor(hint):
-            # The guidance rides the hint channel: it is advice to the actor, and hint is
-            # the only route into the executor's prompt. goal_condition is passed
-            # separately because it reaches the judge instead.
             return AttemptCheckerSupervisor(
                 task=task_str,
                 executor_class=executor_class,
@@ -232,21 +219,14 @@ def _practice_episode(
         failed = not result["success"]
         derived_hint = ""
         if failed:
-            # evaluate() returns {"report": SupervisorReport, ...verdict}; the steps live on
-            # the report's executor legs rather than being copied into the verdict dict.
             env_steps = _report_env_steps(result["report"])
-            # derive_critique_hint returns (hint, input_tokens, output_tokens). The counts
-            # are dropped here: this script does not account for tokens, and binding the
-            # tuple to derived_hint would f-string a tuple repr into the retry's prompt.
+            # (hint, input_tokens, output_tokens); this script does not account for tokens.
             derived_hint, _, _ = derive_critique_hint(
                 env_steps, task_str, game, critique_vlm, max_new_tokens
             )
             hint_str = f"{guidance_str}\nSpecific hint: {derived_hint}" if guidance_str else f"Specific hint: {derived_hint}"
-            # Rebuild rather than assigning supervisor._hint: Supervisor copies hint into
-            # _executor_kwargs at construction time and call_executor splats that frozen
-            # dict into every executor, so a later attribute write never reaches the
-            # executor's prompt. A fresh supervisor is required anyway — evaluate() refuses
-            # to run twice on one instance, since the report accumulates.
+            # A fresh supervisor: evaluate() refuses to run twice on one instance, and the
+            # hint is frozen into _executor_kwargs at construction time.
             supervisor = _make_supervisor(hint_str)
             supervisor._env.reset()
             for action in random_actions:
@@ -254,11 +234,9 @@ def _practice_episode(
             result = supervisor.evaluate()
 
         if verbose:
-            print(f"  Attempt {attempt}: {'success' if result['success'] else 'failure'} "
-                  f"| {result.get('description', '')}")
-            # show() is on ExecutorReport, not SupervisorReport; the checker stashes the
-            # executor's own report as last_report in process_executor_return.
-            print(supervisor.last_report.show())
+            log_info(f"  Attempt {attempt}: {'success' if result['success'] else 'failure'} "
+                     f"| {result.get('description', '')}", parameters)
+            log_info(supervisor.last_report.show(), parameters)
             breakpoint()
 
         row = {
@@ -267,15 +245,8 @@ def _practice_episode(
             "task_string": task_str,
             "success": result["success"],
             "safe_success_point": result.get("safe_success_point"),
-            # Stored rather than re-derived so _episode_seed stays a changeable
-            # implementation detail: a later scheme cannot orphan existing dirs.
             "seed": seed,
-            # Everything below describes *how* this episode was produced. Without it the
-            # retained data is indistinguishable from an unaided run: used_retry says
-            # whether the kept episode is the first draw or the hint-carried second one,
-            # derived_hint is the failure-specific hint the executor actually saw on that
-            # retry, and the judge's own words are the only record of why it ruled as it
-            # did. All of these were previously computed and then thrown away.
+            # Everything below describes *how* this episode was produced.
             "used_retry": bool(failed),
             "derived_hint": derived_hint,
             "guidance": guidance_str or "",
@@ -385,9 +356,8 @@ def practice_tasks_cmd(
     max_new_tokens = obj["max_new_tokens"]
 
     executor_class = AVAILABLE_EXECUTORS[executor_name]
-    # Also the critique VLM handed to each episode for derive_critique_hint, which is a
-    # plain function rather than a supervisor method and so takes a VLM directly. One
-    # instance is shared: VLM wraps a stateless client, and this mirrors attempt_tasks.
+    # Also the critique VLM handed to each episode for derive_critique_hint. One shared
+    # instance: VLM wraps a stateless client.
     vlm = VLM(model_name, vlm_kind)
 
     if not os.path.exists(guidance_path):
@@ -437,16 +407,11 @@ def practice_tasks_cmd(
     jobs = [j for j in all_jobs if j not in done]
     log_info(f"{len(done)}/{len(all_jobs)} episodes already done — running {len(jobs)}.", parameters)
 
-    # Each (group_idx, attempt) episode owns its own env, so they're independent
-    # and can run concurrently. --verbose runs interleaved print/breakpoint
-    # debugging and HuggingFaceModel isn't safe for concurrent generate() calls —
-    # both fall back to max_workers=1, which processes jobs one at a time in
-    # submission order (i.e. identical to a sequential loop).
+    # Each (group_idx, attempt) episode owns its own env, so they can run concurrently.
+    # --verbose and HuggingFaceModel both fall back to one worker.
     effective_workers = 1 if (verbose or isinstance(vlm._vlm, HuggingFaceModel)) else max_concurrency
 
-    # Written before the run rather than after, so a killed or crashed run still leaves a
-    # dir that says what it was trying to do. Rewritten on every invocation, including a
-    # checkpoint resume, so it always reflects the settings the surviving episodes ran under.
+    # Written before the run, and rewritten on every invocation including a resume.
     config = {
         "guidance_path": os.path.abspath(guidance_path),
         "game": game,

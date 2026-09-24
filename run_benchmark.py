@@ -10,28 +10,16 @@ Five arms, one group, each adding one capability to the one before it::
     run_benchmark.py --game X info_subgoal_retrieval    planned from a distilled document
 
 The subcommand word IS the supervisor's registry key (execution.registry.AVAILABLE_SUPERVISORS)
-and the CSV stem, with the one exception that the control arm's key is ``dummy``. The two
-info arms are separate commands rather than one command with a --mode flag, because they are
-separate experiments with different inputs: --info_docs is required by one and rejected by
-the other, which a shared command could not express.
+and the CSV stem, with the one exception that the control arm's key is ``dummy``.
 
 Called by scripts/benchmark/run_benchmark.sh.
 
-There used to be an ``info`` arm, which spent retrieved knowledge on a single hint written
-once at the opening frame. It has been retired along with ``InfoHintSupervisor``, and its
-absence is why knowledge is only available to an arm that plans: a document is spent
-writing a plan, and without one there is nothing to spend it on.
-
 Options shared by every arm live on the group and reach the subcommands through ctx.obj;
-each arm declares only what is its own. That is what stops --max_replans being silently
-accepted by the baseline, or --info_docs by an arm that has no plan to spend it on, which a
-single flat command with a --supervisor flag could not prevent. Group options must precede
-the subcommand word.
+each arm declares only what is its own. Group options must precede the subcommand word.
 
-Note for anyone resuming an old run: every arm's CSV carries a trailing session_dirs column
-and no n_resets column, so CSVs written before this package cannot be resumed.
-``load_checkpoint`` refuses them with an explanatory error rather than a pandas shape
-error; the fix is --regenerate, or moving the old file aside.
+Every arm's CSV carries a trailing session_dirs column and no n_resets column, so CSVs
+written before this package cannot be resumed — ``load_checkpoint`` refuses them. The fix is
+--regenerate, or moving the old file aside.
 """
 
 import click
@@ -57,18 +45,15 @@ def _absent(value) -> bool:
 
 def _resolve_executor(executor: str, world_model_run_name, world_model_game=None,
                       game: str = None):
-    """The executor class this run plays with.
+    """The executor class this run plays with, resolved before any emulator starts.
 
-    ``world_model`` names a family, not an arm: the checkpoint is part of the arm's identity,
-    so it resolves to a class named ``world_model_<run_name>`` — or
-    ``world_model_<source_game>_<run_name>`` when the checkpoint is borrowed from another
-    game. Every other key is already a class named after itself. Either way the class name
-    is what the CSV, the session directory and the archived report are keyed on.
+    ``world_model`` names a family, not an arm: it resolves to ``world_model_<run_name>``, or
+    ``world_model_<source_game>_<run_name>`` for a borrowed checkpoint. Every other key is
+    already a class named after itself. The class name is what the CSV, the session directory
+    and the archived report are keyed on.
 
-    A source game equal to ``game`` is the game's own checkpoint and is named as such, so
-    spelling it out cannot split one experiment across two CSVs.
-
-    Checked here, before any emulator starts, rather than when the first executor is built.
+    :return: The executor class.
+    :rtype: type
     """
     run_name = None if _absent(world_model_run_name) else world_model_run_name
     source_game = None if _absent(world_model_game) else world_model_game
@@ -164,14 +149,11 @@ def main(ctx, game, controller_variant, executor, executor_vlm_model, executor_v
         executor_class=executor_class,
         executor_vlm_model=executor_vlm_model,
         executor_vlm_kind=executor_vlm_kind,
-        # Falls back to the executor's, which is now guaranteed to be a real model rather
-        # than None. Resolved here rather than in each arm so the two arms cannot disagree
-        # about what "unset" means.
+        # Falls back to the executor's. Resolved once here, not per arm.
         supervisor_vlm_model=supervisor_vlm_model or executor_vlm_model,
         supervisor_vlm_kind=supervisor_vlm_kind or executor_vlm_kind,
         supervisor_max_new_tokens=supervisor_max_new_tokens,
-        # Names the CSV and the emulator session directory. Derived once here so both arms
-        # agree on it — they write beside each other and a mismatch would be silent.
+        # Names the CSV and the emulator session directory. Derived once here, not per arm.
         model_save_name=model_save_name(executor_vlm_model),
         save_video=save_video,
         max_steps=max_steps,

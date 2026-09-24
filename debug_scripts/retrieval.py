@@ -207,4 +207,3 @@ def debug_retrieval(obj, csv_path, label, n_examples):
     stem = os.path.splitext(os.path.basename(csv_path))[0]
     path = md.write_report(os.path.join(report_dir, f"{stem}.md"), blocks)
     log_info(f"[retrieval] wrote {path}")
-    print(path)

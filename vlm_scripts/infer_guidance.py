@@ -17,7 +17,6 @@ import os
 import pickle
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import click
-import numpy as np
 from tqdm import tqdm
 
 from utils import log_info, log_warn, log_error, VLM, parse_key_value, HuggingFaceModel
@@ -132,7 +131,7 @@ def infer_guidance_for_trajectory(
         )
 
         if verbose:
-            print(f"SLICE prompt (frames {start}-{end - 1} / {total}):\n{prompt}\n---")
+            log_info(f"SLICE prompt (frames {start}-{end - 1} / {total}):\n{prompt}\n---")
 
         slice_ranges.append((start, end))
         slice_prompts.append(prompt)
@@ -143,7 +142,7 @@ def infer_guidance_for_trajectory(
         outputs = vlm.infer(texts=slice_prompts, images=slice_images, max_new_tokens=max_new_tokens)["output"]
         for (start, end), output in zip(slice_ranges, outputs):
             if verbose:
-                print(f"SLICE output:\n{output}\n---")
+                log_info(f"SLICE output:\n{output}\n---")
 
             parsed = _parse_guidance(output)
             if parsed is None:
@@ -167,12 +166,12 @@ def infer_guidance_for_trajectory(
     )
 
     if verbose:
-        print(f"CONSOLIDATE prompt:\n{consolidate_prompt}\n---")
+        log_info(f"CONSOLIDATE prompt:\n{consolidate_prompt}\n---")
 
     output = vlm.infer(texts=consolidate_prompt, max_new_tokens=max_new_tokens)["output"]
 
     if verbose:
-        print(f"CONSOLIDATE output:\n{output}\n---")
+        log_info(f"CONSOLIDATE output:\n{output}\n---")
 
     parsed = _parse_guidance(output)
     if parsed is None:

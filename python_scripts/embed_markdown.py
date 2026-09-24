@@ -3,31 +3,24 @@ Inline a markdown report's local images and videos into ONE standalone HTML file
 
     python python_funcs.py embed_markdown <report.md> [--out report.html] [--tasks a,b]
 
-Why this exists
----------------
 The debug reports point at frames and videos on ``/project2`` through symlinks in the report
-directory. That renders locally, but the markdown is not portable: move the .md anywhere and
-every image is a dead link. This walks the same links, base64s the bytes into ``data:`` URIs,
-and emits a single file that renders anywhere with no filesystem and no network.
+directory, so the markdown is not portable. This walks the same links, base64s the bytes into
+``data:`` URIs, and emits a single file that renders anywhere with no filesystem and no
+network.
 
 Videos are transcoded to H.264 on the way in
 --------------------------------------------
-The emulator records with OpenCV's ``mp4v`` fourcc (see ``VideoWriter`` in
-``gameboy_worlds/emulation/emulator.py``), which is MPEG-4 Part 2. Desktop players open it
-fine; **no browser will decode it**, so an embedded ``<video>`` shows controls and refuses to
-play. Each clip is therefore re-encoded to H.264 / yuv420p before embedding — the pixel format
-matters as much as the codec, since browsers need 4:2:0 chroma.
+The emulator records with OpenCV's ``mp4v`` fourcc, which is MPEG-4 Part 2 and which **no
+browser will decode**. Each clip is re-encoded to H.264 / yuv420p before embedding; browsers
+need the 4:2:0 chroma as much as the codec.
 
 ffmpeg comes from ``imageio_ffmpeg``'s bundled binary, so nothing has to be on PATH. Without
-it the original bytes are embedded and a warning says the clip will not play, rather than the
-export failing outright.
+it the original bytes are embedded and a warning says the clip will not play.
 
-Frames are 160x144, so clips are upscaled with nearest-neighbour (``--video-scale``) to be
-watchable without blurring Game Boy pixels into mush.
+Frames are 160x144, so clips are upscaled with nearest-neighbour (``--video-scale``).
 
-A full 50-episode report is ~13 MB: fine as a download, slow as a web page. Pass ``--tasks``
-to cut it to the episodes worth looking at. Targets that are not local files (http, mailto,
-anchors) are left exactly as they are.
+A full 50-episode report is ~13 MB; pass ``--tasks`` to cut it down. Targets that are not
+local files (http, mailto, anchors) are left exactly as they are.
 """
 
 import base64
@@ -36,7 +29,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 
 import click
