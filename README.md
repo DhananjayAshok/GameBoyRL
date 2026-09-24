@@ -42,8 +42,8 @@ This repository established two things:
 ### 1. Clone
 
 ```bash
-git clone https://github.com/DhananjayAshok/GameBoyRL
-cd GameBoyRL
+git clone https://github.com/DhananjayAshok/GameBoyWorlds-Benchmark
+cd GameBoyWorlds-Benchmark
 git submodule update --init --recursive GameBoyWorlds cleanrl
 ```
 
