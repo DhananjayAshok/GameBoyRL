@@ -391,6 +391,54 @@ def strategist_dir(parameters=None, *, game: str, name: str) -> str:
     return os.path.join(storage, "playthrough_artifacts", game, "strategist", segment)
 
 
+def strategist_sessions_root(*, game: str) -> str:
+    """``<GameBoyWorlds storage>/sessions/<game>/strategist`` — what a provenance
+    ``session_dir`` is relative to.
+
+    :return: The root every strategist session directory for this game sits under.
+    :rtype: str
+    """
+    return os.path.join(sessions_dir(game=game), "strategist")
+
+
+def strategist_session_rel(path: str, *, game: str, parameters=None) -> str:
+    """An absolute strategist session directory, cut down to what provenance stores:
+    ``<name>/<stamp>/<n>_<hash>``.
+
+    A prefix check and cut rather than :func:`os.path.relpath`, which would emit a ``../..``
+    chain for a path outside the root instead of failing. The trailing separator matters:
+    without it a sibling like ``strategist_old/`` would pass the check.
+
+    :return: The path relative to :func:`strategist_sessions_root`.
+    :rtype: str
+    """
+    root = strategist_sessions_root(game=game) + os.sep
+    if not path.startswith(root):
+        log_error(f"Session directory {path!r} is not under {root!r}, so it cannot be "
+                  f"recorded relative to it.", parameters)
+    return path[len(root):]
+
+
+def strategist_session_abs(value: str, *, game: str) -> str:
+    """Inverse of :func:`strategist_session_rel`. Tolerates a legacy absolute ``value``,
+    which :func:`os.path.join` returns unchanged.
+
+    :return: The absolute session directory.
+    :rtype: str
+    """
+    return os.path.join(strategist_sessions_root(game=game), value)
+
+
+def strategist_video(value: str, *, game: str) -> Optional[str]:
+    """The playthrough mp4 for a provenance ``session_dir``.
+
+    :return: Path to ``videos/0.mp4``, or ``None`` when the run saved no video.
+    :rtype: Optional[str]
+    """
+    path = os.path.join(strategist_session_abs(value, game=game), "videos", "0.mp4")
+    return path if os.path.exists(path) else None
+
+
 # ---------------------------------------------------------------------------
 # Benchmark
 # ---------------------------------------------------------------------------

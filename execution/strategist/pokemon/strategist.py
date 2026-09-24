@@ -30,13 +30,36 @@ from execution.strategist.pokemon.location import LocationStore, Place, follow_t
 from execution.strategist.pokemon.notepad import ThoughtNotepad
 from execution.strategist.report import (REPORT_DETAILS, EpisodeArchive, EpisodeRecord, StrategistReport,
                                          StrategistVLMCallRecord, save_episode_report, trim_episode)
-from python_scripts.paths import strategist_dir
+from python_scripts.paths import strategist_dir, strategist_session_rel
 from utils import VLM, load_parameters, log_error, log_info, log_warn
 from utils.lm_inference import clean_value, parse_key_value
 from utils.parsing import parse_list
 
 #: One file per process, stamped like the run it records, so a resumed run writes its own.
 PROVENANCE_PREFIX = "provenance"
+
+# One run writes to three trees, and only the first is addressable from (game, name) alone.
+# Recovering the other two, given a provenance_<stamp>.json payload:
+#
+#   1. State, under this project's storage:
+#        paths.strategist_dir(game=payload["game"], name=payload["init_kwargs"]["name"])
+#      holds episode_<n>/*.pkl, episode_<n>/report.pkl.gz and the provenance files. Also
+#      recorded verbatim as payload["init_kwargs"]["storage"].
+#
+#   2. Video, under GameBoyWorlds' storage. payload["session_dir"] is relative to
+#      paths.strategist_sessions_root(game=...) and resolves with:
+#        paths.strategist_session_abs(payload["session_dir"], game=payload["game"])
+#        paths.strategist_video(payload["session_dir"], game=payload["game"])
+#      The second returns None when the run saved no video. Do NOT rebuild this path from
+#      the stamp in the provenance filename; see _resolve_session_dir for why it differs.
+#      A payload["session_dir"] of None means the run predates this field, or the emulator
+#      exposed no session path -- glob sessions/<game>/strategist/<name>/*/*/videos/0.mp4.
+#
+#   3. Emulator save states, under GameBoyWorlds' rom_data, NOT under either of the above:
+#        <gbw storage>/rom_data/<series>/<game>/states/custom_<treat_name(name)><n>.state
+#      one per saved episode, named by _emulator_state_name. There is no accessor for the
+#      states directory on this side; GameBoyWorlds builds it as
+#      gbw_parameters[f"{game}_rom_data_path"] + "/states/".
 
 
 def treat_name(name: str) -> str:
@@ -150,6 +173,7 @@ class PokemonStrategist:
         self._ran = False
 
         self._started_at = datetime.now()
+        self._session_dir = self._resolve_session_dir()
         os.makedirs(self._dir, exist_ok=True)
 
         self.report = StrategistReport(
@@ -179,11 +203,34 @@ class PokemonStrategist:
             "supervisor_kwargs": dict(self._supervisor_kwargs),
         }
 
+    def _resolve_session_dir(self) -> Optional[str]:
+        """The emulator's session directory, cut to ``<name>/<stamp>/<n>_<hash>``.
+
+        Read off the emulator rather than rebuilt from the naming convention: the stamp in
+        the session path is minted by ``run_strategist.py`` before the emulator boots, while
+        this class's own ``_started_at`` is minted after, so the two disagree whenever
+        construction crosses a second boundary. Recording what the emulator actually used is
+        the only reliable link between the two halves of a run.
+
+        :return: The relative session directory, or ``None`` if the emulator does not expose
+            one (``Environment._emulator`` having moved, or a session path outside the
+            strategist root).
+        :rtype: Optional[str]
+        """
+        emulator = getattr(self._env, "_emulator", None)
+        session_path = getattr(emulator, "session_path", None) if emulator is not None else None
+        if not session_path:
+            log_warn("The environment exposed no session_path, so this run's provenance "
+                     "cannot record where its video was written.", self._parameters)
+            return None
+        return strategist_session_rel(session_path, game=self._game, parameters=self._parameters)
+
     def _write_provenance(self) -> str:
         payload = {
             "started_at": self._started_at.isoformat(timespec="seconds"),
             "game": self._game,
             "strategist": self.__class__.__name__,
+            "session_dir": self._session_dir,
             "init_kwargs": self._run_config(),
         }
         stamp = self._started_at.strftime("%Y%m%d_%H%M%S")
@@ -349,7 +396,15 @@ class PokemonStrategist:
 
     @staticmethod
     def _emulator_state_name(run_name: str, episode_number: int) -> str:
-        return f"{treat_name(run_name)}{episode_number}"
+        """``strategist<name><n>``, saved by the emulator as ``custom_strategist<name><n>.state``.
+
+        The ``strategist`` prefix is what makes these separable from the states
+        ``Environment._simulate`` writes, which are named for a uuid4 hex and deleted in a
+        ``finally`` that a killed job never reaches. A uuid hex cannot begin with
+        ``strategist``, so the sync set's ``custom_strategist*`` pattern cannot pick one up.
+        Must stay alphanumeric: ``save_custom_state`` rejects anything else.
+        """
+        return f"strategist{treat_name(run_name)}{episode_number}"
 
     # ------------------------------------------------------------------
     # The loop

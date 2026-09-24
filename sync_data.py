@@ -16,6 +16,8 @@ import os
 import shlex
 import sys
 
+from python_scripts import paths
+
 loaded_parameters = load_parameters()
 
 GLOBAL_IGNORE_PATTERNS = [
@@ -45,6 +47,42 @@ ALLOWED_SETS = {
             "benchmark/*subgoal_single_visual_low_level*.csv",
         ],
         "ignore_patterns": ["*info_subgoal_parametric_*"],
+    },
+    # The three trees one strategist playthrough writes to. Kept as separate sets because
+    # they sit under two different storage roots and differ by orders of magnitude in size.
+    "strategist": {
+        "root": "storage_dir",
+        "subdir": "playthrough_artifacts",
+        "allow_patterns": [
+            "*/strategist/*/episode_*/*.pkl",
+            "*/strategist/*/episode_*/report.pkl.gz",
+            "*/strategist/*/provenance_*.json",
+        ],
+        # The */strategist/* prefix already excludes <game>/perception/tile_recognizer/,
+        # the shared tile database, which is not a per-playthrough artifact.
+        "ignore_patterns": [],
+    },
+    "strategist_videos": {
+        "root": "gameboy_worlds_storage_dir",
+        "subdir": "sessions",
+        "allow_patterns": ["*/strategist/*/videos/*.mp4"],
+        # fnmatch's * crosses /, so the allow pattern means "a strategist segment somewhere",
+        # not "at depth 1". A benchmark task whose mission depathifies to exactly
+        # "strategist" would otherwise match. Depth cannot be pinned without naming every
+        # game, so the other run kinds are excluded by name instead.
+        "ignore_patterns": ["*/benchmark_*/*", "*/tmp_sessions/*", "*/random_sweep/*"],
+    },
+    # Rooted inside rom_data, which also holds the copyrighted ROMs and the 1200+ handmade
+    # benchmark start states. The allow pattern takes only states the strategist itself
+    # wrote -- custom_ is Environment.save_custom_state's prefix, strategist is
+    # PokemonStrategist._emulator_state_name's -- so the uuid-named temporaries that
+    # Environment._simulate leaves behind when a job is killed stay out. The ignores restate
+    # the ROM exclusion locally so that widening the allow list cannot leak one.
+    "strategist_states": {
+        "root": "gameboy_worlds_storage_dir",
+        "subdir": "rom_data",
+        "allow_patterns": ["*/states/custom_strategist*.state"],
+        "ignore_patterns": ["*.gb", "*.gbc", "*.gba", "*.sav", "*.ips", "*.bps"],
     },
 }
 
@@ -244,6 +282,12 @@ def main(ctx, **input_parameters):
         else:
             log_error("huggingface_repo_name must be specified either in the config file or as a command line argument.", loaded_parameters)
     compute_secondary_parameters(loaded_parameters)
+    # A distinct key, never storage_dir: the strategist's videos and save states live on the
+    # GameBoyWorlds submodule's storage, its state and reports on this project's, and a set
+    # rooted at one must not silently resolve against the other. Injected here rather than in
+    # compute_secondary_parameters so that every script loading parameters does not end up
+    # importing gameboy_worlds and running its directory-creating config loader.
+    loaded_parameters["gameboy_worlds_storage_dir"] = paths.gameboy_worlds_storage()
     api = HfApi()
     loaded_parameters["api"] = api
     ctx.obj = loaded_parameters
