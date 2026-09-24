@@ -59,7 +59,7 @@ SHORT = {
     "pokemon_red": "R", "pokemon_crystal": "C",
     "sword_of_hope_1": "1", "sword_of_hope_2": "2",
 }
-SEQ_BLUE = ["#f4f8fd", "#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"]
+DIV_RED_BLUE = ["#7a1414", "#b52a2a", "#e34948", "#f2a19f", "#f0efec", "#9ec5f4", "#3987e5", "#256abf", "#0d366b"]
 
 CAT_CANON = {"dialog": "dialogue", "interact": "interaction", "inspect": "interaction", "take": "interaction",
              "use": "interaction", "navigaton": "navigation", "catch_pokemon": "combat", "inventory": "menu"}
@@ -99,6 +99,10 @@ CONTAMINATION_GAMES = [
     ("Pokémon Crystal", "C", "Crystal", ["#9ff0ff", "#2aa7d6", "#1b5fa8"]),
     ("Pokémon Brown", "B", "Brown", ["#c98b52", "#7a4a22"]),
     ("Pokémon Prism", "P", "Prism", ["#c89bff", "#8a4fe0", "#56209e"]),
+]
+CONTAMINATION_GAME_GROUPS = [
+    ("Classic", ["Pokémon Red", "Pokémon Crystal"]),
+    ("GameBoyWorlds-Playthrough", ["Pokémon Brown", "Pokémon Prism"]),
 ]
 
 FAILURE_MODES = [
@@ -355,9 +359,15 @@ class ImageHandler(HandlerBase):
 
 def logo_legend(fig, badges, keys, labels, **kw):
     handles = [Patch(label=l) for l in labels]
-    handler_map = {h: ImageHandler(badges[k]) for h, k in zip(handles, keys)}
-    return fig.legend(handles=handles, handler_map=handler_map, handlelength=1.6, frameon=True, fancybox=False,
-                      edgecolor="#888", borderpad=0.6, handletextpad=0.3, **kw)
+    handler_map = {h: ImageHandler(badges[k]) for h, k in zip(handles, keys) if k is not None}
+    leg = fig.legend(handles=handles, handler_map=handler_map, handlelength=1.6, frameon=True, fancybox=False,
+                     edgecolor="#888", borderpad=0.6, handletextpad=0.3, **kw)
+    rows = [r for col in leg._legend_handle_box.get_children() for r in col.get_children()]
+    for row, k, text in zip(rows, keys, leg.get_texts()):
+        if k is None:
+            row._children = row._children[1:]
+            text.set_fontweight("bold")
+    return leg
 
 
 def img_at(ax, arr, xy, zoom, xycoords="data", align=(0.5, 0.5)):
@@ -417,7 +427,7 @@ def frontier_heatmap():
     series_badges = {p: make_badge(SERIES_COLOUR, logo, frac=0.8) for p, _, logo in SERIES}
     plt.rcParams.update({"font.size": 30})
     rates = data.groupby(["model", "game"])["success"].mean().unstack() * 100
-    cmap = LinearSegmentedColormap.from_list("seq_blue", SEQ_BLUE[::-1])
+    cmap = LinearSegmentedColormap.from_list("div_red_blue", DIV_RED_BLUE)
     norm = Normalize(0, 100)
 
     xs, x, last = [], 0.0, None
@@ -433,7 +443,7 @@ def frontier_heatmap():
         for xc, g in zip(xs, GAMES):
             v = rates.loc[k, g]
             ax.add_patch(Rectangle((xc, y), 1, 1, facecolor=cmap(norm(v)), edgecolor="white", lw=3))
-            ax.text(xc + 0.5, y + 0.5, f"{v:.0f}", ha="center", va="center", color="white" if v < 50 else "#1a1a1a")
+            ax.text(xc + 0.5, y + 0.5, f"{v:.0f}", ha="center", va="center", fontsize=33, color="white" if abs(v - 50) > 22 else "#1a1a1a")
         img_at(ax, badges[k], (-0.006, y + 0.5), zoom=0.19, xycoords=("axes fraction", "data"), align=(1, 0.5))
 
     ax.set_xlim(0, x)
@@ -452,7 +462,7 @@ def frontier_heatmap():
         s.set_visible(False)
 
     logo_legend(fig, series_badges, [p for p, *_ in SERIES], [n for _, n, _ in SERIES], bbox_transform=ax.transAxes,
-                loc="upper center", bbox_to_anchor=(0.5, -0.33), ncol=3, fontsize=40, columnspacing=1.2)
+                loc="upper center", bbox_to_anchor=(0.5, -0.33), ncol=3, fontsize=38, columnspacing=1.2)
     save(fig, "frontier_heatmap.png")
     log_info(rates.reindex(index=order, columns=GAMES).round(1).to_string(), PARAMETERS)
 
@@ -667,10 +677,15 @@ def self_improvement_gain():
 
     def box(cx, v, s, text):
         w = len(text) * vf * 0.55 / 72 + 0.06
+        if s == "right":
+            x0 = cx + dot_in / 2 + 0.04
+            return x0, x0 + w, v - label_pp / 2, v + label_pp / 2
         y0 = v + off if s == "above" else v - off - label_pp
         return cx - w / 2, cx + w / 2, y0, y0 + label_pp
 
-    def clashes(b, own):
+    def clashes(b, own, zero=True):
+        if zero and b[2] < 0 < b[3] and own[1] != 0:
+            return True
         if any(b[0] < p[1] and p[0] < b[1] and b[2] < p[3] and p[2] < b[3] for p in placed):
             return True
         rx, ry = dot_in / 2, dot_pp / 2
@@ -682,12 +697,14 @@ def self_improvement_gain():
         text = fmt_gain(v)
         pref = "above" if v >= 0 else "below"
         other = "below" if pref == "above" else "above"
-        s = next((s for s in (pref, other) if not clashes(box(cx, v, s, text), d)), pref)
-        placed.append(box(cx, v, s, text))
+        s = next((s for s in (pref, other, "right") if not clashes(box(cx, v, s, text), d)), None) or \
+            next((s for s in (pref, other) if not clashes(box(cx, v, s, text), d, zero=False)), pref)
+        b = box(cx, v, s, text)
+        placed.append(b)
         img_at(ax, method_badges[k], (cx, v), zoom=dot_in * 72 / 256)
-        ax.text(cx, v + off if s == "above" else v - off, text, ha="center", va="bottom" if s == "above" else "top",
-                fontsize=vf, fontweight="bold", color="#1a1a1a", zorder=5,
-                bbox={"boxstyle": "square,pad=0.05", "facecolor": "white", "edgecolor": "none"})
+        tx, ty, ha, va = {"above": (cx, v + off, "center", "bottom"), "below": (cx, v - off, "center", "top"),
+                          "right": (b[0], v, "left", "center")}[s]
+        ax.text(tx, ty, text, ha=ha, va=va, fontsize=vf, fontweight="bold", color="#1a1a1a", zorder=5)
 
     for gi, (g, x0) in enumerate(zip(GAMES, xs)):
         ax.text(x0 + col_w / 2, -0.03, SHORT[g], transform=ax.get_xaxis_transform(), ha="center", va="top",
@@ -710,31 +727,29 @@ def self_improvement_gain():
     for s in ("top", "right", "bottom"):
         ax.spines[s].set_visible(False)
 
-    keys = [k for k, *_ in GAIN_METHODS] + [p for p, *_ in SERIES]
-    labels = [n for _, n, *_ in GAIN_METHODS] + [n for _, n, _ in SERIES]
-    logo_legend(fig, {**method_badges, **series_badges}, keys, labels, loc="lower center",
-                bbox_to_anchor=((left + plot_w / 2) / fig_w, 0.02), ncol=len(keys), fontsize=31.2, columnspacing=0.9)
+    legends = [
+        logo_legend(fig, method_badges, [k for k, *_ in GAIN_METHODS], [n for _, n, *_ in GAIN_METHODS],
+                    loc="lower left", ncol=len(GAIN_METHODS), fontsize=31.2, columnspacing=0.9),
+        logo_legend(fig, series_badges, [p for p, *_ in SERIES], [n for _, n, _ in SERIES],
+                    loc="lower left", ncol=len(SERIES), fontsize=31.2, columnspacing=0.9),
+    ]
+    fig.canvas.draw()
+    gap = 0.4 / fig_w
+    widths = [lg.get_window_extent().width / fig.bbox.width for lg in legends]
+    x = (left + plot_w / 2) / fig_w - (sum(widths) + gap) / 2
+    for lg, lw in zip(legends, widths):
+        lg.set_bbox_to_anchor((x, 0.02), transform=fig.transFigure)
+        x += lw + gap
     save(fig, "self_improvement_gain.png")
 
 
 def letter_badge(letter, stops, px=256):
     s = px * 4
-    grad = np.linspace(0, 1, s)
-    t = grad[None, :] * 0.5 + grad[:, None] * 0.5
-    cols = np.array([to_rgb(c) for c in stops])
-    pos = np.linspace(0, 1, len(stops))
-    rgb = np.stack([np.interp(t, pos, cols[:, i]) for i in range(3)], -1)
-    fill = Image.fromarray((rgb * 255).astype(np.uint8)).convert("RGBA")
-    mask = Image.new("L", (s, s), 0)
-    ImageDraw.Draw(mask).ellipse([s * 0.04, s * 0.04, s * 0.96, s * 0.96], fill=255)
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    img.paste(fill, (0, 0), mask)
     d = ImageDraw.Draw(img)
-    d.ellipse([s * 0.04, s * 0.04, s * 0.96, s * 0.96], outline="white", width=int(s * 0.05))
-    d.ellipse([s * 0.015, s * 0.015, s * 0.985, s * 0.985], outline="#333", width=int(s * 0.02))
-    font = ImageFont.truetype(findfont(FontProperties(family="serif", weight="bold")), int(s * 0.6))
-    d.text((s / 2, s / 2), letter, font=font, fill="white", anchor="mm", stroke_width=int(s * 0.025),
-           stroke_fill="#222")
+    d.ellipse([s * 0.02, s * 0.02, s * 0.98, s * 0.98], fill=stops[0])
+    font = ImageFont.truetype(findfont(FontProperties(family="serif", weight="bold")), int(s * 0.58))
+    d.text((s / 2, s / 2), letter, font=font, fill="#1a1a1a", anchor="mm")
     return np.asarray(img.resize((px, px), Image.LANCZOS)) / 255.0
 
 
@@ -809,8 +824,11 @@ def contamination_dotplot():
     lx, ly = (left + plot_w + 0.3) / w, (bottom + total) / fig_h
     logo_legend(fig, model_badges, [k for k, *_ in CONTAMINATION_MODELS], [n for _, n, *_ in CONTAMINATION_MODELS],
                 loc="upper left", bbox_to_anchor=(lx, ly), ncol=1, fontsize=vf, labelspacing=0.8)
-    logo_legend(fig, game_badges, [g for g, *_ in CONTAMINATION_GAMES], [n for _, _, n, _ in CONTAMINATION_GAMES],
-                loc="upper left", bbox_to_anchor=(lx, ly - 2.9 / fig_h), ncol=1, fontsize=vf, labelspacing=0.8)
+    game_keys, game_labels = [], []
+    for heading, games in CONTAMINATION_GAME_GROUPS:
+        game_keys += [None] + games
+        game_labels += [heading] + games
+    logo_legend(fig, game_badges, game_keys, game_labels, loc="upper left", bbox_to_anchor=(lx, ly - 2.9 / fig_h), ncol=1, fontsize=vf, labelspacing=0.8)
     save(fig, "contamination_dotplot.png")
     log_info(pd.DataFrame(acc).round(1).to_string(), PARAMETERS)
 
