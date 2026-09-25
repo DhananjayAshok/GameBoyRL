@@ -1499,8 +1499,15 @@
         document.querySelectorAll('.contrib-toggle').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var box = btn.closest('.contrib-box');
-                var open = box.classList.toggle('is-open');
-                btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+                var open = !box.classList.contains('is-open');
+                document.querySelectorAll('.contrib-box').forEach(function (other) {
+                    other.classList.remove('is-open');
+                    other.querySelector('.contrib-toggle').setAttribute('aria-expanded', 'false');
+                });
+                if (open) {
+                    box.classList.add('is-open');
+                    btn.setAttribute('aria-expanded', 'true');
+                }
             });
         });
 
