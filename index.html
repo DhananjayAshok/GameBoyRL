@@ -992,6 +992,78 @@
             border-left: 4px solid #ffa500;
         }
 
+        /* ── Expandable contribution boxes ───────────────────────── */
+        .contrib-box {
+            padding: 0;
+            overflow: hidden;
+            transition: box-shadow 0.2s ease, background 0.2s ease;
+        }
+
+        .contrib-box:hover {
+            box-shadow: 0 2px 10px rgba(50, 115, 220, 0.14);
+        }
+
+        .contrib-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            width: 100%;
+            padding: 1rem 1.5rem;
+            background: none;
+            border: 0;
+            margin: 0;
+            font: inherit;
+            color: #1a1a2e;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .contrib-toggle:focus-visible {
+            outline: 2px solid #3273dc;
+            outline-offset: -2px;
+        }
+
+        .contrib-title {
+            font-weight: 700;
+            font-size: 1rem;
+        }
+
+        .contrib-chevron {
+            flex: 0 0 auto;
+            width: 0.62rem;
+            height: 0.62rem;
+            border-right: 2.2px solid #3273dc;
+            border-bottom: 2.2px solid #3273dc;
+            transform: rotate(45deg);
+            transform-origin: center;
+            transition: transform 0.28s ease;
+        }
+
+        .contrib-box.is-open .contrib-chevron {
+            transform: rotate(-135deg);
+        }
+
+        .contrib-body {
+            display: grid;
+            grid-template-rows: 0fr;
+            transition: grid-template-rows 0.3s ease;
+        }
+
+        .contrib-box.is-open .contrib-body {
+            grid-template-rows: 1fr;
+        }
+
+        .contrib-body>div {
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        .contrib-body p {
+            margin: 0;
+            padding: 0 1.5rem 1.25rem;
+        }
+
         /* ── Sub-tabs (nested within experiment tabs) ──────────── */
         .sub-tabs .tabs ul {
             border-bottom: none;
@@ -1267,42 +1339,80 @@
                 we introduce a two-legged benchmark, GameBoyWorlds, the first testbed for self-improvement in complex
                 video games.
             </p>
-            <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
-                <strong>GameBoyWorlds Framework</strong><br />
-                A Gymnasium compatible set of environments that allow agents to play any GameBoy or GameBoy Color
-                title, including releases from classic franchises such as Pok&eacute;mon and Legend of Zelda. Supported
-                titles include more obscure ROM hacks (i.e. fan made games), which are considerably less exposed to
-                frontier Language Models during their training. GameBoyWorlds is flexible, and developers can set up
-                custom tracking metrics, tasks and more.
+            <div class="highlight-box is-info-light contrib-box is-open" style="margin-bottom:1rem;">
+                <button class="contrib-toggle" type="button" aria-expanded="true">
+                    <span class="contrib-title">GameBoyWorlds Framework</span>
+                    <span class="contrib-chevron" aria-hidden="true"></span>
+                </button>
+                <div class="contrib-body">
+                    <div>
+                        <p>
+                            A Gymnasium compatible set of environments that allow agents to play any GameBoy or GameBoy
+                            Color title, including releases from classic franchises such as Pok&eacute;mon and Legend of
+                            Zelda. Supported titles include more obscure ROM hacks (i.e. fan made games), which are
+                            considerably less exposed to frontier Language Models during their training. GameBoyWorlds
+                            is flexible, and developers can set up custom tracking metrics, tasks and more.
+                        </p>
+                    </div>
+                </div>
             </div>
-            <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
-                <strong>GameBoyWorlds-Execution</strong><br />
-                A testbed for short-horizon task execution where the action space consists of only GameBoy buttons,
-                with <strong>no</strong> special harnesses, and the observation space consists of screen frames, with
-                <strong>no</strong> observation engineering. Agents see the game as humans do, and play the game as
-                humans do. Each of the five game series marks a dedicated training game and a distinct, test-only game.
-                Agents are allowed indefinite access to dedicated training games but are provided no demonstrations,
-                documentation, or rewards, and must ground themselves in the environment through self-directed
-                exploration and by inferring actionable knowledge from their own experience. With 50 hand-crafted tasks
-                per game, GameBoyWorlds-Execution tests agents on a wide range of 500 tasks, including navigation,
-                interaction, combat and game-specific control across 10 distinct games.
+            <div class="highlight-box is-info-light contrib-box" style="margin-bottom:1rem;">
+                <button class="contrib-toggle" type="button" aria-expanded="false">
+                    <span class="contrib-title">GameBoyWorlds-Execution</span>
+                    <span class="contrib-chevron" aria-hidden="true"></span>
+                </button>
+                <div class="contrib-body">
+                    <div>
+                        <p>
+                            A testbed for short-horizon task execution where the action space consists of only GameBoy
+                            buttons, with <strong>no</strong> special harnesses, and the observation space consists of
+                            screen frames, with <strong>no</strong> observation engineering. Agents see the game as
+                            humans do, and play the game as humans do. Each of the five game series marks a dedicated
+                            training game and a distinct, test-only game. Agents are allowed indefinite access to
+                            dedicated training games but are provided no demonstrations, documentation, or rewards, and
+                            must ground themselves in the environment through self-directed exploration and by inferring
+                            actionable knowledge from their own experience. With 50 hand-crafted tasks per game,
+                            GameBoyWorlds-Execution tests agents on a wide range of 500 tasks, including navigation,
+                            interaction, combat and game-specific control across 10 distinct games.
+                        </p>
+                    </div>
+                </div>
             </div>
-            <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
-                <strong>Curiosity-Based Exploration as Search</strong><br />
-                We adapt curiosity-based RL to serve as a search procedure to identify `interesting' snippets of
-                gameplay. Our core intuition is that subtrajectories which end in a highly novel observation likely
-                implicitly contain information regarding key, game-specific mechanics. We sweep these subtrajectories
-                with the VLM and distill insights from them into game-specific guidance documents to aid task execution.
-                In truth, this strategy achieves only partial success, but it consistently outperforms both world
-                modelling and autonomous skill discovery-based approaches.
+            <div class="highlight-box is-info-light contrib-box" style="margin-bottom:1rem;">
+                <button class="contrib-toggle" type="button" aria-expanded="false">
+                    <span class="contrib-title">Curiosity-Based Exploration as Search</span>
+                    <span class="contrib-chevron" aria-hidden="true"></span>
+                </button>
+                <div class="contrib-body">
+                    <div>
+                        <p>
+                            We adapt curiosity-based RL to serve as a search procedure to identify `interesting'
+                            snippets of gameplay. Our core intuition is that subtrajectories which end in a highly novel
+                            observation likely implicitly contain information regarding key, game-specific mechanics. We
+                            sweep these subtrajectories with the VLM and distill insights from them into game-specific
+                            guidance documents to aid task execution. In truth, this strategy achieves only partial
+                            success, but it consistently outperforms both world modelling and autonomous skill
+                            discovery-based approaches.
+                        </p>
+                    </div>
+                </div>
             </div>
-            <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
-                <strong>GameBoyWorlds-Playthrough</strong><br />
-                Tests end-to-end game completion in two fan-made Pok&eacute;mon games. We show that while frontier
-                models have been pre-exposed to official releases such as Pok&eacute;mon Red, they lack essential
-                information on the games in our testbed, recovering less than 30% of their progression steps. Instead of
-                relying on their parametric knowledge to succeed, agents must learn from their own experience and
-                autonomously improve over the course of the playthrough.
+            <div class="highlight-box is-info-light contrib-box" style="margin-bottom:1rem;">
+                <button class="contrib-toggle" type="button" aria-expanded="false">
+                    <span class="contrib-title">GameBoyWorlds-Playthrough</span>
+                    <span class="contrib-chevron" aria-hidden="true"></span>
+                </button>
+                <div class="contrib-body">
+                    <div>
+                        <p>
+                            Tests end-to-end game completion in two fan-made Pok&eacute;mon games. We show that while
+                            frontier models have been pre-exposed to official releases such as Pok&eacute;mon Red, they
+                            lack essential information on the games in our testbed, recovering less than 30% of their
+                            progression steps. Instead of relying on their parametric knowledge to succeed, agents must
+                            learn from their own experience and autonomously improve over the course of the playthrough.
+                        </p>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -1385,6 +1495,15 @@
     </footer>
 
     <script>
+        /* Expandable contribution boxes */
+        document.querySelectorAll('.contrib-toggle').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var box = btn.closest('.contrib-box');
+                var open = box.classList.toggle('is-open');
+                btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            });
+        });
+
         /* Navbar burger */
         document.querySelector('.navbar-burger').addEventListener('click', function () {
             this.classList.toggle('is-active');
