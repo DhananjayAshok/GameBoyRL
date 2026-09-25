@@ -820,6 +820,101 @@
             font-weight: 600;
         }
 
+        /* ── Method verdict cards ──────────────────────────────────── */
+        .verdict-list {
+            max-width: 940px;
+            margin: 2.5rem auto 0;
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+
+        .verdict-card {
+            display: flex;
+            align-items: flex-start;
+            gap: 1.5rem;
+            padding: 1.5rem 1.75rem;
+            background: #fff;
+            border-radius: 12px;
+            border-left: 5px solid var(--vc);
+            box-shadow: 0 2px 14px rgba(20, 30, 60, 0.07);
+        }
+
+        .verdict-logo {
+            flex: 0 0 auto;
+            width: 92px;
+            height: 92px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 14px;
+            background: color-mix(in srgb, var(--vc) 10%, #fff);
+        }
+
+        .verdict-logo img {
+            width: 68px;
+            height: 68px;
+            object-fit: contain;
+        }
+
+        .verdict-body {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .verdict-head {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .verdict-name {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: #1a1a2e;
+        }
+
+        .verdict-stat {
+            font-size: 0.9rem;
+            font-weight: 700;
+            padding: 0.15rem 0.6rem;
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--vc) 13%, #fff);
+            color: var(--vc);
+            white-space: nowrap;
+        }
+
+        .verdict-body p {
+            color: #444;
+            font-size: 0.95rem;
+            line-height: 1.7;
+            margin: 0;
+        }
+
+        .verdict-lede {
+            max-width: 940px;
+            margin: 2rem auto 0;
+            text-align: center;
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #1a1a2e;
+        }
+
+        @media (max-width: 640px) {
+            .verdict-card {
+                flex-direction: column;
+                align-items: center;
+                text-align: center;
+                gap: 1rem;
+            }
+
+            .verdict-head {
+                justify-content: center;
+            }
+        }
+
         /* ── Success / failure example panels ──────────────────────── */
         #examples-panels {
             max-width: 1000px;
@@ -1704,26 +1799,64 @@
                 </div>
                 <div class="gain-legend" id="improvement-legend"></div>
             </div>
-            <div class="highlight-box is-info-light" style="max-width:900px;margin:2rem auto 0;">
-                <strong>No approach consistently improves performance across all game environments.</strong> World
-                modelling reduces average task completion by 3.4%. Qualitatively, we observe that the world model is
-                unable to predict the next observation with sufficient accuracy to serve as a useful tool. The skill
-                discovery approach performs even worse, degrading task completion by 44.3% on average
-                (40.7% &rarr; 22.6%), with catastrophic collapses on Pok&eacute;monCrystal (36.0% &rarr; 4.0%),
-                Pok&eacute;monRed (38.8% &rarr; 8.2%) and ZeldaOracleOfSeasons (40.0% &rarr; 14.0%). The performance
-                degradation is always greater for test-only games, suggesting an overfitting to the training
-                distribution. We hypothesize the extent of degradation is caused by an inability to accurately judge
-                task completion during practice, a known failure scenario for skill acquisition methods. The only
-                method that achieves partial success is our novel utilization of curiosity-based exploration to write
-                game-specific documentation. Here, task completion increases by as much as 22% on select games like
-                BombermanPocket (72.0% &rarr; 88.0%), and the boost applies to both games seen during training time and
-                unseen test games like SwordOfHope2 (66.0% &rarr; 72.0%). However, even this approach leads to
-                considerable performance degradation on some games (DejaVu1, &minus;29%; DejaVu2, &minus;25%;
-                Pok&eacute;monCrystal, &minus;17%), and the average task completion rate improves by only 2.0%
-                (40.7% &rarr; 41.5%). The failure of these standard implementations establishes
-                GameBoyWorlds-Execution as a challenging benchmark and calls for further research on acquiring
-                short-horizon task execution capabilities via self-improvement.
+            <p class="verdict-lede">No approach consistently improves performance across all game environments.</p>
+            <div class="verdict-list">
+                <div class="verdict-card" style="--vc:#2E6FD9;">
+                    <div class="verdict-logo"><img src="assets/logos/method_wm.png" alt="World modelling"></div>
+                    <div class="verdict-body">
+                        <div class="verdict-head">
+                            <span class="verdict-name">World Modelling</span>
+                            <span class="verdict-stat">&minus;3.4% average task completion</span>
+                        </div>
+                        <p>
+                            Qualitatively, we observe that the world model is unable to predict the next observation
+                            with sufficient accuracy to serve as a useful tool.
+                        </p>
+                    </div>
+                </div>
+                <div class="verdict-card" style="--vc:#7D4CC4;">
+                    <div class="verdict-logo"><img src="assets/logos/method_pae.png" alt="Autonomous skill discovery">
+                    </div>
+                    <div class="verdict-body">
+                        <div class="verdict-head">
+                            <span class="verdict-name">Autonomous Skill Discovery</span>
+                            <span class="verdict-stat">&minus;44.3% &nbsp;(40.7% &rarr; 22.6%)</span>
+                        </div>
+                        <p>
+                            The skill discovery approach performs even worse, with catastrophic collapses on
+                            Pok&eacute;monCrystal (36.0% &rarr; 4.0%), Pok&eacute;monRed (38.8% &rarr; 8.2%) and
+                            ZeldaOracleOfSeasons (40.0% &rarr; 14.0%). The performance degradation is always greater
+                            for test-only games, suggesting an overfitting to the training distribution. We hypothesize
+                            the extent of degradation is caused by an inability to accurately judge task completion
+                            during practice, a known failure scenario for skill acquisition methods.
+                        </p>
+                    </div>
+                </div>
+                <div class="verdict-card" style="--vc:#0F9D76;">
+                    <div class="verdict-logo"><img src="assets/logos/method_guide.png" alt="Curiosity guides"></div>
+                    <div class="verdict-body">
+                        <div class="verdict-head">
+                            <span class="verdict-name">Curiosity Guides</span>
+                            <span class="verdict-stat">+2.0% &nbsp;(40.7% &rarr; 41.5%)</span>
+                        </div>
+                        <p>
+                            The only method that achieves partial success is our novel utilization of curiosity-based
+                            exploration to write game-specific documentation. Here, task completion increases by as
+                            much as 22% on select games like BombermanPocket (72.0% &rarr; 88.0%), and the boost
+                            applies to both games seen during training time and unseen test games like SwordOfHope2
+                            (66.0% &rarr; 72.0%). However, even this approach leads to considerable performance
+                            degradation on some games (DejaVu1, &minus;29%; DejaVu2, &minus;25%;
+                            Pok&eacute;monCrystal, &minus;17%).
+                        </p>
+                    </div>
+                </div>
             </div>
+            <p
+                style="text-align:center;color:#555;max-width:820px;margin:1.75rem auto 0;font-size:0.95rem;line-height:1.7;">
+                The failure of these standard implementations establishes GameBoyWorlds-Execution as a challenging
+                benchmark and calls for further research on acquiring short-horizon task execution capabilities via
+                self-improvement.
+            </p>
         </div>
     </section>
 
