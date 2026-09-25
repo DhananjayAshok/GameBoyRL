@@ -1082,6 +1082,66 @@
             margin-bottom: 0.75rem;
             padding-left: 0.5rem;
         }
+        /* ── Contamination dotplot ─────────────────────────────────── */
+        .contam-wrap {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .contam-canvas-wrap {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, .08);
+            padding: 1.5rem 1.5rem 1rem;
+        }
+
+        .contam-legend {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 2.5rem;
+            margin-top: 1.5rem;
+        }
+
+        .contam-legend-heading {
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #666;
+            margin-bottom: 0.5rem;
+        }
+
+        .contam-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0.2rem 0;
+            font-size: 0.95rem;
+            color: #1a1a2e;
+            transition: opacity 0.15s ease;
+        }
+
+        .contam-legend-item img {
+            width: 26px;
+            height: 26px;
+        }
+
+        .contam-legend-item.is-off {
+            opacity: 0.35;
+            text-decoration: line-through;
+        }
+
+        .contam-caption {
+            text-align: center;
+            color: #666;
+            font-size: 0.9rem;
+            margin-top: 1.25rem;
+        }
+
         /* ── Red vs Brown playthrough panels ───────────────────────── */
         .playthrough-columns {
             max-width: 1000px;
@@ -1318,17 +1378,172 @@
                 and Crystal), they recover less than 30% of the steps in the fan-made versions that make up
                 GameBoyWorlds-Playthrough.
             </p>
-            <figure style="max-width:1000px;margin:0 auto;">
-                <img src="assets/contamination_dotplot.png"
-                    alt="Progression-step accuracy per model for Pokemon Red, Crystal, Brown and Prism"
-                    style="width:100%;display:block;border-radius:8px;background:#fff;">
-                <figcaption style="text-align:center;color:#666;font-size:0.9rem;margin-top:0.85rem;">
-                    Accuracy on progression-step questions. Every model clears 90%+ on the classic titles and collapses
-                    on Pok&eacute;mon Brown and Pok&eacute;mon Prism.
-                </figcaption>
-            </figure>
+            <div class="contam-wrap">
+                <div class="contam-canvas-wrap">
+                    <canvas id="contamination-chart" height="150"></canvas>
+                </div>
+                <div class="contam-legend" id="contamination-legend"></div>
+                <p class="contam-caption">
+                    Accuracy on progression-step questions. Every model clears 90% on the classic titles and collapses
+                    on Pok&eacute;mon Brown and Pok&eacute;mon Prism. Hover a marker for the exact figure; click a game
+                    to show or hide it.
+                </p>
+            </div>
         </div>
     </section>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <script src="assets/contamination_data.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            var DATA = window.CONTAMINATION_DATA;
+            if (!DATA || !window.Chart) return;
+
+            var canvas = document.getElementById('contamination-chart');
+            var legendEl = document.getElementById('contamination-legend');
+            var chart = null;
+            var MODELS = DATA.models, GAMES = DATA.games;
+            var DOT = 30, TIER = 0.17, NEAR = 9;   // y offset when two dots would collide
+
+            function img(src, size, onload) {
+                var im = new Image();
+                im.src = src;
+                im.addEventListener('load', function () {
+                    im.width = size; im.height = size;
+                    if (onload) onload();
+                });
+                return im;
+            }
+            var gameImgs = {}, modelImgs = {};
+            GAMES.forEach(function (g) {
+                gameImgs[g.id] = img(g.badge, DOT, function () { if (chart) chart.update('none'); });
+            });
+            MODELS.forEach(function (m) {
+                modelImgs[m.id] = img(m.badge, 38, function () { if (chart) chart.draw(); });
+            });
+
+            // Tier dots that sit too close on the same lane, as the paper figure does.
+            var tiers = {};
+            MODELS.forEach(function (m) {
+                var vals = GAMES.map(function (g) { return { id: g.id, v: DATA.accuracy[m.id][g.id] }; });
+                vals.sort(function (a, b) { return a.v - b.v; });
+                var placed = [];
+                vals.forEach(function (row) {
+                    var t = 0;
+                    while (placed.some(function (p) { return p.t === t && Math.abs(p.v - row.v) < NEAR; })) t++;
+                    placed.push({ t: t, v: row.v });
+                    tiers[m.id + '|' + row.id] = t;
+                });
+            });
+
+            var lanesPlugin = {
+                id: 'contamLanes',
+                beforeDatasetsDraw: function (c) {
+                    var x = c.scales.x, y = c.scales.y, ctx = c.ctx;
+                    ctx.save();
+                    MODELS.forEach(function (m, i) {
+                        var py = y.getPixelForValue(i);
+                        ctx.strokeStyle = '#bbb';
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.moveTo(x.getPixelForValue(0), py);
+                        ctx.lineTo(x.getPixelForValue(100), py);
+                        ctx.stroke();
+                        var im = modelImgs[m.id];
+                        if (im && im.complete && im.naturalWidth) {
+                            ctx.drawImage(im, x.left - 52, py - 19, 38, 38);
+                        }
+                    });
+                    ctx.restore();
+                }
+            };
+
+            chart = new Chart(canvas, {
+                type: 'scatter',
+                data: {
+                    datasets: GAMES.map(function (g) {
+                        return {
+                            label: g.name,
+                            gameId: g.id,
+                            data: MODELS.map(function (m, i) {
+                                return {
+                                    x: DATA.accuracy[m.id][g.id],
+                                    y: i + tiers[m.id + '|' + g.id] * TIER,
+                                    model: i
+                                };
+                            }),
+                            pointStyle: function () { return gameImgs[g.id]; },
+                            backgroundColor: g.color,
+                            borderColor: g.color,
+                            pointRadius: DOT / 2,
+                            pointHoverRadius: DOT / 2 + 2,
+                            showLine: false
+                        };
+                    })
+                },
+                plugins: [lanesPlugin],
+                options: {
+                    responsive: true,
+                    animation: { duration: 650, easing: 'easeOutQuart' },
+                    layout: { padding: { left: 56, top: 14, bottom: 6, right: 14 } },
+                    scales: {
+                        x: {
+                            min: -3, max: 106,
+                            title: { display: true, text: 'Accuracy (%)' },
+                            ticks: { stepSize: 20, callback: function (v) { return v < 0 || v > 100 ? '' : v; } },
+                            grid: { color: '#eee' }
+                        },
+                        y: {
+                            reverse: true,
+                            min: -0.55, max: MODELS.length - 0.2,
+                            ticks: { display: false },
+                            grid: { display: false },
+                            border: { display: false }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            displayColors: false,
+                            callbacks: {
+                                title: function (items) { return MODELS[items[0].raw.model].name; },
+                                label: function (ctx) {
+                                    return ctx.dataset.label + ': ' + ctx.raw.x + '%';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Grouped, clickable game legend (Classic vs GameBoyWorlds-Playthrough).
+            legendEl.innerHTML = '';
+            DATA.groups.forEach(function (group) {
+                var box = document.createElement('div');
+                box.className = 'contam-legend-group';
+                var h = document.createElement('div');
+                h.className = 'contam-legend-heading';
+                h.textContent = group.name;
+                box.appendChild(h);
+                group.games.forEach(function (gid) {
+                    var gi = GAMES.findIndex(function (g) { return g.id === gid; });
+                    var g = GAMES[gi];
+                    var item = document.createElement('button');
+                    item.type = 'button';
+                    item.className = 'contam-legend-item';
+                    item.innerHTML = '<img src="' + g.badge + '" alt=""><span>' + g.name + '</span>';
+                    item.addEventListener('click', function () {
+                        var vis = chart.isDatasetVisible(gi);
+                        chart.setDatasetVisibility(gi, !vis);
+                        item.classList.toggle('is-off', vis);
+                        chart.update();
+                    });
+                    box.appendChild(item);
+                });
+                legendEl.appendChild(box);
+            });
+        });
+    </script>
 
     <!-- ════════════════════════════════════════════════════════════
      PLAYTHROUGH — RED VS BROWN, SAME AGENT

@@ -1,6 +1,6 @@
-// One random success and one random failure per game for gemini-3.6-flash on
-// GameBoyWorlds-Execution (subgoal + single_visual + low_level). Seeded pick;
-// videos copied from the recorded benchmark sessions.
+// One success and one failure per game for gemini-3.6-flash on GameBoyWorlds-Execution
+// (subgoal + single_visual + low_level), chosen for a clean task statement and a
+// legible clip. Videos re-encoded to H.264 from the recorded benchmark sessions.
 window.EXAMPLES_DATA = {
   "model": "Gemini 3.6 Flash",
   "games": [
@@ -8,13 +8,14 @@ window.EXAMPLES_DATA = {
       "id": "deja_vu_1",
       "name": "Déjà Vu 1",
       "series": "Déjà Vu",
+      "seriesId": "deja_vu",
       "success": {
-        "task": "check the coat",
+        "task": "Take coat from the front door",
         "video": "assets/rollouts/deja_vu_1_success.mp4",
-        "steps": 6
+        "steps": 37
       },
       "failure": {
-        "task": "open the desk",
+        "task": "Take gun from the front door",
         "video": "assets/rollouts/deja_vu_1_failure.mp4",
         "steps": 76
       }
@@ -23,28 +24,30 @@ window.EXAMPLES_DATA = {
       "id": "deja_vu_2",
       "name": "Déjà Vu 2",
       "series": "Déjà Vu",
+      "seriesId": "deja_vu",
       "success": {
-        "task": "chat with taxi driver",
+        "task": "Open the box at the alleway behind joe",
         "video": "assets/rollouts/deja_vu_2_success.mp4",
-        "steps": 21
+        "steps": 47
       },
       "failure": {
-        "task": "hit the board  at fire escape",
+        "task": "Enter the Joe's place",
         "video": "assets/rollouts/deja_vu_2_failure.mp4",
-        "steps": 76
+        "steps": 74
       }
     },
     {
       "id": "legend_of_zelda_links_awakening",
       "name": "Link's Awakening",
       "series": "Zelda",
+      "seriesId": "legend_of_zelda",
       "success": {
-        "task": "make another call from the chest shop",
+        "task": "Go in the water",
         "video": "assets/rollouts/legend_of_zelda_links_awakening_success.mp4",
-        "steps": 3
+        "steps": 60
       },
       "failure": {
-        "task": "go left see the blue house and then go up to the fan house",
+        "task": "Pick up the sword from the shore",
         "video": "assets/rollouts/legend_of_zelda_links_awakening_failure.mp4",
         "steps": 76
       }
@@ -53,13 +56,14 @@ window.EXAMPLES_DATA = {
       "id": "legend_of_zelda_the_oracle_of_seasons",
       "name": "Oracle of Seasons",
       "series": "Zelda",
+      "seriesId": "legend_of_zelda",
       "success": {
-        "task": "get off green carpet",
+        "task": "Talk to the shop person",
         "video": "assets/rollouts/legend_of_zelda_the_oracle_of_seasons_success.mp4",
-        "steps": 6
+        "steps": 39
       },
       "failure": {
-        "task": "blue snake talk",
+        "task": "Go to other people",
         "video": "assets/rollouts/legend_of_zelda_the_oracle_of_seasons_failure.mp4",
         "steps": 76
       }
@@ -68,43 +72,46 @@ window.EXAMPLES_DATA = {
       "id": "pokemon_red",
       "name": "Pokémon Red",
       "series": "Pokémon",
+      "seriesId": "pokemon",
       "success": {
-        "task": "Read the sign below you",
+        "task": "Read the letter",
         "video": "assets/rollouts/pokemon_red_success.mp4",
-        "steps": 23
+        "steps": 60
       },
       "failure": {
-        "task": "Defeat Blue",
+        "task": "Defeat Gym Leader Brock",
         "video": "assets/rollouts/pokemon_red_failure.mp4",
-        "steps": 76
+        "steps": 45
       }
     },
     {
       "id": "pokemon_crystal",
       "name": "Pokémon Crystal",
       "series": "Pokémon",
+      "seriesId": "pokemon",
       "success": {
-        "task": "Make Pidgeot hold a Cleanse Tag",
+        "task": "Teach Pidgeot Toxic",
         "video": "assets/rollouts/pokemon_crystal_success.mp4",
-        "steps": 26
+        "steps": 55
       },
       "failure": {
-        "task": "Speak to the gym leader",
+        "task": "Look into the mirror",
         "video": "assets/rollouts/pokemon_crystal_failure.mp4",
-        "steps": 74
+        "steps": 76
       }
     },
     {
       "id": "sword_of_hope_1",
       "name": "Sword of Hope 1",
       "series": "Sword of Hope",
+      "seriesId": "sword_of_hope",
       "success": {
-        "task": "Talk to an NPC or interactable and advance one full dialogue page",
+        "task": "Look at surroundings to reveal a previously hidden path",
         "video": "assets/rollouts/sword_of_hope_1_success.mp4",
-        "steps": 14
+        "steps": 54
       },
       "failure": {
-        "task": "View Power stats last page then Teleport to Old Man's House (3-subgoal composite)",
+        "task": "Reach the first adjacent room from the start state",
         "video": "assets/rollouts/sword_of_hope_1_failure.mp4",
         "steps": 76
       }
@@ -113,10 +120,11 @@ window.EXAMPLES_DATA = {
       "id": "sword_of_hope_2",
       "name": "Sword of Hope 2",
       "series": "Sword of Hope",
+      "seriesId": "sword_of_hope",
       "success": {
-        "task": "Reach the weapons shop BUY item list from the shopkeeper interaction",
+        "task": "Buy CPR Sword from Weapons Shop via Look-shopkeeper-Buy chain",
         "video": "assets/rollouts/sword_of_hope_2_success.mp4",
-        "steps": 8
+        "steps": 13
       },
       "failure": {
         "task": "Finish a battle encounter without a game over",
@@ -128,28 +136,30 @@ window.EXAMPLES_DATA = {
       "id": "bomberman_quest",
       "name": "Bomberman Quest",
       "series": "Bomberman",
+      "seriesId": "bomberman",
       "success": {
-        "task": "Enter the House",
+        "task": "Read the Ruins Sign",
         "video": "assets/rollouts/bomberman_quest_success.mp4",
-        "steps": 64
+        "steps": 54
       },
       "failure": {
-        "task": "Jump Off the Cliff and Read the Sign",
+        "task": "Talk to the NPC",
         "video": "assets/rollouts/bomberman_quest_failure.mp4",
-        "steps": 75
+        "steps": 76
       }
     },
     {
       "id": "bomberman_pocket",
       "name": "Bomberman Pocket",
       "series": "Bomberman",
+      "seriesId": "bomberman",
       "success": {
-        "task": "Wind Area 1 Navigate to Find and Take the Exit",
+        "task": "Area 2 Pick up a Bomb Up",
         "video": "assets/rollouts/bomberman_pocket_success.mp4",
-        "steps": 17
+        "steps": 38
       },
       "failure": {
-        "task": "Ocean Area 1 Take the Exit",
+        "task": "Kill the Forest Stage Boss and Take the Exit",
         "video": "assets/rollouts/bomberman_pocket_failure.mp4",
         "steps": 76
       }

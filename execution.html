@@ -782,6 +782,13 @@
             font-weight: 600;
         }
 
+        .results-series-tabs .tabs li a .tab-icon {
+            width: 22px;
+            height: 22px;
+            margin-right: 0.45rem;
+            flex-shrink: 0;
+        }
+
         /* ── Self-improvement gain dotplot ─────────────────────────── */
         .gain-legend {
             display: flex;
@@ -883,6 +890,7 @@
             display: block;
             border-radius: 6px;
             background: #000;
+            image-rendering: pixelated;
         }
 
         @media screen and (max-width: 768px) {
@@ -1422,6 +1430,24 @@
     </section>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <script>
+        /* A chart tab carrying its series badge. Shared by every tabbed chart on the page. */
+        function seriesTab(name, badge) {
+            var li = document.createElement('li');
+            var a = document.createElement('a');
+            if (badge) {
+                var img = document.createElement('img');
+                img.className = 'tab-icon';
+                img.src = badge;
+                img.alt = '';
+                a.appendChild(img);
+            }
+            a.appendChild(document.createTextNode(name));
+            li.appendChild(a);
+            return li;
+        }
+        function seriesBadgePath(id) { return 'assets/logos/series_' + id + '.png'; }
+    </script>
     <script src="assets/results_data.js"></script>
     <script>
         (function () {
@@ -1544,11 +1570,8 @@
             }
 
             DATA.series.forEach(function (series, idx) {
-                var li = document.createElement('li');
+                var li = seriesTab(series.name, seriesBadgePath(series.id));
                 if (idx === 0) li.classList.add('is-active');
-                var a = document.createElement('a');
-                a.textContent = series.name;
-                li.appendChild(a);
                 li.addEventListener('click', function () { selectSeries(li, series); });
                 tabList.appendChild(li);
 
@@ -1668,6 +1691,9 @@
             <div class="results-chart-wrap">
                 <div class="results-chart-canvas-wrap">
                     <canvas id="improvement-chart" height="150"></canvas>
+                </div>
+                <div class="results-series-tabs" style="margin-top:1.5rem;">
+                    <ul class="tabs is-centered is-toggle is-medium" id="improvement-tab-list"></ul>
                 </div>
                 <div class="gain-legend" id="improvement-legend"></div>
             </div>
@@ -1906,55 +1932,55 @@
 
             var canvas = document.getElementById('improvement-chart');
             var legendEl = document.getElementById('improvement-legend');
+            var tabList = document.getElementById('improvement-tab-list');
             var chart = null;
 
             // One lane per method inside each game's column, mirroring plots.py's
             // self_improvement_gain: dots are icon badges, x is the game, y is the gain in pp.
-            var LANE = 0.22;
-            var GAMES = DATA.games;
+            var LANE = 0.16, DOT = 26;
             var METHODS = DATA.methods;
+            var byId = {};
+            DATA.games.forEach(function (g) { byId[g.id] = g; });
 
+            // Chart.js sizes an image point from img.width/height, so set them explicitly
+            // rather than letting the 256px source decide.
             var badges = {};
             METHODS.forEach(function (m) {
                 var img = new Image();
                 img.src = m.badge;
-                img.addEventListener('load', function () { if (chart) chart.update('none'); });
+                img.addEventListener('load', function () {
+                    img.width = DOT; img.height = DOT;
+                    if (chart) chart.update('none');
+                });
                 badges[m.id] = img;
-            });
-            var seriesBadges = {};
-            DATA.series.forEach(function (s) {
-                var img = new Image();
-                img.src = s.badge;
-                img.addEventListener('load', function () { if (chart) chart.draw(); });
-                seriesBadges[s.id] = img;
             });
 
             function laneX(gameIdx, methodIdx) {
                 return gameIdx + (methodIdx - (METHODS.length - 1) / 2) * LANE;
             }
 
-            // Alternating series bands, the zero rule, and a series badge under each pair.
+            // The zero rule, plus a divider between the games in the series.
             var backdropPlugin = {
                 id: 'gainBackdrop',
                 beforeDatasetsDraw: function (c) {
-                    var x = c.scales.x, y = c.scales.y, ctx = c.ctx, shade = false;
+                    var x = c.scales.x, y = c.scales.y, ctx = c.ctx;
+                    var n = c.$games.length;
                     ctx.save();
-                    DATA.series.forEach(function (s) {
-                        var idx = s.games.map(function (id) {
-                            return GAMES.findIndex(function (g) { return g.id === id; });
-                        });
-                        var lo = x.getPixelForValue(Math.min.apply(null, idx) - 0.5);
-                        var hi = x.getPixelForValue(Math.max.apply(null, idx) + 0.5);
-                        if (shade) {
+                    for (var i = 0; i < n; i++) {
+                        if (i % 2 === 0) {
+                            var lo = x.getPixelForValue(i - 0.5), hi = x.getPixelForValue(i + 0.5);
                             ctx.fillStyle = '#eef3fa';
                             ctx.fillRect(lo, y.top, hi - lo, y.bottom - y.top);
                         }
-                        shade = !shade;
-                        var img = seriesBadges[s.id], size = 30;
-                        if (img && img.complete && img.naturalWidth) {
-                            ctx.drawImage(img, (lo + hi) / 2 - size / 2, y.bottom + 26, size, size);
+                        if (i) {
+                            ctx.strokeStyle = '#1f5fa8';
+                            ctx.lineWidth = 1.5;
+                            ctx.beginPath();
+                            ctx.moveTo(x.getPixelForValue(i - 0.5), y.top);
+                            ctx.lineTo(x.getPixelForValue(i - 0.5), y.bottom);
+                            ctx.stroke();
                         }
-                    });
+                    }
                     ctx.strokeStyle = '#333';
                     ctx.lineWidth = 2;
                     ctx.beginPath();
@@ -1965,92 +1991,111 @@
                 }
             };
 
-            function build() {
-                return METHODS.map(function (m, mi) {
+            function renderSeries(series) {
+                var games = series.games.map(function (id) { return byId[id]; });
+                var datasets = METHODS.map(function (m, mi) {
                     return {
                         label: m.name,
-                        methodId: m.id,
-                        data: GAMES.map(function (g, gi) {
+                        data: games.map(function (g, gi) {
                             return { x: laneX(gi, mi), y: g.gains[m.id], game: gi };
                         }),
-                        pointStyle: function () { return badges[m.id].complete && badges[m.id].naturalWidth ? badges[m.id] : 'circle'; },
+                        pointStyle: function () {
+                            var b = badges[m.id];
+                            return b.complete && b.naturalWidth ? b : 'circle';
+                        },
                         backgroundColor: m.color,
                         borderColor: m.color,
-                        pointRadius: 13,
-                        pointHoverRadius: 15,
+                        pointRadius: DOT / 2,
+                        pointHoverRadius: DOT / 2 + 2,
                         showLine: false
                     };
                 });
-            }
 
-            chart = new Chart(canvas, {
-                type: 'scatter',
-                data: { datasets: build() },
-                plugins: [backdropPlugin],
-                options: {
-                    responsive: true,
-                    animation: { duration: 650, easing: 'easeOutQuart' },
-                    layout: { padding: { top: 10, bottom: 34 } },
-                    scales: {
-                        y: {
-                            title: { display: true, text: 'Task completion gain (pp)' },
-                            grid: { color: '#eee' },
-                            suggestedMin: -36,
-                            suggestedMax: 20
-                        },
-                        x: {
-                            min: -0.5,
-                            max: GAMES.length - 0.5,
-                            offset: false,
-                            grid: { display: false },
-                            ticks: {
-                                stepSize: 1,
-                                autoSkip: false,
-                                callback: function (v) {
-                                    return Number.isInteger(v) && GAMES[v] ? GAMES[v].short : '';
-                                },
-                                font: { size: 13 }
-                            }
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            position: 'top',
-                            labels: {
-                                usePointStyle: true,
-                                generateLabels: function (c) {
-                                    return METHODS.map(function (m, i) {
-                                        return {
-                                            text: m.name,
-                                            fillStyle: m.color,
-                                            strokeStyle: m.color,
-                                            pointStyle: badges[m.id].complete && badges[m.id].naturalWidth ? badges[m.id] : 'circle',
-                                            hidden: !c.isDatasetVisible(i),
-                                            datasetIndex: i
-                                        };
-                                    });
+                if (chart) chart.destroy();
+                chart = new Chart(canvas, {
+                    type: 'scatter',
+                    data: { datasets: datasets },
+                    plugins: [backdropPlugin],
+                    options: {
+                        responsive: true,
+                        animation: { duration: 650, easing: 'easeOutQuart' },
+                        layout: { padding: { top: 10 } },
+                        scales: {
+                            y: {
+                                title: { display: true, text: 'Task completion gain (pp)' },
+                                grid: { color: '#eee' },
+                                suggestedMin: -36,
+                                suggestedMax: 20
+                            },
+                            x: {
+                                min: -0.5,
+                                max: games.length - 0.5,
+                                offset: false,
+                                grid: { display: false },
+                                ticks: {
+                                    stepSize: 1,
+                                    autoSkip: false,
+                                    callback: function (v) {
+                                        return Number.isInteger(v) && games[v] ? games[v].name : '';
+                                    },
+                                    font: { size: 13 }
                                 }
                             }
                         },
-                        tooltip: {
-                            displayColors: false,
-                            callbacks: {
-                                title: function (items) {
-                                    return GAMES[items[0].raw.game].name;
-                                },
-                                label: function (ctx) {
-                                    var g = GAMES[ctx.raw.game];
-                                    var m = METHODS[ctx.datasetIndex];
-                                    var gain = g.gains[m.id];
-                                    return [
-                                        m.name + ': ' + (gain > 0 ? '+' : '') + gain + ' pp',
-                                        g.base + '% → ' + g.rates[m.id] + '%'
-                                    ];
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                                labels: {
+                                    usePointStyle: true,
+                                    generateLabels: function (c) {
+                                        return METHODS.map(function (m, i) {
+                                            var b = badges[m.id];
+                                            return {
+                                                text: m.name,
+                                                fillStyle: m.color,
+                                                strokeStyle: m.color,
+                                                pointStyle: b.complete && b.naturalWidth ? b : 'circle',
+                                                hidden: !c.isDatasetVisible(i),
+                                                datasetIndex: i
+                                            };
+                                        });
+                                    }
+                                }
+                            },
+                            tooltip: {
+                                displayColors: false,
+                                callbacks: {
+                                    title: function (items) { return games[items[0].raw.game].name; },
+                                    label: function (ctx) {
+                                        var g = games[ctx.raw.game];
+                                        var m = METHODS[ctx.datasetIndex];
+                                        var gain = g.gains[m.id];
+                                        return [
+                                            m.name + ': ' + (gain > 0 ? '+' : '') + gain + ' pp',
+                                            g.base + '% → ' + g.rates[m.id] + '%'
+                                        ];
+                                    }
                                 }
                             }
                         }
                     }
-                }
+                });
+                chart.$games = games;
+            }
+
+            function selectSeries(li, series) {
+                var prev = tabList.querySelector('li.is-active');
+                if (prev) prev.classList.remove('is-active');
+                li.classList.add('is-active');
+                renderSeries(series);
+            }
+
+            DATA.series.forEach(function (series, idx) {
+                var li = seriesTab(series.name, series.badge);
+                if (idx === 0) li.classList.add('is-active');
+                li.addEventListener('click', function () { selectSeries(li, series); });
+                tabList.appendChild(li);
+                if (idx === 0) renderSeries(series);
             });
 
             // Average-gain summary under the chart.
@@ -2063,7 +2108,7 @@
                     '<img src="' + m.badge + '" alt="">' +
                     '<div><div class="gain-legend-name">' + m.name + '</div>' +
                     '<div class="gain-legend-value" style="color:' + (gain >= 0 ? '#0b7457' : '#a8323c') + '">' +
-                    (gain > 0 ? '+' : '') + gain + ' pp on average</div></div>';
+                    (gain > 0 ? '+' : '') + gain + ' pp across all 10 games</div></div>';
                 legendEl.appendChild(item);
             });
         });
