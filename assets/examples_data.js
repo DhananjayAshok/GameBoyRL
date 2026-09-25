@@ -47,7 +47,7 @@ window.EXAMPLES_DATA = {
         "steps": 60
       },
       "failure": {
-        "task": "Pick up the sword from the shore",
+        "task": "Go inside the dark forest by chopping bushes",
         "video": "assets/rollouts/legend_of_zelda_links_awakening_failure.mp4",
         "steps": 76
       }
@@ -79,9 +79,9 @@ window.EXAMPLES_DATA = {
         "steps": 60
       },
       "failure": {
-        "task": "Defeat Gym Leader Brock",
+        "task": "Exit the building",
         "video": "assets/rollouts/pokemon_red_failure.mp4",
-        "steps": 45
+        "steps": 76
       }
     },
     {
@@ -127,7 +127,7 @@ window.EXAMPLES_DATA = {
         "steps": 13
       },
       "failure": {
-        "task": "Finish a battle encounter without a game over",
+        "task": "Escape from a battle using the Flee command",
         "video": "assets/rollouts/sword_of_hope_2_failure.mp4",
         "steps": 76
       }
