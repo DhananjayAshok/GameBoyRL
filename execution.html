@@ -782,6 +782,115 @@
             font-weight: 600;
         }
 
+        /* ── Self-improvement gain dotplot ─────────────────────────── */
+        .gain-legend {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 1.75rem;
+            margin-top: 1.5rem;
+        }
+
+        .gain-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .gain-legend-item img {
+            width: 34px;
+            height: 34px;
+        }
+
+        .gain-legend-name {
+            font-weight: 600;
+            color: #1a1a2e;
+            line-height: 1.2;
+        }
+
+        .gain-legend-value {
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        /* ── Success / failure example panels ──────────────────────── */
+        #examples-panels {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .example-panel {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, .08);
+            border-top: 4px solid #cbd5e1;
+            padding: 1.25rem;
+            height: 100%;
+        }
+
+        .example-panel-success {
+            border-top-color: #0F9D76;
+        }
+
+        .example-panel-failure {
+            border-top-color: #d64550;
+        }
+
+        .example-panel-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-bottom: 0.6rem;
+        }
+
+        .example-verdict {
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            padding: 0.25rem 0.7rem;
+            border-radius: 999px;
+        }
+
+        .example-verdict-success {
+            background: #e3f5ef;
+            color: #0b7457;
+        }
+
+        .example-verdict-failure {
+            background: #fdeaec;
+            color: #a8323c;
+        }
+
+        .example-steps {
+            font-size: 0.8rem;
+            color: #777;
+            white-space: nowrap;
+        }
+
+        .example-task {
+            font-size: 1.02rem;
+            font-weight: 600;
+            color: #1a1a2e;
+            margin-bottom: 0.9rem;
+            min-height: 2.7em;
+            line-height: 1.35;
+        }
+
+        .example-panel video {
+            width: 100%;
+            display: block;
+            border-radius: 6px;
+            background: #000;
+        }
+
+        @media screen and (max-width: 768px) {
+            .example-task {
+                min-height: 0;
+            }
+        }
+
         /* ── Task explorer (GameBoyWorlds benchmark browser) ───────── */
         .task-explorer {
             display: flex;
@@ -1449,6 +1558,101 @@
     </script>
 
     <!-- ════════════════════════════════════════════════════════════
+     SUCCESS VS FAILURE — ONE OF EACH PER GAME, GEMINI 3.6 FLASH
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-light-alt" id="examples">
+        <div class="container">
+            <h2 class="section-heading">Success and Failure</h2>
+            <div class="section-divider"></div>
+            <p
+                style="text-align:center;color:#555;margin-bottom:1.5rem;max-width:700px;margin-left:auto;margin-right:auto;">
+                One task Gemini 3.6 Flash completed and one it did not, drawn at random from each game's benchmark
+                run. Select a game below.
+            </p>
+            <div class="results-series-tabs" style="margin-bottom:1.75rem;">
+                <ul class="tabs is-centered is-toggle is-medium" id="examples-tab-list"></ul>
+            </div>
+            <div class="columns" id="examples-panels">
+                <div class="column">
+                    <div class="example-panel example-panel-success">
+                        <div class="example-panel-head">
+                            <span class="example-verdict example-verdict-success">
+                                <i class="fas fa-check"></i>&ensp;Success
+                            </span>
+                            <span class="example-steps" id="example-success-steps"></span>
+                        </div>
+                        <p class="example-task" id="example-success-task"></p>
+                        <video id="example-success-video" controls muted loop playsinline preload="metadata"></video>
+                    </div>
+                </div>
+                <div class="column">
+                    <div class="example-panel example-panel-failure">
+                        <div class="example-panel-head">
+                            <span class="example-verdict example-verdict-failure">
+                                <i class="fas fa-xmark"></i>&ensp;Failure
+                            </span>
+                            <span class="example-steps" id="example-failure-steps"></span>
+                        </div>
+                        <p class="example-task" id="example-failure-task"></p>
+                        <video id="example-failure-video" controls muted loop playsinline preload="metadata"></video>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <script src="assets/examples_data.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            var DATA = window.EXAMPLES_DATA;
+            if (!DATA) return;
+
+            var tabList = document.getElementById('examples-tab-list');
+            var els = {
+                success: {
+                    task: document.getElementById('example-success-task'),
+                    steps: document.getElementById('example-success-steps'),
+                    video: document.getElementById('example-success-video')
+                },
+                failure: {
+                    task: document.getElementById('example-failure-task'),
+                    steps: document.getElementById('example-failure-steps'),
+                    video: document.getElementById('example-failure-video')
+                }
+            };
+
+            function renderGame(game) {
+                ['success', 'failure'].forEach(function (kind) {
+                    var d = game[kind], el = els[kind];
+                    el.task.textContent = d.task;
+                    el.steps.textContent = d.steps + ' steps';
+                    el.video.pause();
+                    el.video.src = d.video;
+                    el.video.load();
+                });
+            }
+
+            function selectGame(li, game) {
+                var prev = tabList.querySelector('li.is-active');
+                if (prev) prev.classList.remove('is-active');
+                li.classList.add('is-active');
+                renderGame(game);
+            }
+
+            DATA.games.forEach(function (game, idx) {
+                var li = document.createElement('li');
+                if (idx === 0) li.classList.add('is-active');
+                var a = document.createElement('a');
+                a.textContent = game.name;
+                li.appendChild(a);
+                li.addEventListener('click', function () { selectGame(li, game); });
+                tabList.appendChild(li);
+                if (idx === 0) renderGame(game);
+            });
+        });
+    </script>
+
+    <!-- ════════════════════════════════════════════════════════════
      SELF-IMPROVEMENT — BASE VS WM / PAE / GUIDES
 ════════════════════════════════════════════════════════════ -->
     <section class="section is-light-alt" id="results">
@@ -1457,16 +1661,15 @@
             <div class="section-divider"></div>
             <p
                 style="text-align:center;color:#555;margin-bottom:1.5rem;max-width:700px;margin-left:auto;margin-right:auto;">
-                Task success rates (%) for Gemma 4 31B before and after each self-improvement method, broken down by
-                game series. Select a series below.
+                Task completion gain (percentage points) over the Gemma 4 31B base agent, per game. Everything above
+                the line helped; everything below it hurt. Hover a marker for the underlying rates, and click a method
+                in the legend to show or hide it.
             </p>
             <div class="results-chart-wrap">
                 <div class="results-chart-canvas-wrap">
-                    <canvas id="improvement-chart" height="120"></canvas>
+                    <canvas id="improvement-chart" height="150"></canvas>
                 </div>
-                <div class="results-series-tabs" style="margin-top:1.5rem;">
-                    <ul class="tabs is-centered is-toggle is-medium" id="improvement-tab-list"></ul>
-                </div>
+                <div class="gain-legend" id="improvement-legend"></div>
             </div>
             <div class="highlight-box is-info-light" style="max-width:900px;margin:2rem auto 0;">
                 <strong>No approach consistently improves performance across all game environments.</strong> World
@@ -1701,79 +1904,167 @@
             var DATA = window.IMPROVEMENT_DATA;
             if (!DATA) return;
 
-            var tabList = document.getElementById('improvement-tab-list');
             var canvas = document.getElementById('improvement-chart');
-            var canvasWrap = canvas.parentElement;
+            var legendEl = document.getElementById('improvement-legend');
             var chart = null;
 
-            function renderSeries(series) {
-                var labels = series.games.map(function (g) { return g.name; });
-                var chartData = {
-                    labels: labels,
-                    datasets: DATA.methods.map(function (m) {
-                        return {
-                            label: m.name,
-                            data: series.games.map(function (g) { return g[m.id]; }),
-                            backgroundColor: m.color,
-                            borderRadius: 4,
-                            maxBarThickness: 52
-                        };
-                    })
-                };
+            // One lane per method inside each game's column, mirroring plots.py's
+            // self_improvement_gain: dots are icon badges, x is the game, y is the gain in pp.
+            var LANE = 0.22;
+            var GAMES = DATA.games;
+            var METHODS = DATA.methods;
 
-                if (chart) chart.destroy();
-                canvasWrap.style.opacity = 0;
-                chart = new Chart(canvas, {
-                    type: 'bar',
-                    data: chartData,
-                    options: {
-                        responsive: true,
-                        animation: { duration: 650, easing: 'easeOutQuart' },
-                        scales: {
-                            y: {
-                                beginAtZero: true,
-                                max: 100,
-                                title: { display: true, text: 'Task success rate (%)' }
-                            },
-                            x: { grid: { display: false } }
+            var badges = {};
+            METHODS.forEach(function (m) {
+                var img = new Image();
+                img.src = m.badge;
+                img.addEventListener('load', function () { if (chart) chart.update('none'); });
+                badges[m.id] = img;
+            });
+            var seriesBadges = {};
+            DATA.series.forEach(function (s) {
+                var img = new Image();
+                img.src = s.badge;
+                img.addEventListener('load', function () { if (chart) chart.draw(); });
+                seriesBadges[s.id] = img;
+            });
+
+            function laneX(gameIdx, methodIdx) {
+                return gameIdx + (methodIdx - (METHODS.length - 1) / 2) * LANE;
+            }
+
+            // Alternating series bands, the zero rule, and a series badge under each pair.
+            var backdropPlugin = {
+                id: 'gainBackdrop',
+                beforeDatasetsDraw: function (c) {
+                    var x = c.scales.x, y = c.scales.y, ctx = c.ctx, shade = false;
+                    ctx.save();
+                    DATA.series.forEach(function (s) {
+                        var idx = s.games.map(function (id) {
+                            return GAMES.findIndex(function (g) { return g.id === id; });
+                        });
+                        var lo = x.getPixelForValue(Math.min.apply(null, idx) - 0.5);
+                        var hi = x.getPixelForValue(Math.max.apply(null, idx) + 0.5);
+                        if (shade) {
+                            ctx.fillStyle = '#eef3fa';
+                            ctx.fillRect(lo, y.top, hi - lo, y.bottom - y.top);
+                        }
+                        shade = !shade;
+                        var img = seriesBadges[s.id], size = 30;
+                        if (img && img.complete && img.naturalWidth) {
+                            ctx.drawImage(img, (lo + hi) / 2 - size / 2, y.bottom + 26, size, size);
+                        }
+                    });
+                    ctx.strokeStyle = '#333';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(x.left, y.getPixelForValue(0));
+                    ctx.lineTo(x.right, y.getPixelForValue(0));
+                    ctx.stroke();
+                    ctx.restore();
+                }
+            };
+
+            function build() {
+                return METHODS.map(function (m, mi) {
+                    return {
+                        label: m.name,
+                        methodId: m.id,
+                        data: GAMES.map(function (g, gi) {
+                            return { x: laneX(gi, mi), y: g.gains[m.id], game: gi };
+                        }),
+                        pointStyle: function () { return badges[m.id].complete && badges[m.id].naturalWidth ? badges[m.id] : 'circle'; },
+                        backgroundColor: m.color,
+                        borderColor: m.color,
+                        pointRadius: 13,
+                        pointHoverRadius: 15,
+                        showLine: false
+                    };
+                });
+            }
+
+            chart = new Chart(canvas, {
+                type: 'scatter',
+                data: { datasets: build() },
+                plugins: [backdropPlugin],
+                options: {
+                    responsive: true,
+                    animation: { duration: 650, easing: 'easeOutQuart' },
+                    layout: { padding: { top: 10, bottom: 34 } },
+                    scales: {
+                        y: {
+                            title: { display: true, text: 'Task completion gain (pp)' },
+                            grid: { color: '#eee' },
+                            suggestedMin: -36,
+                            suggestedMax: 20
                         },
-                        plugins: {
-                            legend: {
-                                position: 'top',
-                                labels: { usePointStyle: true, pointStyle: 'rect' }
-                            },
-                            tooltip: {
-                                callbacks: {
-                                    label: function (ctx) {
-                                        return ctx.dataset.label + ': ' + ctx.parsed.y + '%';
-                                    }
+                        x: {
+                            min: -0.5,
+                            max: GAMES.length - 0.5,
+                            offset: false,
+                            grid: { display: false },
+                            ticks: {
+                                stepSize: 1,
+                                autoSkip: false,
+                                callback: function (v) {
+                                    return Number.isInteger(v) && GAMES[v] ? GAMES[v].short : '';
+                                },
+                                font: { size: 13 }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: {
+                                usePointStyle: true,
+                                generateLabels: function (c) {
+                                    return METHODS.map(function (m, i) {
+                                        return {
+                                            text: m.name,
+                                            fillStyle: m.color,
+                                            strokeStyle: m.color,
+                                            pointStyle: badges[m.id].complete && badges[m.id].naturalWidth ? badges[m.id] : 'circle',
+                                            hidden: !c.isDatasetVisible(i),
+                                            datasetIndex: i
+                                        };
+                                    });
+                                }
+                            }
+                        },
+                        tooltip: {
+                            displayColors: false,
+                            callbacks: {
+                                title: function (items) {
+                                    return GAMES[items[0].raw.game].name;
+                                },
+                                label: function (ctx) {
+                                    var g = GAMES[ctx.raw.game];
+                                    var m = METHODS[ctx.datasetIndex];
+                                    var gain = g.gains[m.id];
+                                    return [
+                                        m.name + ': ' + (gain > 0 ? '+' : '') + gain + ' pp',
+                                        g.base + '% → ' + g.rates[m.id] + '%'
+                                    ];
                                 }
                             }
                         }
                     }
-                });
-                requestAnimationFrame(function () {
-                    canvasWrap.style.transition = 'opacity 0.35s ease-out';
-                    canvasWrap.style.opacity = 1;
-                });
-            }
+                }
+            });
 
-            function selectSeries(li, series) {
-                var prev = tabList.querySelector('li.is-active');
-                if (prev) prev.classList.remove('is-active');
-                li.classList.add('is-active');
-                renderSeries(series);
-            }
-
-            DATA.series.forEach(function (series, idx) {
-                var li = document.createElement('li');
-                if (idx === 0) li.classList.add('is-active');
-                var a = document.createElement('a');
-                a.textContent = series.name;
-                li.appendChild(a);
-                li.addEventListener('click', function () { selectSeries(li, series); });
-                tabList.appendChild(li);
-                if (idx === 0) renderSeries(series);
+            // Average-gain summary under the chart.
+            legendEl.innerHTML = '';
+            METHODS.forEach(function (m) {
+                var gain = DATA.averageGains[m.id];
+                var item = document.createElement('div');
+                item.className = 'gain-legend-item';
+                item.innerHTML =
+                    '<img src="' + m.badge + '" alt="">' +
+                    '<div><div class="gain-legend-name">' + m.name + '</div>' +
+                    '<div class="gain-legend-value" style="color:' + (gain >= 0 ? '#0b7457' : '#a8323c') + '">' +
+                    (gain > 0 ? '+' : '') + gain + ' pp on average</div></div>';
+                legendEl.appendChild(item);
             });
         });
     </script>
@@ -1872,6 +2163,7 @@
     <nav id="left-nav-panel">
         <div class="left-nav-label">On this page</div>
         <a class="left-nav-link" href="#leaderboard">Leaderboard</a>
+        <a class="left-nav-link" href="#examples">Success &amp; Failure</a>
         <a class="left-nav-link" href="#results">Self-Improvement</a>
         <a class="left-nav-link" href="#rollouts">Rollouts</a>
         <a class="left-nav-link" href="#submissions">Submissions</a>
@@ -1882,6 +2174,7 @@
     <div class="left-nav-drawer" id="left-nav-drawer">
         <div class="drawer-nav-label">On this page</div>
         <a class="drawer-nav-link" href="#leaderboard" onclick="closeLeftDrawer()">Leaderboard</a>
+        <a class="drawer-nav-link" href="#examples" onclick="closeLeftDrawer()">Success &amp; Failure</a>
         <a class="drawer-nav-link" href="#results" onclick="closeLeftDrawer()">Self-Improvement</a>
         <a class="drawer-nav-link" href="#rollouts" onclick="closeLeftDrawer()">Rollouts</a>
         <a class="drawer-nav-link" href="#submissions" onclick="closeLeftDrawer()">Submissions</a>
@@ -1900,7 +2193,7 @@
             panel.addEventListener('mouseleave',   function () { t = setTimeout(function () { panel.classList.remove('is-open'); }, 180); });
         })();
         (function () {
-            var ids = ['leaderboard', 'results', 'rollouts', 'submissions', 'gameboyworlds'];
+            var ids = ['leaderboard', 'examples', 'results', 'rollouts', 'submissions', 'gameboyworlds'];
             var links = document.querySelectorAll('.left-nav-link, .drawer-nav-link');
             function spy() {
                 var active = null;
