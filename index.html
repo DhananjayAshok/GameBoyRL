@@ -1237,7 +1237,8 @@
                             <span class="icon"><i class="ai ai-arxiv"></i></span>
                             <span>arXiv</span>
                         </a>
-                        <a class="button is-dark" href="https://github.com/DhananjayAshok/GameBoyRL/" target="_blank">
+                        <a class="button is-dark" href="https://github.com/DhananjayAshok/GameBoyWorlds-Benchmark"
+                            target="_blank">
                             <span class="icon"><i class="fab fa-github"></i></span>
                             <span>Code</span>
                         </a>
@@ -1260,30 +1261,31 @@
             <br>
             <h3 class="title is-4" style="color:#1a1a2e;">Specific Contributions</h3>
             <p style="color:#444; margin-bottom:1.25rem;">
-                Powered by expert guidance, embodied agents can operate in interactive environments; however, it is
-                unclear whether they can learn autonomously and continually from their own experience. To evaluate such
-                self-improvement methods, we introduce a two-legged benchmark, GameBoyWorlds, the first testbed for
-                self-improvement in complex video games. We define self-learning as procedures that exclusively use data
-                generated from the agent's interactions with the training environment; i.e., not distillation from human
-                trajectories, a stronger teacher or external knowledge bases. Our metric of interest is task completion
-                gain, i.e., the increase in task completion after self-learning in the training environments.
+                Powered by pretraining knowledge and expert-crafted reward signals, embodied agents can operate in
+                interactive environments; however, it is unclear whether they can learn autonomously and continually
+                from their own experience. To evaluate self-improvement methods and continually self-improving agents,
+                we introduce a two-legged benchmark, GameBoyWorlds, the first testbed for self-improvement in complex
+                video games.
             </p>
             <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
                 <strong>GameBoyWorlds Framework</strong><br />
-                A Gymnasium compatible set of environments that allow agents to play GameBoy and GameBoy Color titles,
-                including releases from classic franchises such as Pok&eacute;mon and Legend of Zelda. Titles include
-                more obscure ROM hacks (i.e. fan made games), which are considerably less exposed to frontier Language
-                Models during their training. The action space is an action space of buttons, with <strong>no</strong>
-                harnesses, and the observation space consists of screen frames, with no observation engineering.
+                A Gymnasium compatible set of environments that allow agents to play any GameBoy or GameBoy Color
+                titles, including releases from classic franchises such as Pok&eacute;mon and Legend of Zelda. Supported
+                titles include more obscure ROM hacks (i.e. fan made games), which are considerably less exposed to
+                frontier Language Models during their training. GameBoyWorlds is flexible, and developers can set up
+                custom tracking metrics, tasks and more.
             </div>
             <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
                 <strong>GameBoyWorlds-Execution</strong><br />
-                A testbed for short-horizon task execution across five different game series, with each marking a
-                dedicated training game and a distinct, test-only game. Agents are allowed indefinite access to
-                dedicated training games but are provided no demonstrations, documentation, or rewards, and must ground
-                themselves in the environment through self-directed exploration and by inferring actionable knowledge
-                from their own experience. With 50 hand-crafted tasks per game, we test agents on a wide range of 500
-                tasks, including navigation, interaction, combat and game-specific control across 10 distinct games.
+                A testbed for short-horizon task execution where the action space consists of only GameBoy buttons,
+                with <strong>no</strong> special harnesses, and the observation space consists of screen frames, with
+                <strong>no</strong> observation engineering. Agents see the game as humans do, and play the game as
+                humans do. Each of the five game series marks a dedicated training game and a distinct, test-only game.
+                Agents are allowed indefinite access to dedicated training games but are provided no demonstrations,
+                documentation, or rewards, and must ground themselves in the environment through self-directed
+                exploration and by inferring actionable knowledge from their own experience. With 50 hand-crafted tasks
+                per game, GameBoyWorlds-Execution tests agents on a wide range of 500 tasks, including
+                navigation, interaction, combat and game-specific control across 10 distinct games.
                 Even frontier models like Gemini-3.6-Flash achieve an out-of-the-box task success rate of less than
                 50%, due to failures in precise perception and gaps in game-specific understanding, establishing that
                 self-improvement methods have considerable room to push performance.
@@ -1294,9 +1296,8 @@
                 gameplay. Our core intuition is that subtrajectories which end in a highly novel observation likely
                 implicitly contain information regarding key, game-specific mechanics. We sweep these subtrajectories
                 with the VLM and distill insights from them into game-specific guidance documents to aid task execution.
-                We show that contemporary approaches to self-improvement are lacking, with standard implementations of
-                world modelling and autonomous skill discovery failing, and this novel strategy achieving only partial
-                success.
+                In truth, this strategy achieves only partial success, but it consistently outperforms both world
+                modelling and autonomous skill discovery-based approaches.
             </div>
             <div class="highlight-box is-info-light" style="margin-bottom:1rem;">
                 <strong>GameBoyWorlds-Playthrough</strong><br />
@@ -1304,10 +1305,7 @@
                 models have been pre-exposed to official releases such as Pok&eacute;mon Red, they lack essential
                 information on the games in our testbed, recovering less than 30% of their progression steps. Instead of
                 relying on their parametric knowledge to succeed, agents must learn from their own experience and
-                autonomously improve over the course of the playthrough. We show that a sophisticated agentic pipeline
-                with self-reflection, memory and hierarchical agent controllers fails to reach even the first major
-                milestone in both games, establishing that GameBoyWorlds is an ambitious target for self-improving
-                agents.
+                autonomously improve over the course of the playthrough.
             </div>
         </div>
 

@@ -1333,7 +1333,7 @@
             <div class="container">
                 <h1 class="title" style="color:#fff;">Execution Track</h1>
                 <p class="subtitle" style="color:rgba(255,255,255,0.7);">
-                    Benchmark tasks, leaderboard, rollouts and results for autonomous execution agents.
+                    Can embodied agents self-improve their short-horizon task execution capabilities?
                 </p>
             </div>
         </div>
@@ -1728,10 +1728,11 @@
             <h2 class="section-heading">Submissions</h2>
             <div class="section-divider"></div>
             <p style="text-align:center;color:#555;margin-bottom:2rem;">
-                Upload the CSV generated from the run (<a
-                    href="https://github.com/DhananjayAshok/GameBoyRL/run_benchmark.py"
-                    target="_blank">run_benchmark.py</a>)
-                and we'll update the leaderboard with your information.
+                Run your agent with <a
+                    href="https://github.com/DhananjayAshok/GameBoyWorlds-Benchmark/blob/main/scripts/benchmark/run_benchmark.sh"
+                    target="_blank"><code>scripts/benchmark/run_benchmark.sh</code></a>, which writes one CSV per game
+                to <code>results/benchmark/&lt;game&gt;/</code>. Upload it here and we will add your model to the
+                leaderboard.
             </p>
 
             <form id="submission-form" class="result-card" style="padding:2rem;">
