@@ -1082,6 +1082,78 @@
             margin-bottom: 0.75rem;
             padding-left: 0.5rem;
         }
+        /* ── Red vs Brown playthrough panels ───────────────────────── */
+        .playthrough-columns {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .playthrough-panel {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, .08);
+            border-top: 4px solid #cbd5e1;
+            padding: 1.25rem;
+            height: 100%;
+        }
+
+        .playthrough-panel-red {
+            border-top-color: #c8161d;
+        }
+
+        .playthrough-panel-brown {
+            border-top-color: #7a4a22;
+        }
+
+        .playthrough-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-bottom: 0.9rem;
+        }
+
+        .playthrough-title {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: #1a1a2e;
+        }
+
+        .playthrough-tag {
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            padding: 0.25rem 0.7rem;
+            border-radius: 999px;
+            white-space: nowrap;
+        }
+
+        .playthrough-tag-contaminated {
+            background: #fdeaec;
+            color: #a8323c;
+        }
+
+        .playthrough-tag-clean {
+            background: #e3f5ef;
+            color: #0b7457;
+        }
+
+        .playthrough-panel video {
+            width: 100%;
+            display: block;
+            border-radius: 6px;
+            background: #000;
+            image-rendering: pixelated;
+        }
+
+        .playthrough-note {
+            font-size: 0.9rem;
+            color: #555;
+            margin-top: 0.85rem;
+            line-height: 1.45;
+        }
+
         .left-nav-link {
             display: block;
             color: rgba(255,255,255,0.75);
@@ -1222,14 +1294,85 @@
         </div>
     </section>
 
-    <section class="section" id="coming-soon" style="min-height:60vh; display:flex; align-items:center;">
-        <div class="container" style="max-width:680px; text-align:center;">
-            <div style="font-size:4rem; margin-bottom:1.5rem;">&#127918;</div>
-            <h2 class="title is-3">Coming Soon</h2>
-            <p class="subtitle is-5" style="color:#666; margin-top:0.75rem;">
-                Full-game playthroughs from both human players and AI agents are on their way.
-                Check back for head-to-head comparisons across all GameBoyWorlds titles.
+    <!-- ════════════════════════════════════════════════════════════
+     CONTAMINATION — THE CLAIM AND THE EVIDENCE
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-light-alt" id="contamination">
+        <div class="container">
+            <h2 class="section-heading">Existing benchmarks are heavily contaminated</h2>
+            <div class="section-divider"></div>
+            <p style="color:#444; max-width:820px; margin:0 auto 1.25rem;">
+                It has become standard practice for frontier models to benchmark on Pok&eacute;mon games as a means of
+                establishing their planning and visual grounding abilities. However, key information on how to clear
+                these games is already contained in the parametric knowledge of frontier models, before they even start
+                the game. When asked how to clear Pok&eacute;mon Red, GPT-5 already knows that to enter Saffron City it
+                can navigate to the roof of the Celadon City Department Store, purchase a Fresh Water from a vending
+                machine, and give it to the thirsty guards blocking the gates. Human players must discover this
+                relatively arbitrary dependency through active exploration, but GPT-5 bypasses information-gathering
+                entirely. The consequence of this contamination is that existing benchmarks are unable to evaluate
+                whether agents can truly acquire information and improve during deployment.
             </p>
+            <p style="color:#444; max-width:820px; margin:0 auto 2rem;">
+                We write questions that poll the model for contamination of progression steps and confirm that while
+                frontier models nearly perfectly recover the progression steps in the classic Pok&eacute;mon games (Red
+                and Crystal), they recover less than 30% of the steps in the fan-made versions that make up
+                GameBoyWorlds-Playthrough.
+            </p>
+            <figure style="max-width:1000px;margin:0 auto;">
+                <img src="assets/contamination_dotplot.png"
+                    alt="Progression-step accuracy per model for Pokemon Red, Crystal, Brown and Prism"
+                    style="width:100%;display:block;border-radius:8px;background:#fff;">
+                <figcaption style="text-align:center;color:#666;font-size:0.9rem;margin-top:0.85rem;">
+                    Accuracy on progression-step questions. Every model clears 90%+ on the classic titles and collapses
+                    on Pok&eacute;mon Brown and Pok&eacute;mon Prism.
+                </figcaption>
+            </figure>
+        </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════════════
+     PLAYTHROUGH — RED VS BROWN, SAME AGENT
+════════════════════════════════════════════════════════════ -->
+    <section class="section is-white-alt" id="playthroughs">
+        <div class="container">
+            <h2 class="section-heading">Red vs Brown</h2>
+            <div class="section-divider"></div>
+            <p
+                style="text-align:center;color:#555;margin-bottom:2rem;max-width:760px;margin-left:auto;margin-right:auto;">
+                The same strategist agent, running Gemini 3.6 Flash, on a contaminated game and an uncontaminated one.
+                In Pok&eacute;mon Red it selects a starter, defeats its rival and reaches the next city. In
+                Pok&eacute;mon Brown it never leaves the starting town, and so never obtains its first Pok&eacute;mon.
+            </p>
+            <div class="columns playthrough-columns">
+                <div class="column">
+                    <div class="playthrough-panel playthrough-panel-red">
+                        <div class="playthrough-head">
+                            <span class="playthrough-title">Pok&eacute;mon Red</span>
+                            <span class="playthrough-tag playthrough-tag-contaminated">Contaminated</span>
+                        </div>
+                        <video src="assets/playthrough/strategist_red_flash.mp4" controls muted loop playsinline
+                            preload="metadata"></video>
+                        <p class="playthrough-note">
+                            Reaches the Pok&eacute;mon Lab, selects a starter, wins the rival battle and traverses the
+                            first route.
+                        </p>
+                    </div>
+                </div>
+                <div class="column">
+                    <div class="playthrough-panel playthrough-panel-brown">
+                        <div class="playthrough-head">
+                            <span class="playthrough-title">Pok&eacute;mon Brown</span>
+                            <span class="playthrough-tag playthrough-tag-clean">Uncontaminated</span>
+                        </div>
+                        <video src="assets/playthrough/strategist_brown_flash.mp4" controls muted loop playsinline
+                            preload="metadata"></video>
+                        <p class="playthrough-note">
+                            Wanders the houses of the starting town. The first Pok&eacute;mon is south, in the
+                            neighbouring town, and it never explores that far.
+                        </p>
+                    </div>
+                </div>
+            </div>
         </div>
     </section>
 
@@ -1237,13 +1380,15 @@
     <div id="left-nav-trigger"></div>
     <nav id="left-nav-panel">
         <div class="left-nav-label">On this page</div>
-        <a class="left-nav-link" href="#coming-soon">Coming Soon</a>
+        <a class="left-nav-link" href="#contamination">Contamination</a>
+        <a class="left-nav-link" href="#playthroughs">Red vs Brown</a>
     </nav>
     <!-- Mobile drawer -->
     <div class="left-nav-drawer-overlay" id="left-drawer-overlay" onclick="closeLeftDrawer()"></div>
     <div class="left-nav-drawer" id="left-nav-drawer">
         <div class="drawer-nav-label">On this page</div>
-        <a class="drawer-nav-link" href="#coming-soon" onclick="closeLeftDrawer()">Coming Soon</a>
+        <a class="drawer-nav-link" href="#contamination" onclick="closeLeftDrawer()">Contamination</a>
+        <a class="drawer-nav-link" href="#playthroughs" onclick="closeLeftDrawer()">Red vs Brown</a>
     </div>
     <button class="left-nav-mobile-btn" onclick="openLeftDrawer()" aria-label="Page navigation">&#9776;</button>
     <script>
@@ -1258,7 +1403,7 @@
             panel.addEventListener('mouseleave',   function () { t = setTimeout(function () { panel.classList.remove('is-open'); }, 180); });
         })();
         (function () {
-            var ids = ['coming-soon'];
+            var ids = ['contamination', 'playthroughs'];
             var links = document.querySelectorAll('.left-nav-link, .drawer-nav-link');
             function spy() {
                 var active = null;
