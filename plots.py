@@ -465,15 +465,18 @@ def frontier_model_legend():
     save(fig, "frontier_model_legend.png")
 
 
-TREEMAP_W, TREEMAP_H = 16, 9
+TREEMAP_W, TREEMAP_H, TREEMAP_HEADER = 16, 9, 1.5
 
 
-def treemap_canvas():
-    fig = plt.figure(figsize=(TREEMAP_W, TREEMAP_H))
+def treemap_canvas(caption):
+    fig = plt.figure(figsize=(TREEMAP_W, TREEMAP_H + TREEMAP_HEADER))
     ax = fig.add_axes([0, 0, 1, 1])
     ax.set_xlim(0, TREEMAP_W)
-    ax.set_ylim(TREEMAP_H, 0)
+    ax.set_ylim(TREEMAP_H, -TREEMAP_HEADER)
     ax.axis("off")
+    ax.add_patch(Rectangle((0, -TREEMAP_HEADER), TREEMAP_W, TREEMAP_HEADER, facecolor="#1a1a1a", lw=0))
+    ax.text(TREEMAP_W / 2, -TREEMAP_HEADER / 2, caption, ha="center", va="center", color="white", fontsize=52,
+            fontweight="bold")
     return fig, ax
 
 
@@ -483,7 +486,7 @@ def treemap_font(lines, w, h, cap=52.8):
 
 def failure_mode_treemap():
     total = sum(n for _, n, _ in FAILURE_MODES)
-    fig, ax = treemap_canvas()
+    fig, ax = treemap_canvas("Failure modes, sized by prevalence")
     rects = squarify([n for _, n, _ in FAILURE_MODES], 0, 0, TREEMAP_W, TREEMAP_H)
     for (name, n, c), (x, y, rw, rh) in zip(FAILURE_MODES, rects):
         ax.add_patch(Rectangle((x, y), rw, rh, facecolor=c, edgecolor="white", lw=5))
@@ -498,7 +501,7 @@ def task_category_treemap():
     data = load_results([TREEMAP_MODEL])
     data = data.assign(cat=data["task_category"].apply(task_categories)).explode("cat").dropna(subset=["cat"])
     agg = data.groupby("cat")["success"].agg(["sum", "count"]).sort_values("count", ascending=False)
-    fig, ax = treemap_canvas()
+    fig, ax = treemap_canvas("Task success rates, sized by frequency")
     for (cat, r), (x, y, rw, rh) in zip(agg.iterrows(), squarify(list(agg["count"]), 0, 0, TREEMAP_W, TREEMAP_H)):
         c, rate = CAT_COLOUR[cat], r["sum"] / r["count"]
         ax.add_patch(Rectangle((x, y), rw, rh * rate, facecolor=shade(c, 0.78), lw=0))
