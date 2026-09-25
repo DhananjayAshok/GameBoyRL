@@ -376,14 +376,6 @@ def img_at(ax, arr, xy, zoom, xycoords="data", align=(0.5, 0.5)):
     ax.add_artist(ab)
 
 
-def wilson(k, n, z=1.96):
-    p = k / n
-    d = 1 + z * z / n
-    c = (p + z * z / (2 * n)) / d
-    h = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
-    return 100 * (c - h), 100 * (c + h)
-
-
 def save(fig, name, dpi=170):
     path = os.path.join(OUT, name)
     fig.savefig(path, dpi=dpi, bbox_inches="tight")
@@ -407,16 +399,14 @@ def frontier_leaderboard():
     fig, ax = plt.subplots(figsize=(12, 1.4 * len(agg) + 0.6))
     top = 0
     for y, (k, r) in enumerate(agg.iterrows()):
-        lo, hi = wilson(r["sum"], r["count"])
-        top = max(top, hi)
+        top = max(top, r["rate"])
         ax.barh(y, r["rate"], color=COLOUR[k], height=0.68)
-        ax.errorbar(r["rate"], y, xerr=[[r["rate"] - lo], [hi - r["rate"]]], color="#222", capsize=5, lw=1.4)
         img_at(ax, badges[k], (-0.012, y), zoom=0.24, xycoords=("axes fraction", "data"), align=(1, 0.5))
-        ax.text(hi + 1.2, y, f"{r['rate']:.1f}%", va="center", ha="left", fontsize=48, fontweight="bold",
+        ax.text(r["rate"] + 1.2, y, f"{r['rate']:.1f}%", va="center", ha="left", fontsize=48, fontweight="bold",
                 color=COLOUR[k])
     ax.set_yticks([])
     ax.set_xlim(0, top + 12)
-    ax.set_xlabel("Success Rate (%) · 95% Wilson interval")
+    ax.set_xlabel("Success Rate (%)")
     ax.spines[["top", "right", "left"]].set_visible(False)
     save(fig, "frontier_leaderboard.png")
     log_info(agg.to_string(), PARAMETERS)
@@ -497,9 +487,10 @@ def failure_mode_treemap():
     rects = squarify([n for _, n, _ in FAILURE_MODES], 0, 0, TREEMAP_W, TREEMAP_H)
     for (name, n, c), (x, y, rw, rh) in zip(FAILURE_MODES, rects):
         ax.add_patch(Rectangle((x, y), rw, rh, facecolor=c, edgecolor="white", lw=5))
-        lines = [name, f"{100 * n / total:.0f}%"]
+        lines = {"Coordination": ["Co-", "ordination"]}.get(name, [name]) + [f"{100 * n / total:.0f}%"]
+        scale = {"Coordination": 1.4, "Planning": 1.25, "Familiarity": 1.25}.get(name, 1)
         ax.text(x + rw / 2, y + rh / 2, "\n".join(lines), ha="center", va="center", color="white",
-                fontsize=treemap_font(lines, rw, rh), fontweight="bold", linespacing=1.15)
+                fontsize=scale * treemap_font(lines, rw, rh), fontweight="bold", linespacing=1.15)
     save(fig, "failure_mode_treemap.png")
 
 

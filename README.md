@@ -197,6 +197,11 @@ Solving GameBoyWorlds-Execution will require generalizable self-improvement meth
 
 ## Run a model on GameBoyWorlds-Playthrough
 
+Unlike the original games, fan-made games are scarcely documented and so models trained on internet-scale corpora (e.g. Large Language Models) haven't already acquired as rich base of knowledge regarding the game areas or particular Fakémon. While good performance in PokémonRed may be a result of the backbone model's data being contaminated with walkthroughs and internet guides, the same concern is far less valid for more obscure fan-made games. You can find evidence of this in the HuggingFace dataset below:
+
+<a href="https://huggingface.co/datasets/DJ-Research/GameBoyWorlds-Playthrough-Contamination-Check" target="_blank" rel="noopener noreferrer"><img alt="Contamination Check" src="https://img.shields.io/badge/dataset-Contamination%20Check-ffd21e?logo=huggingface"></a>
+
+To run a playthrough: 
 
 ```bash
 python run_strategist.py \
