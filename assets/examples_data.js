@@ -47,7 +47,7 @@ window.EXAMPLES_DATA = {
         "steps": 60
       },
       "failure": {
-        "task": "Go inside the dark forest by chopping bushes",
+        "task": "Talk to Tarin inside the spawn house to get the shield",
         "video": "assets/rollouts/legend_of_zelda_links_awakening_failure.mp4",
         "steps": 76
       }
@@ -63,7 +63,7 @@ window.EXAMPLES_DATA = {
         "steps": 39
       },
       "failure": {
-        "task": "Go to other people",
+        "task": "Go inside the library and talk to the parrot",
         "video": "assets/rollouts/legend_of_zelda_the_oracle_of_seasons_failure.mp4",
         "steps": 76
       }
@@ -111,7 +111,7 @@ window.EXAMPLES_DATA = {
         "steps": 54
       },
       "failure": {
-        "task": "Reach the first adjacent room from the start state",
+        "task": "Defeat a boss using offensive magic spells",
         "video": "assets/rollouts/sword_of_hope_1_failure.mp4",
         "steps": 76
       }
@@ -127,7 +127,7 @@ window.EXAMPLES_DATA = {
         "steps": 13
       },
       "failure": {
-        "task": "Escape from a battle using the Flee command",
+        "task": "Hit a tree at Riccar Woods until Wheat is received",
         "video": "assets/rollouts/sword_of_hope_2_failure.mp4",
         "steps": 76
       }
