@@ -47,7 +47,7 @@ window.EXAMPLES_DATA = {
         "steps": 60
       },
       "failure": {
-        "task": "Talk to Tarin inside the spawn house to get the shield",
+        "task": "Go inside the shop",
         "video": "assets/rollouts/legend_of_zelda_links_awakening_failure.mp4",
         "steps": 76
       }
@@ -127,7 +127,7 @@ window.EXAMPLES_DATA = {
         "steps": 13
       },
       "failure": {
-        "task": "Hit a tree at Riccar Woods until Wheat is received",
+        "task": "Use Wheat from inventory",
         "video": "assets/rollouts/sword_of_hope_2_failure.mp4",
         "steps": 76
       }
